@@ -6,7 +6,8 @@
 
 This topic covers the wiring around the LuckyStack socket transport:
 
-- **Server-side socket slot** — `setIoInstance` / `getIoInstance` so framework code can broadcast.
+- **Server-side socket slot** — `setIoInstance` / `getIoInstance` so framework code can broadcast, plus `getRoomSockets` for cross-instance room enumeration.
+- **Room-name formatter** — `registerRoomNameFormatter` / `formatRoomName`, and the contract a formatter must honour.
 - **Client-side socket singleton** — live binding `socket`, `setSocket`, `waitForSocket`, `incrementResponseIndex`.
 - **Token extraction** — pull the session token from a Socket.io handshake (`extractTokenFromSocket`) or a Node `IncomingMessage` (`extractTokenFromRequest`).
 - **Origin check** — `allowedOrigin` for CORS-style allow-listing, with `corsRejected` hook fan-out.
@@ -30,9 +31,31 @@ export const setIoInstance = (io: SocketIOServer | null): void
 
 **Behavior:** Stores the running Socket.io server in a module-level slot. Framework code (`@luckystack/sync`, presence package, etc.) reads via `getIoInstance()` for broadcast paths.
 
-### `getIoInstance(): SocketIOServer | null`
+### `getIoInstance(options?: { raw?: boolean })`
 
 Returns the registered instance or `null` when no server has been set. Callers must null-check.
+
+**Outside production the returned server is a guarded view.** Reading `sockets.adapter.rooms`, `sockets.adapter.sids`, or enumerating `sockets.sockets` (`values` / `keys` / `entries` / `forEach` / `size` / iteration) **throws**, with the same message the ESLint rule `luckystack/no-local-socket-enumeration` prints. `sockets.sockets.get(id)` stays allowed. Why: under the Redis adapter those maps only know the sockets of *this* process, so a helper built on them looks complete on one instance and silently misses the rest of the cluster on two — the failure surfaces only in production, where it is hardest to attribute. The guard moves that discovery to the first dev run. In production the raw instance is always returned; the guard costs nothing on the hot path.
+
+Pass `{ raw: true }` for deliberate per-instance work — a sweep cleaning up this process's own connections, sampling this process's backpressure. The option is the audit trail: a reviewer can grep for it. Framework-internal code and the Redis adapter always hold the raw instance.
+
+For "who is in this room" use `getRoomSockets` below, or `io.in(room).fetchSockets()` when you already hold the physical room name.
+
+### `getRoomSockets(room, { userId? })`
+
+Cross-instance room enumeration. Routes `room` through the room-name formatter under the canonical `'broadcast'` purpose (`userId` defaults to `null`, and is context only — see the formatter contract below), then asks the adapter for every member on every instance and returns the `RemoteSocket[]`. `'all'` returns every socket everywhere.
+
+It **throws** when no Socket.io server is registered. A silent `[]` in that situation is indistinguishable from "the room is empty", which is exactly the class of failure this helper exists to prevent.
+
+## API Reference — Room-Name Formatter
+
+### `registerRoomNameFormatter(fn)` / `getRoomNameFormatter()` / `formatRoomName(raw, ctx)` / `defaultRoomNameFormatter`
+
+Every room name the framework joins, leaves, broadcasts to or uses for presence passes through the registered formatter (default: identity) with a `RoomNameFormatterContext` — a `purpose` (`'join'`, `'leave'`, `'broadcast'`, `'presence'`) and the `userId` of whoever performs the operation. The intended use is a stable, user-independent transform such as per-tenant prefixing.
+
+**The contract: `userId` is context, never an input to the physical name of a content room.** For `purpose: 'broadcast'` the framework passes whichever user performs the operation — the joiner on join and rejoin, the sender on fan-out, the originator on `broadcastStream` — so for a shared room it is a *different* value on each side. A formatter that folds `userId` into the name makes join and fan-out land in different physical rooms, and every broadcast then reaches nobody: no error, `sync.noReceiversFound` at best, silence at worst. The framework cannot detect this for you, because from its side both names are just strings.
+
+Per-user isolation belongs in the raw room code the consumer chooses (put the user in the *code*, not in the formatter), or in the separate `'presence'` family, which is per-user by design.
 
 ## API Reference — Client Socket Singleton
 

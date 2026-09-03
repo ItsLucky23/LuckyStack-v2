@@ -67,8 +67,11 @@ export const clearActivity = (socketId: string, token?: string): void => {
   //? this token remains — a multi-tab user closing one tab must not reset the
   //? refractory for their still-open tabs (PRESENCE-4).
   if (token) {
-    const io = getIoInstance();
+    //? `{ raw: true }` + the disable: the walk over the LOCAL socket map is
+    //? deliberate here (the refractory being cleared is local state too).
+    const io = getIoInstance({ raw: true });
     const hasOtherSocket = io
+      // eslint-disable-next-line luckystack/no-local-socket-enumeration -- per-instance on purpose: `lastAfkFireByToken` is local state, so only local sibling sockets matter
       ? [...io.sockets.sockets.values()].some(
           (s) => s.id !== socketId && extractTokenFromSocket(s) === token,
         )
@@ -173,7 +176,9 @@ export const stopActivitySampler = (): void => {
  * socket connection). Returns the stop function.
  */
 export const startActivitySampler = (
-  { io = getIoInstance(), intervalMs }: { io?: Server | null; intervalMs?: number } = {},
+  //? `{ raw: true }`: the sampler walks the LOCAL socket map by design — every
+  //? instance samples its own sockets (`lastActivityBySocket` is local state).
+  { io = getIoInstance({ raw: true }), intervalMs }: { io?: Server | null; intervalMs?: number } = {},
 ): (() => void) => {
   if (!io) {
     getLogger().warn('presence: cannot start activity sampler — no io instance');
@@ -195,6 +200,7 @@ export const startActivitySampler = (
 
   samplerHandle = setInterval(() => {
     const now = Date.now();
+    // eslint-disable-next-line luckystack/no-local-socket-enumeration -- per-instance on purpose: each instance samples the sockets it owns (see the `io` default above)
     for (const [socketId, socket] of io.sockets.sockets) {
       //? Per-socket isolation: a single malformed socket throwing in
       //? `extractTokenFromSocket` must not abort the whole sweep and starve AFK

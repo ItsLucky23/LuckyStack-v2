@@ -45,6 +45,10 @@ export type {
 export type { ApiTypeMap, SyncTypeMap, StreamPayload } from './apiTypeStubs';
 export type { apiMessage, syncMessage } from './socketTypes';
 export { setIoInstance, getIoInstance } from './socketTypes';
+export type { GetIoInstanceOptions } from './socketTypes';
+export { LocalSocketEnumerationError } from './localSocketEnumerationGuard';
+export { getRoomSockets } from './roomSockets';
+export type { GetRoomSocketsOptions, RoomSocket } from './roomSockets';
 export {
   registerProjectConfig,
   getProjectConfig,
@@ -222,7 +226,7 @@ export {
   isRedisClientRegistered,
   resetClientsForTests,
 } from './clients';
-export { attachSocketRedisAdapter } from './socketRedisAdapter';
+export { attachSocketRedisAdapter, resolveSocketAdapterKey } from './socketRedisAdapter';
 export {
   writeBootUuid,
   readBootUuid,

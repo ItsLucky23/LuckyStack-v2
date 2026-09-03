@@ -20,6 +20,26 @@ Every request flows through `handleHttpRequest` (`packages/server/src/httpHandle
 
 The key consequence: a `'post-params'` custom route can **never** read the raw body (step 6 already consumed it), and an `Origin`-less webhook is **rejected at step 1** before any route runs. The two seams below solve exactly that.
 
+## Routed invocation keeps the declared method — including GET payloads
+
+With `transport.invocation: 'routed-http'` (see `docs/ARCHITECTURE_API.md` →
+"Invocation transport"), `apiRequest` sends each typed route with the HTTP
+method the route declares (`httpMethod`, via the generated `apiMethodMap`). A
+GET has no body, so its `data` travels JSON-encoded in the reserved
+`__luckystack_data` query field. This is deliberate: preserving the declared
+method keeps HTTP semantics intact (caches, proxies and the router treat a GET
+as a GET), and JSON encoding keeps nested objects, numbers and booleans typed on
+arrival instead of flattening to strings.
+
+The consequence a consumer must know: **on `routed-http` a GET route's payload
+is part of the URL.** It lands in access logs, proxy logs, browser history and
+outgoing `Referer` headers, and it is subject to URL length limits — where over
+the `socket` transport the same payload sat inside a WebSocket frame that
+nothing logs by default. Switching a project from `socket` to `routed-http`
+therefore silently widens the logging surface of every GET route. Never put
+secrets, tokens or PII in the `data` of a GET route; declare
+`httpMethod = 'POST'` for such routes and let the body carry it.
+
 ## Custom routes — two phases
 
 `registerCustomRoute(handler, { phase })` (`@luckystack/server`):

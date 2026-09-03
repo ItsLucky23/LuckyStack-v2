@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-03
+
+### Changed
+
+- Session fan-out and the single-session kick read the Socket.io server with `getIoInstance({ raw: true })` and carry explicit `luckystack/no-local-socket-enumeration` opt-outs, because they enumerate the per-instance room map by construction (they pre-date the cross-instance fan-out). No behaviour change. **Known limitation surfaced by this audit, reported and NOT fixed here:** a replaced session's sockets on ANOTHER instance are not kicked, and the `updateSession` broadcast is skipped when this session's sockets live on another instance (a per-instance guard in front of a cross-instance emit).
+
 ## [0.8.4] - 2026-08-17
 
 ### Changed

@@ -20,7 +20,7 @@ Every sync error — whether produced client-side before sending or server-side 
 }
 ```
 
-`message` is **always** the localized string for `errorCode` (with `errorParams` interpolated). The default i18n catalog ships built-in keys for every framework code; project-defined codes use whatever the project i18n catalog defines.
+`message` is **always** the localized string for `errorCode` (with `errorParams` interpolated). The framework itself ships no message catalog: the `sync.*` keys live in the scaffold's `src/_locales/*.json`, and `translate()` returns the raw key when a key is missing — so a code that is not in your locale files surfaces as `sync.someCode` in the UI rather than as a sentence. The canonical list of every `sync.*` code the framework can emit (both transports plus the server's HTTP sync route, e.g. `sync.disabled`, `sync.methodNotAllowed`, `sync.requestTimeout`) is exported as `SYNC_ERROR_CODES` (with the type `SyncErrorCode`) from both `@luckystack/sync` and `@luckystack/sync/client`. Write a parity test of your locale files against that array instead of retyping the tables below — the framework's own test keeps the scaffold locales in parity the same way. Project-defined codes use whatever the project catalog defines.
 
 ---
 
@@ -56,12 +56,14 @@ Emitted by `handleSyncRequest` / `handleHttpSyncRequest` to the originator's ack
 | `sync.notFound` | Neither `_server_v{N}` nor `_client_v{N}` exists for this route | `404` | — |
 | `auth.required` | `auth.login === true` on `_server` and no session resolved | `401` | — |
 | `auth.forbidden` (or route-specific code from `validateRequest`) | `validateRequest(auth.additional)` rejected | `403` (default; some predicates override) | predicate-defined |
+| `sync.receiverNotAllowed` | `receiver: 'all'` requested while `sync.allowClientReceiverAll` is `false` | `403` | — |
+| `sync.notRoomMember` | `sync.requireRoomMembership` is on and the requester is not a member of `receiver` — socket: physical membership of the originating socket; HTTP: logical membership from the session's `roomCodes` (+ its own token-room); an anonymous HTTP caller fails closed. See `/docs/ARCHITECTURE_SYNC.md` → "Room membership is transport-specific" | `403` | — |
 | `sync.rateLimitExceeded` | Per-route or per-IP rate-limit bucket rejected | `429` | `[{ key: 'seconds', value: <retry in> }]` |
 | `sync.invalidInputType` | `validateInputByType` rejected (Zod schema mismatch) | `400` | `[{ key: 'message', value: <readable reason> }]` |
 | `sync.serverExecutionFailed` | `_server`'s `main(...)` threw (caught by `tryCatch`) | `500` | — |
 | `<route-supplied>` (e.g. `board.cardNotFound`) | `_server` returned `{ status: 'error', errorCode }` | `defaultHttpStatusForResponse` or as-provided | as-provided |
 | `sync.invalidServerResponse` | `_server` returned a value with `status` other than `'success'` / `'error'` | `500` | — |
-| `sync.noReceiversFound` | Resolved sockets is `undefined` or empty | `404` | — |
+| `sync.noReceiversFound` | The cross-instance recipient list for `receiver` is empty. Both transports since 0.10.0 (the HTTP path used to answer `success` with zero recipients). Recipients are resolved BEFORE `_server` runs, so nothing has been persisted — a retry is safe | `404` | — |
 | `<hook-supplied>` | `preSyncAuthorize` / `preSyncFanout` stop signal | from hook | from hook |
 
 The `preSyncAuthorize` and `preSyncFanout` hooks can stop with any `errorCode` they choose; the framework normalizes the message via `normalizeErrorResponse` using the originator's locale.
@@ -88,7 +90,7 @@ Recipients see these on their own `socketEventNames.sync` channel as if they wer
 `httpStatus` defaults via `defaultHttpStatusForResponse(errorCode)` in `@luckystack/core`. Default rules (paraphrased — see core for exact source):
 
 - `auth.required` -> `401`
-- `auth.forbidden` and similar role/policy codes -> `403`
+- `auth.forbidden` and similar role/policy codes, plus the receiver-policy codes `sync.receiverNotAllowed` / `sync.notRoomMember` -> `403`
 - Validation failures (`*.invalidRequest`, `*.invalidInputType`, `*.invalidName`, `routing.invalidServiceRouteName`) -> `400`
 - Not-found (`*.notFound`, `sync.noReceiversFound`) -> `404`
 - Rate limit (`*.rateLimitExceeded`) -> `429`
@@ -237,7 +239,9 @@ These are dev hints, not production behavior. Toggle both to `false` for product
 | Server-side schema fail | `sync.invalidInputType` | `_server`'s `SyncParams.clientInput` interface + generated Zod schema |
 | Handler threw | `sync.serverExecutionFailed` / `sync.clientExecutionFailed` | Registered error-tracker capture |
 | Domain logic rejected | `<route-supplied errorCode>` | The `_server` or `_client` file's return path |
-| Empty room | `sync.noReceiversFound` | `receiver` argument; check room membership |
+| Receiver rejected before `_server` ran (403) | `sync.receiverNotAllowed`, `sync.notRoomMember` | `projectConfig.sync.allowClientReceiverAll` / `requireRoomMembership`; on `routed-http` membership is the session's `roomCodes`, not the socket — `/docs/ARCHITECTURE_SYNC.md` |
+| Empty room (both transports; before `_server` ran, nothing persisted) | `sync.noReceiversFound` | `receiver` argument; whether any socket actually (re)joined the room — [`./room-fanout.md`](./room-fanout.md) §8 |
+| Recipient lookup failed (both transports; before `_server` ran, nothing persisted) | `sync.serverExecutionFailed` | The Redis adapter's `fetchSockets()` timed out: an instance on the same adapter key + Redis did not answer — `/docs/ARCHITECTURE_MULTI_INSTANCE.md` pitfalls (shared Redis across environments) |
 | Offline + caller didn't await | `offline.queueFull` | Bump `offlineQueue.maxSize` or switch `dropPolicy` |
 
 ---
@@ -249,5 +253,6 @@ These are dev hints, not production behavior. Toggle both to `false` for product
 - Rate limiting hook + buckets: [`./room-fanout.md`](./room-fanout.md) §5
 - Hook payload shapes: `@luckystack/core` `HookPayloads`
 - Status-code mapping source: `@luckystack/core` `defaultHttpStatusForResponse`
+- Canonical code list for locale parity tests: `SYNC_ERROR_CODES` / `SyncErrorCode` (`@luckystack/sync` and `@luckystack/sync/client`)
 - Locale extraction: `@luckystack/core` `extractLanguageFromHeader`, `normalizeErrorResponse`
 - Project config: `projectConfig.rateLimiting`, `projectConfig.offlineQueue`, `projectConfig.logging`

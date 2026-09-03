@@ -78,11 +78,14 @@ export const attachSocketRedisAdapter = (io: SocketIOServer): void
 **Behavior (in order):**
 1. Calls `redis.duplicate()` twice to obtain dedicated pub + sub clients (ioredis blocks non-pub/sub commands on a connection in subscribe mode, so duplicating is required).
 2. Installs `error` listeners on both clients that log to `console.error` with the `[socket-redis-adapter]` prefix.
-3. Calls `io.adapter(createAdapter(pubClient, subClient))` to wire `@socket.io/redis-adapter`.
+3. Calls `io.adapter(createAdapter(pubClient, subClient, { key }))` to wire `@socket.io/redis-adapter`, with `key` from `resolveSocketAdapterKey()` unless `adapterOptions.key` is given.
+
+**The adapter key is the cluster boundary.** The adapter's `key` names its Redis pub/sub channels, so every instance on the same key *and* the same Redis server is one Socket.io cluster: broadcasts reach all of them, and `fetchSockets()` waits for an answer from each of them (or times out after `requestsTimeout`). Upstream's default is the fixed string `socket.io`, which turns two deployments that merely share a Redis server — a dev laptop tunnelled into the staging Redis, staging and production on one managed instance — into one cluster: staging's broadcasts reach the developer's sockets, and staging's `fetchSockets()` hangs on a laptop that went to sleep. The framework therefore derives the key from the project name plus the deploy-topology key (`resolveEnvKey()`: `LUCKYSTACK_ENV` → `NODE_ENV`), which keeps all instances of one environment together and separates environments without any setting. Pass `adapterOptions.key` to override. Note that sessions, rate-limit counters and every other Redis key are namespaced by project name only (see `redisKeyFormatter.ts`), so two environments that share a Redis server *and* a `PROJECT_NAME` still share their session store — the adapter key isolates the socket cluster, not the data.
 
 **Edge cases:**
 - Calling this after `io` has already accepted connections is allowed but races with in-flight broadcasts — wire it before `io.listen` / connection handlers in the boot sequence.
 - The duplicated clients inherit the active registered client (or the default).
+- Rolling out a version that changed the derived key: instances on the old key and the new key do not see each other until the rollout completes. On a single-replica environment nothing is observable; on a multi-replica one, cross-instance fan-out is split for the duration of the rollout.
 
 **Example:**
 ```typescript

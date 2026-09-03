@@ -154,6 +154,19 @@ Guards:
 - **`synchronizedEnvKeys`** (e.g. `COOKIE_SECRET`, `PROJECT_NAME`): hashed and compared across
   envs so sessions/cookies stay portable between instances.
 
+The inverse footgun is just as silent: **two environments that share one Redis server** (a dev
+laptop tunnelled into the staging Redis, staging and production on one managed instance). The
+adapter's channel key is the cluster boundary, and upstream's default is a fixed string — so
+without a per-environment key the environments become one cluster: a staging broadcast reaches
+the developer's sockets, and staging's `fetchSockets()` waits on a laptop that went to sleep
+until the adapter's request timeout. The framework derives the key from `PROJECT_NAME` plus the
+deploy-topology key (`LUCKYSTACK_ENV` → `NODE_ENV`), which keeps every instance of one
+environment together and separates environments with no setting to forget — see
+`resolveSocketAdapterKey` in `packages/core/docs/redis-adapter.md`. The key isolates the
+**socket cluster only**: sessions and every other Redis key are namespaced by `PROJECT_NAME`
+alone, so two environments on one Redis server still need distinct project names (or distinct
+Redis servers) to keep their session stores apart.
+
 ---
 
 ## `services.config.ts` reality check
@@ -193,6 +206,8 @@ For local-preset→remote-staging development, use the gitignored `.env.docker` 
 | Client hits the router and socket.io fails with **"websocket error"**, HTTP routes fine | `@luckystack/router` 0.4.0–0.6.7: the forwarded 101 lost `Connection: Upgrade`, so no handshake could complete | Upgrade the router past 0.6.7 |
 | Client hits the router and socket.io fails with **"xhr poll error"** / `502 serviceNotAssigned` naming service `socket.io` | `@luckystack/router` ≤0.6.7: the polling handshake was routed by first path segment, so it looked for a service named `socket.io` | Upgrade the router past 0.6.7 |
 | A `syncRequest` broadcast / `broadcastStream` reaches **no one** on other servers | Instances pointing at **different** Redis (so neither `fetchSockets()` nor the adapter spans them) | Point every backend at one shared Redis (`REDIS_HOST`/`REDIS_PORT`); enable `strictBootHandshake` to catch it at boot |
+| A broadcast from staging shows up in a **dev** browser; a sync on staging fails with `sync.serverExecutionFailed` (a `fetchSockets` timeout) while a dev laptop is asleep or paused in a debugger | Two environments share one Redis server **and** the same adapter key, so they are one Socket.io cluster and `fetchSockets()` waits on every instance of both | Give the environments distinct `LUCKYSTACK_ENV` (or `NODE_ENV`) values — the adapter key derives from `PROJECT_NAME` + that key (`resolveSocketAdapterKey`); for a fully separate session store also use distinct `PROJECT_NAME`s or separate Redis servers |
+| A project helper's broadcast / presence snapshot **only covers the sending instance** (works on one server, misses members on two) | It read `io.sockets.adapter.rooms` / `adapter.sids` or enumerated `io.sockets.sockets` — per-instance maps that look complete but only know this process's sockets | Use `getRoomSockets(room)` from `@luckystack/core` or `io.in(room).fetchSockets()` (cross-instance `RemoteSocket[]`); the ESLint rule `luckystack/no-local-socket-enumeration` flags it statically and outside production `getIoInstance()` throws on those accessors (`getIoInstance({ raw: true })` is the explicit opt-in for deliberate per-instance work) |
 | Every sync feels slightly slower / more Redis traffic in a cluster | Each sync fan-out does one cross-instance `fetchSockets()` (Redis round-trip) + one `RemoteSocket.emit()` per remote recipient | Expected; single-instance short-circuits. For very high sync throughput or huge rooms, the `io.serverSideEmit()` fan-out (O(instances)) is the optimization — no API change |
 | Router **crashes at boot** with an explicit-port error | A `deploy.config.ts` binding URL has no port | Add the port (`http://host:8081/`) |
 | Sessions/cookies not portable between instances (users logged out after LB switch) | `COOKIE_SECRET` / `PROJECT_NAME` differ between instances | Align the `synchronizedEnvKeys` across all backends |

@@ -4,20 +4,22 @@
 
 For the originator's `receiver` argument see [`./sync-request.md`](./sync-request.md). For per-recipient handler authoring see [`./server-vs-client-handlers.md`](./server-vs-client-handlers.md).
 
+> **Applies from `@luckystack/sync` 0.10.0.** Earlier versions resolved recipients from this process's own adapter maps, and only the socket transport rejected an empty room. Everything below describes the cross-instance model that replaced that.
+
 ---
 
 ## 1. How `receiver` resolves to sockets
 
-`handleSyncRequest` branches on `receiver`:
+Both transports — `handleSyncRequest` (socket) and `handleHttpSyncRequest` (HTTP/SSE) — resolve recipients the same way, in the same order:
 
-```ts
-const sockets = receiver === 'all'
-  ? ioInstance.sockets.sockets                          // Map<socketId, Socket>
-  : ioInstance.sockets.adapter.rooms.get(receiver);     // Set<socketId> | undefined
-```
+1. **Format the room.** The `receiver` string goes through the room-name formatter from `@luckystack/core` under the canonical `'broadcast'` purpose, so a non-identity `registerRoomNameFormatter` targets the same physical room the sockets joined (join formats the name too). `'all'` is a sentinel and is never formatted.
+2. **Enumerate across instances — before `_server` runs.** The framework asks Socket.io for the members of that physical room on **every** instance sharing the Redis adapter (`io.in(room).fetchSockets()`), or for every socket everywhere when the receiver is `'all'`. The result is a list of `RemoteSocket`s — never a lookup in this process's local room map. This happens after auth, rate-limit and the authorize hooks but **before** input validation and the `_server` handler, so nothing has been persisted yet when it fails.
+3. **Empty → `sync.noReceiversFound`.** An empty list ends the request with that error on **both** transports, before `_server` runs, before `preSyncFanout` fires and before any recipient is touched. See §8.
+4. `_server` (validate input, execute, persist), then `preSyncFanout`, then the per-recipient loop (§3).
 
-- `receiver === 'all'` -> every connected socket on **this instance** (production with Redis adapter: every socket on every instance, see §6).
-- Any other string -> the Socket.io room with that name. If the room does not exist or is empty, `sockets` is `undefined` and the fanout fails with `sync.noReceiversFound`.
+Three consequences worth internalising: a recipient on another instance is a first-class recipient (its `_client` runs, see §7); "does the room exist locally" is never the question — the only question is whether the cross-instance query returned members; and an error from this step is a **pre-commit** rejection — the cross-instance query can fail (an adapter request timeout when an instance on the channel does not answer) and when that happened after `_server` had persisted its mutation the caller was told `error` about a change that had been saved, so a retry applied it twice. The cost of resolving first is a recipient snapshot taken one handler-execution earlier: a socket that joins the room while `_server` runs misses that one fan-out.
+
+Whether the sender is *allowed* to target the room at all is a separate, earlier check (`sync.requireRoomMembership`) whose semantics deliberately differ per transport — see [`/docs/ARCHITECTURE_SYNC.md`](../../../docs/ARCHITECTURE_SYNC.md) → "Room membership is transport-specific".
 
 There is no "broadcast to all but yourself" sentinel — pass `ignoreSelf: true` to skip the originator's own sockets. See [`./ignore-self.md`](./ignore-self.md).
 
@@ -52,6 +54,8 @@ preSyncFanout (stop signal aborts before any recipient is touched)
 for each socket in <resolved sockets>:
     yield every N (configurable)
     skip if ignoreSelf && token === recipientToken
+    preSyncRecipient (stop without overrideOutput skips this recipient, uncounted;
+                      stop WITH overrideOutput replaces serverOutput for this recipient)
     recipientCount++
     if _client exists:
         run clientHandler
@@ -89,7 +93,7 @@ Tuning:
 - **Lower `fanoutYieldEvery` + higher `fanoutYieldMs`** = smoother for concurrent traffic but slower fanout.
 - For typical room sizes (<100 recipients), the yield never triggers — defaults are tuned for `receiver: 'all'` worst cases.
 
-This loop only exists on the socket path (`handleSyncRequest`). The HTTP path (`handleHttpSyncRequest`) does not yield — HTTP requests are inherently isolated per Node.js handler invocation, and the per-instance fanout sits inside a single async block anyway.
+Both transports yield on the same schedule — the HTTP handler's loop reads the same two config keys. An HTTP-invoked fanout still runs on the event loop of the instance that received the request, so a giant `'all'` fanout would starve it just the same.
 
 ---
 
@@ -112,6 +116,18 @@ Fires **after** `_server` runs successfully and the recipient set is resolved, *
 - "Don't fanout this mutation to a degraded region while we drain traffic."
 - "Throttle fanout-heavy routes during peak load."
 - "Inject a cross-room replication hop before the room receives the payload."
+
+### `preSyncRecipient`
+
+Fires once per resolved recipient, after the `ignoreSelf` skip and before that one socket receives anything. It carries the route name, the receiver, the recipient's socket id, the recipient's session token (`recipientToken`, `null` for an anonymous socket) and the `serverOutput` about to be sent. Exact shape: `HookPayloads` in `@luckystack/core`.
+
+Semantics that differ from the other fanout hooks:
+
+- A stop signal **without** `overrideOutput` skips just this recipient — the loop continues, and the skipped socket is not counted in `recipientCount`.
+- A stop signal **with** `overrideOutput` still delivers to this recipient, but with the override in place of `serverOutput` — per-recipient redaction without a `_client` file.
+- `recipientUserId` is **always `null`**. There is no resolver option: resolving a user per recipient would cost a session read per socket on the hot path. A handler that needs the user reads the session itself by `recipientToken` (the token is already known in the loop, so it costs nothing to expose).
+
+Fires on both transports and for remote recipients too (§7).
 
 ### `postSyncFanout`
 
@@ -163,41 +179,49 @@ Fires before fanout begins, when either bucket rejects. Used to surface abusive 
 
 ## 6. `recipientCount` vs raw room size
 
-`recipientCount` differs from `sockets.size` in three cases:
+`recipientCount` differs from the size of the resolved recipient list in two cases, identically on both transports:
 
 1. **`ignoreSelf: true`** — every socket whose extracted token matches the sender's is skipped. If a user has 3 sockets in the room and triggered the sync themselves, `recipientCount` is `size - 3`.
-2. **Sockets disappearing mid-fanout** — `ioInstance.sockets.sockets.get(socketId)` can return `undefined` between resolving the room set and emitting (the socket disconnected). Those iterations `continue` without bumping `recipientCount`.
-3. **HTTP transport** — the HTTP path's `_client` execution `continue`s without bumping `recipientCount` only for per-recipient failures it could not recover from; the socket path always bumps for handled (success or error) recipients and only skips disappeared sockets.
+2. **`preSyncRecipient` stop without `overrideOutput`** — the recipient is skipped and not counted (§5).
 
-This is why the hook payload exposes `recipientCount` instead of a raw room size — observers want the count that actually saw the payload.
+What does **not** reduce it:
+
+- **Sockets disappearing mid-fanout.** The recipient list is a snapshot of `RemoteSocket`s taken once, before the loop. A socket that disconnects between the snapshot and its turn is still iterated: the loop emits to the remote handle, the adapter drops the emit because the target is gone, and the recipient is still counted. There is no per-iteration "does this socket still exist" re-check against a local map — that check would only be answerable for local sockets anyway.
+- **A failing `_client`.** The recipient is counted before `_client` runs, so a recipient that received an error frame counts the same as one that received a success frame.
+
+So `recipientCount` is "how many recipients the loop emitted to", not "how many received the payload" — the second number does not exist on the server side of an adapter. Observers wanting delivery confirmation need a client-side ack of their own.
 
 ---
 
 ## 7. Cross-instance fanout via Redis adapter
 
-Single-instance fanout is built into Socket.io. **Cross-instance fanout requires the Redis adapter.** Without it, a `broadcastStream` on instance A reaches sockets on instance A only; sockets on instance B (same room name, different Node process) get nothing.
+Single-instance fanout is built into Socket.io. **Cross-instance fanout requires the Redis adapter**, which `@luckystack/server` attaches on every backend (see [`/docs/ARCHITECTURE_SOCKET.md`](../../../docs/ARCHITECTURE_SOCKET.md)). Two mechanisms ride on it:
 
-`@luckystack/server` wires the Redis adapter when `REDIS_URL` is set and the Socket.io Redis adapter peer is installed. With it:
+- `io.to(room).emit(...)` — used by the streaming emitters — publishes to Redis; every instance delivers to its own members of that room.
+- `io.in(room).fetchSockets()` + `RemoteSocket.emit()` — used by the regular sync fanout — enumerates the room across all instances and delivers to each member individually.
 
-- `io.to(roomCode).emit(...)` reaches every socket in the room **across every instance**.
-- `ioInstance.sockets.adapter.rooms.get(roomCode)` still only sees the local instance's members — the Redis adapter handles the cross-instance fanout transparently at the emit layer.
+**The per-recipient `_client` handler runs for remote recipients too.** The fanout loop iterates the cross-instance list, runs `_client` on the instance that is handling the request (it has the route code, the `serverOutput`, and the recipient's handshake headers and token), and delivers the result through the recipient's `RemoteSocket`. No sticky sessions are needed for correctness; spreading one room's members across instances is fine. The cost model (one Redis round-trip per fanout plus one emit per remote recipient) is in [`/docs/ARCHITECTURE_MULTI_INSTANCE.md`](../../../docs/ARCHITECTURE_MULTI_INSTANCE.md).
 
-This means `handleSyncRequest`'s **per-recipient `_client` execution only runs against local sockets**. If you need a `_client` handler to execute on every recipient regardless of which instance they're connected to, either:
+> **Warning — `io.sockets.adapter.rooms`, `io.sockets.adapter.sids` and enumerating `io.sockets.sockets` are per-instance maps.** They answer "who is connected to *this process*", which under the Redis adapter is a partial view that looks complete: no error, just missing members. A helper that builds a room snapshot, a presence list or a broadcast target from them works on one instance and silently drops the rest of the cluster on two. Use instead:
+>
+> - `getRoomSockets(room, { userId? })` from `@luckystack/core` — routes the room through the formatter under `'broadcast'` and returns the cross-instance `RemoteSocket[]` (`'all'` = every socket everywhere). It throws when no Socket.io server is registered, because a silent empty list is exactly the failure this exists to prevent.
+> - `io.in(room).fetchSockets()` / `io.to(room).emit()` directly when you already hold the physical room name.
+>
+> Three guards catch the mistake before production does: the ESLint rule `luckystack/no-local-socket-enumeration` in `@luckystack/core/eslint` flags the patterns statically; outside production `getIoInstance()` returns a guarded view that **throws** on those accessors (`sockets.sockets.get(id)` stays allowed); and `getIoInstance({ raw: true })` is the explicit opt-in for deliberate per-instance work — a sweep cleaning up its own connections, or sampling this process's backpressure. In production the raw instance is always returned, so the guard costs nothing on the hot path.
 
-1. Pin sticky sessions so a given room's sockets all land on the same instance (simplest), OR
-2. Wire your own cross-instance per-recipient runner (rare, advanced).
-
-For the common case (broadcast a single `serverOutput` to everyone in the room), the Redis adapter is sufficient. See [`/docs/ARCHITECTURE_SOCKET.md`](../../../docs/ARCHITECTURE_SOCKET.md) for the adapter setup.
+`recipientCount` in `postSyncFanout` counts recipients on every instance, not just local ones.
 
 ---
 
 ## 8. `sync.noReceiversFound`
 
-Triggered when the resolved `sockets` is `undefined` or falsy:
+Triggered on **both transports** when the cross-instance recipient list (§1) comes back empty. Before 0.10.0 only the socket transport rejected this; the HTTP/SSE path returned `success` with zero recipients, so an HTTP caller could not tell "delivered" from "nobody there". Typical causes:
 
 - The room name was misspelled.
 - Every member already disconnected before the request reached the fanout step.
 - A bug had the client `joinRoom`-ing under a different name than the sender's `receiver` argument.
+- A room-name formatter that folds the caller's `userId` into the physical name — join and fanout then land in different physical rooms (see the formatter contract in `packages/core/docs/socket-bootstrap.md`).
+- On `routed-http`: the caller's session still lists the room in `roomCodes` (so the membership check passed) but no socket has re-joined it — see the membership section in [`/docs/ARCHITECTURE_SYNC.md`](../../../docs/ARCHITECTURE_SYNC.md).
 - `receiver: 'all'` while no sockets are connected at all (development edge case).
 
 Surfaced to the originator as:
@@ -208,7 +232,7 @@ Surfaced to the originator as:
 
 Default `httpStatus` mapping for this code comes from `defaultHttpStatusForResponse` in `@luckystack/core`.
 
-This is not necessarily a bug — sending to an empty room is legal if the sender doesn't yet know the room is empty. UI typically treats `sync.noReceiversFound` as "your mutation succeeded server-side (the `_server` already ran and persisted state); just nobody happened to be listening". `_server`'s mutations are NOT rolled back when there are zero recipients.
+This is not necessarily a bug — sending to an empty room is legal if the sender doesn't yet know the room is empty. Recipients are resolved **before** `_server` runs (§1), so on this error nothing has been persisted: the mutation did NOT happen, and a retry once someone is listening is safe. (Earlier versions ran the check after `_server`, so the UI had to read this error as "saved, but nobody was listening"; that reading is now wrong.)
 
 ---
 

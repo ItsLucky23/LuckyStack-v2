@@ -152,7 +152,10 @@ Both modes preserve generated response typing, auth, errors, streaming,
 `httpFetch`, so cookie mode fetches CSRF from the same invocation origin; token
 mode forwards the sessionStorage token as bearer auth. GET payloads use the
 reserved `__luckystack_data` query field internally so nested objects, numbers
-and booleans retain their JSON types.
+and booleans retain their JSON types. That puts a GET payload in the URL — and
+so in access logs, proxy logs, browser history and `Referer` — where the socket
+transport kept it inside a frame; keep secrets and PII out of GET routes (see
+`docs/ARCHITECTURE_HTTP.md` → "Routed invocation keeps the declared method").
 
 `src/_sockets/apiRequest.ts` must register the generated `apiMethodMap` before
 re-exporting `apiRequest`. Routed HTTP uses this runtime map to preserve each

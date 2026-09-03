@@ -105,13 +105,16 @@ const waitUntilSocketDrained = async (
 //? ORIGINAL `receiver`, not the token-named rooms; the caller's own socket
 //? (originatorSocket) is the primary pressure signal in that case.
 const collectRoomSocketsForPressure = (receiver: string): Socket[] => {
-  const io = getIoInstance();
+  //? `{ raw: true }`: the per-instance view is the POINT here (local buffer
+  //? sampling), so bypass the dev guard that exists for fan-out code.
+  const io = getIoInstance({ raw: true });
   if (!io) return [];
   if (!receiver) return [];
 
   if (receiver === 'all') {
     const out: Socket[] = [];
     let i = 0;
+    // eslint-disable-next-line luckystack/no-local-socket-enumeration -- deliberately per-instance: backpressure is a property of THIS process's socket buffers (see header comment)
     for (const [, sock] of io.sockets.sockets) {
       if (i >= MAX_SOCKETS_FOR_PRESSURE_SAMPLE) break;
       out.push(sock);
@@ -120,6 +123,7 @@ const collectRoomSocketsForPressure = (receiver: string): Socket[] => {
     return out;
   }
 
+  // eslint-disable-next-line luckystack/no-local-socket-enumeration -- deliberately per-instance: backpressure is a property of THIS process's socket buffers (see header comment)
   const ids = io.sockets.adapter.rooms.get(receiver);
   if (!ids || ids.size === 0) return [];
   const out: Socket[] = [];

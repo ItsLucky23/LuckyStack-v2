@@ -8,7 +8,7 @@
 //? call site was removed once core made `validateRequest` null-safe — CORE-06.)
 /* eslint-disable @typescript-eslint/no-unnecessary-condition, @typescript-eslint/restrict-template-expressions, @typescript-eslint/prefer-nullish-coalescing, @typescript-eslint/no-non-null-assertion, eqeqeq */
 import { randomUUID } from "node:crypto";
-import type { syncMessage, PostSyncFanoutPayload, PostSyncExecutePayload, BaseSessionLayout as SessionLayout, ErrorFormatter } from "@luckystack/core";
+import type { syncMessage, PostSyncFanoutPayload, PostSyncExecutePayload, BaseSessionLayout as SessionLayout, ErrorFormatter, RoomSocket } from "@luckystack/core";
 import { Socket } from "socket.io";
 import {
   readSession,
@@ -850,11 +850,70 @@ async function runSyncServerExecution({
   return { ok: true, serverOutput: serverSyncResult };
 }
 
-//? Stage 9 — fetches the target socket list and runs the per-recipient fanout
-//? (preSyncFanout → ack originator → loop → postSyncFanout).
-//? Returns false when there are no recipients (already emitted an error).
-async function runSyncFanout({
+//? Stage 8 — resolves the cross-instance recipient list BEFORE the `_server`
+//? handler runs. `fetchSockets()` (via the Redis adapter) returns RemoteSocket
+//? objects spanning EVERY backend sharing the adapter — not just this process's
+//? room view — so a normal sync fan-out reaches room members connected to other
+//? instances. `remoteSocket.emit()` routes to the owning instance. (Per-sync
+//? Redis round-trip; see docs/ARCHITECTURE_MULTI_INSTANCE.md.)
+//?
+//? @adr 0063
+//? Why before execution: this query can fail (an adapter `requestsTimeout` when
+//? an instance on the channel does not answer) or come back empty. When that
+//? happened AFTER `_server` had persisted its mutation, the originator was told
+//? `error` about a change that had in fact been saved — and a retry applied it
+//? twice. Resolving first makes every error on this path a pre-commit
+//? rejection: nothing was saved, so `error` is true and a retry is safe.
+//? The cost is a recipient snapshot taken a handler-execution earlier; a socket
+//? that joins the room while `_server` runs misses this one fan-out.
+//?
+//? Route the receiver room through the core room-name formatter (PRESENCE-1)
+//? so a non-identity `registerRoomNameFormatter` targets the same physical room
+//? that sockets actually joined (which is already formatted at join time).
+//? Returns null when there are no recipients (already emitted an error).
+async function resolveSyncRecipients({
   ioInstance,
+  receiver,
+  resolvedName,
+  user,
+  socket,
+  responseIndex,
+  buildSyncError,
+  preferredLocale,
+  cleanupRequest,
+}: {
+  ioInstance: ReturnType<typeof getIoInstance>;
+  receiver: string;
+  resolvedName: string;
+  user: SessionLayout | null;
+  socket: Socket;
+  responseIndex: number | undefined;
+  buildSyncError: SyncErrorBuilder;
+  preferredLocale: string | null;
+  cleanupRequest: () => void;
+}): Promise<RoomSocket[] | null> {
+  const physicalReceiver = receiver === 'all' ? 'all' : formatRoomName(receiver, { purpose: 'broadcast', userId: user?.id ?? null });
+  const sockets = physicalReceiver === 'all'
+    ? await ioInstance!.fetchSockets()
+    : await ioInstance!.in(physicalReceiver).fetchSockets();
+
+  //? now we check if we found any sockets
+  if (sockets.length === 0) {
+    if (shouldLogDev()) {
+      getLogger().warn('sync: no sockets found for receiver', { receiver, sync: resolvedName });
+    }
+    cleanupRequest();
+    rejectSync({ socket, responseIndex, buildSyncError, response: { status: 'error', errorCode: 'sync.noReceiversFound' }, preferred: preferredLocale, userLanguage: user?.language });
+    return null;
+  }
+  return sockets;
+}
+
+//? Stage 10 — runs the per-recipient fanout over the recipients resolved in
+//? stage 8 (preSyncFanout → ack originator → loop → postSyncFanout).
+//? Returns false when the fanout was refused by a hook (already emitted an error).
+async function runSyncFanout({
+  sockets,
   receiver,
   resolvedName,
   normalizedData,
@@ -870,7 +929,7 @@ async function runSyncFanout({
   syncObject,
   functionsObject,
 }: {
-  ioInstance: ReturnType<typeof getIoInstance>;
+  sockets: RoomSocket[];
   receiver: string;
   resolvedName: string;
   normalizedData: Record<string, unknown>;
@@ -887,29 +946,6 @@ async function runSyncFanout({
   syncObject: Record<string, unknown>;
   functionsObject: Record<string, unknown>;
 }): Promise<boolean> {
-  //? Cross-instance recipient list. `fetchSockets()` (via the Redis adapter)
-  //? returns RemoteSocket objects spanning EVERY backend sharing the adapter —
-  //? not just this process's room view — so a normal sync fan-out reaches room
-  //? members connected to other instances. `remoteSocket.emit()` routes to the
-  //? owning instance. (Per-sync Redis round-trip; see docs/ARCHITECTURE_MULTI_INSTANCE.md.)
-  //? Route the receiver room through the core room-name formatter (PRESENCE-1)
-  //? so a non-identity `registerRoomNameFormatter` targets the same physical room
-  //? that sockets actually joined (which is already formatted at join time).
-  const physicalReceiver = receiver === 'all' ? 'all' : formatRoomName(receiver, { purpose: 'broadcast', userId: user?.id ?? null });
-  const sockets = physicalReceiver === 'all'
-    ? await ioInstance!.fetchSockets()
-    : await ioInstance!.in(physicalReceiver).fetchSockets();
-
-  //? now we check if we found any sockets
-  if (sockets.length === 0) {
-    if (shouldLogDev()) {
-      getLogger().warn('sync: no sockets found for receiver', { receiver, sync: resolvedName });
-    }
-    cleanupRequest();
-    rejectSync({ socket, responseIndex, buildSyncError, response: { status: 'error', errorCode: 'sync.noReceiversFound' }, preferred: preferredLocale, userLanguage: user?.language });
-    return false;
-  }
-
   //? Single payload reference reused by pre/post — span pinning in
   //? `@luckystack/error-tracking` uses WeakMap on this object. `recipientCount`
   //? is mutated in place after fanout completes.
@@ -985,9 +1021,10 @@ async function runSyncFanout({
     //? before this socket receives anything, letting a consumer FILTER the
     //? fanout (block users, per-tenant visibility) without a `_client` file. A
     //? stop signal SKIPS just this recipient — the loop continues and the
-    //? recipient is NOT counted as delivered. `recipientUserId` is left null on
-    //? the hot path (resolving it would cost a session read per recipient); a
-    //? handler that needs it can derive it from `recipientSocketId` / `receiver`.
+    //? recipient is NOT counted as delivered. `recipientUserId` is always null
+    //? (resolving it would cost a session read per recipient); the recipient's
+    //? TOKEN is already known here, so it is passed along and a handler that
+    //? needs the user reads the session by it.
     //? SYNC-O8 — per-recipient hook. A stop signal with no `overrideOutput`
     //? SKIPS this recipient (existing behaviour). A stop signal WITH
     //? `overrideOutput` sends the override in place of `serverOutput` so a
@@ -998,6 +1035,7 @@ async function runSyncFanout({
       routeName: resolvedName,
       receiver,
       recipientSocketId: tempSocket.id,
+      recipientToken: tempToken,
       recipientUserId: null,
       serverOutput,
     });
@@ -1246,7 +1284,21 @@ async function handleSyncRequestInner({ msg, socket, token }: {
   // Stage 7 — pre/post authorize hooks
   if (!await runPreAuthorizeHook({ resolvedName, normalizedData, user, receiver, socket, responseIndex, buildSyncError, preferredLocale, cleanupRequest })) return;
 
-  // Stage 8 — validate input + run server handler
+  // Stage 8 — resolve recipients (before anything is persisted)
+  const sockets = await resolveSyncRecipients({
+    ioInstance,
+    receiver,
+    resolvedName,
+    user,
+    socket,
+    responseIndex,
+    buildSyncError,
+    preferredLocale,
+    cleanupRequest,
+  });
+  if (sockets === null) return;
+
+  // Stage 9 — validate input + run server handler
   const executionResult = await runSyncServerExecution({
     serverSyncEntry,
     resolvedName,
@@ -1271,9 +1323,9 @@ async function handleSyncRequestInner({ msg, socket, token }: {
 
   //? from here on we can assume that we have either called a server sync and got a proper result of we didnt call a server sync
 
-  // Stage 9 — fanout
+  // Stage 10 — fanout
   const fanoutAcked = await runSyncFanout({
-    ioInstance,
+    sockets,
     receiver,
     resolvedName,
     normalizedData,

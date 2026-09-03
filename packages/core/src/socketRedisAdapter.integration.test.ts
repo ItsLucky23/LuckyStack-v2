@@ -34,8 +34,20 @@ const clients: ClientSocket[] = [];
 
 let ioA: IOServer;
 let ioB: IOServer;
+let ioC: IOServer;
 let clientA: ClientSocket;
 let clientB: ClientSocket;
+let clientC: ClientSocket;
+
+//? The suite runs on its OWN adapter key, in the shape `resolveSocketAdapterKey()`
+//? produces, never on upstream's default `socket.io`. The Redis this suite
+//? reaches is whatever `.env` points at — on a dev machine that has been a
+//? tunnel into a shared staging Redis with a dozen live servers on the default
+//? channel, and `fetchSockets()` then waits on all of them (and timed out on the
+//? ones that did not answer). Per-pid so two concurrent runs stay apart too.
+const SUITE_KEY = `luckystack:adapter-test-${String(process.pid)}:socket.io`;
+//? A DIFFERENT environment of the same project on the same Redis server.
+const OTHER_ENV_KEY = `luckystack:adapter-test-${String(process.pid)}-other:socket.io`;
 
 const makeRedis = (): Redis => {
   const opts = getRedisConnectionOptions();
@@ -63,7 +75,10 @@ const listen = (http: HttpServer): Promise<number> =>
     });
   });
 
-const buildInstance = async (): Promise<Instance> => {
+//? `key` is the adapter's channel prefix — see `resolveSocketAdapterKey` in
+//? socketRedisAdapter.ts. Instances on different keys share the Redis server
+//? but must NOT see each other (the dev-laptop-on-staging-Redis case).
+const buildInstance = async (key: string): Promise<Instance> => {
   const http = createServer();
   const io = new IOServer(http, { cors: { origin: '*' } });
   const pub = makeRedis();
@@ -72,7 +87,7 @@ const buildInstance = async (): Promise<Instance> => {
   redisClients.push(sub);
   await pub.connect();
   await sub.connect();
-  io.adapter(createAdapter(pub, sub));
+  io.adapter(createAdapter(pub, sub, { key }));
   //? Each instance joins ONLY its own connecting sockets to the room. With the
   //? adapter, `io.to(room).emit()` still reaches the other instance's members.
   io.on('connection', (socket: ServerSocket) => {
@@ -138,13 +153,18 @@ beforeAll(async () => {
     return;
   }
 
-  const a = await buildInstance();
-  const b = await buildInstance();
-  instances.push(a, b);
+  const a = await buildInstance(SUITE_KEY);
+  const b = await buildInstance(SUITE_KEY);
+  //? C shares the Redis SERVER with A and B but sits on another adapter key —
+  //? another environment of the same project (see the isolation suite below).
+  const c = await buildInstance(OTHER_ENV_KEY);
+  instances.push(a, b, c);
   ioA = a.io;
   ioB = b.io;
+  ioC = c.io;
   clientA = await connect(a.port);
   clientB = await connect(b.port);
+  clientC = await connect(c.port);
 
   //? Let the adapter propagate the room joins across instances before asserting.
   await new Promise((r) => setTimeout(r, 300));
@@ -211,6 +231,37 @@ describe('@socket.io/redis-adapter cross-instance fan-out', () => {
 
     const notReceived = expectNoEvent(clientB, EVENT, 800);
     localServerSocket?.emit(EVENT, { hello: 'local-only' });
+    await expect(notReceived).resolves.toBeUndefined();
+  });
+});
+
+//? The other half of the adapter contract: one Redis SERVER, two adapter keys,
+//? two clusters. This is the dev-laptop-tunnelled-into-staging-Redis case that
+//? `resolveSocketAdapterKey` exists for — without a per-environment key, staging's
+//? `fetchSockets()` would list (and wait on) the developer's sockets.
+describe('@socket.io/redis-adapter cross-environment isolation (different key, same Redis)', () => {
+  it('fetchSockets() on the suite key never lists a member of the other key\'s cluster', async (ctx) => {
+    if (!redisAvailable) { ctx.skip(); return; }
+    const members = await ioA.in(ROOM).fetchSockets();
+    const ids = members.map((s) => s.id);
+    expect(ids).not.toContain(clientC.id);
+    expect(ids.sort()).toEqual([clientA.id, clientB.id].sort());
+  });
+
+  it('fetchSockets() on the other key sees only its own cluster and does not wait on the suite one', async (ctx) => {
+    if (!redisAvailable) { ctx.skip(); return; }
+    //? The adapter waits `requestsTimeout` (5s upstream) for every instance on
+    //? its channel. Returning well under that proves A and B are not counted.
+    const started = Date.now();
+    const members = await ioC.in(ROOM).fetchSockets();
+    expect(Date.now() - started).toBeLessThan(2000);
+    expect(members.map((s) => s.id)).toEqual([clientC.id]);
+  });
+
+  it('a room broadcast on the suite key does not reach the other key\'s client', async (ctx) => {
+    if (!redisAvailable) { ctx.skip(); return; }
+    const notReceived = expectNoEvent(clientC, EVENT, 800);
+    ioA.to(ROOM).emit(EVENT, { hello: 'suite-key-only' });
     await expect(notReceived).resolves.toBeUndefined();
   });
 });

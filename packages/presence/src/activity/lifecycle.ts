@@ -109,7 +109,11 @@ const handleGraceExpiry = async ({
     //? it because the session was never gone. Without this check we would leave
     //? rooms + delete the shared session out from under the live tab A. Every
     //? socket joins `socket.join(token)`, so a non-empty token room = a live tab.
-    const liveSockets = getIoInstance()?.sockets.adapter.rooms.get(token)?.size ?? 0;
+    //? `{ raw: true }` + the disable: this reads the per-instance room map on
+    //? purpose. A live tab for this token on ANOTHER instance is not seen here
+    //? (known limitation, reported in the 0.10.0 handoff, not fixed here).
+    // eslint-disable-next-line luckystack/no-local-socket-enumeration -- per-instance multi-tab guard; see the comment above
+    const liveSockets = getIoInstance({ raw: true })?.sockets.adapter.rooms.get(token)?.size ?? 0;
     if (liveSockets > 0) { return; }
 
     //? Resolve the session BEFORE teardown so the grace-expiry hook + any

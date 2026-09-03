@@ -27,7 +27,17 @@ export interface RoomNameFormatterContext {
    * seen, identically to `'broadcast'`.
    */
   purpose: 'join' | 'leave' | 'broadcast' | 'presence';
-  /** Session user id when known (join/leave by an authenticated socket), else null. */
+  //? @adr 0060
+  /**
+   * Session user id of whoever is performing THIS operation, when known, else
+   * null — CONTEXT ONLY. For a shared content room under `'broadcast'` the
+   * framework passes the joiner on join/rejoin, the SENDER on fan-out and the
+   * originator on `broadcastStream`, so the value differs per call for the SAME
+   * room. A formatter must therefore never fold `userId` into a content room's
+   * physical name: join and fan-out would resolve to different rooms and every
+   * broadcast would reach nobody, silently. Per-user isolation belongs in the
+   * raw room code the consumer chooses, or in the separate `'presence'` family.
+   */
   userId?: string | null;
 }
 

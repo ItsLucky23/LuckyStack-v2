@@ -123,6 +123,9 @@ const buildRequest = ({
   const headers = new Headers();
   if (stream) headers.set('Accept', 'text/event-stream');
 
+  //? @adr 0062 — a GET keeps its declared method, so its payload can only ride
+  //? the query string: it lands in access/proxy logs, history and `Referer`.
+  //? Sensitive data belongs on a route that declares POST (ARCHITECTURE_HTTP.md).
   if (method === 'GET') {
     const params = new URLSearchParams();
     params.set('__luckystack_data', JSON.stringify(data));

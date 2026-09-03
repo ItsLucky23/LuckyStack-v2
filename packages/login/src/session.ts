@@ -174,7 +174,11 @@ const saveSession = async (
     }
 
     const { getIoInstance } = await import('@luckystack/core');
-    const io = getIoInstance();
+    //? `{ raw: true }`: the kick + the guard below read the per-instance room
+    //? map on purpose (they pre-date the cross-instance fan-out and only see
+    //? THIS process's sockets — a known limitation, see the eslint-disable
+    //? comments), so bypass the dev guard meant for fan-out code.
+    const io = getIoInstance({ raw: true });
     //? Socket fanout + single-session enforcement below need a live io; skip
     //? them when there isn't one. The session IS already persisted + tracked, so
     //? this is a success (background workers / CLI tasks have no io).
@@ -218,6 +222,7 @@ const saveSession = async (
         const { logout } = await import('./logout');
 
         await Promise.all(tokensToKick.map(async (previousToken) => {
+          // eslint-disable-next-line luckystack/no-local-socket-enumeration -- per-instance by construction: only the replaced session's sockets on THIS instance are logged out here; sockets on other instances are not reached (known limitation, reported in the 0.10.0 handoff, not fixed here)
           const sockets = io.sockets.adapter.rooms.get(previousToken);
           if (sockets) {
             getLogger().debug(`Kicking previous session for user ${userId}`);
@@ -251,6 +256,7 @@ const saveSession = async (
     //? this payload in either mode (the socket handshake reads sessionStorage /
     //? the cookie), so we always send the token-stripped projection — the same one
     //? persisted to the adapter at LOGIN-M9 — matching the CLIENT `ClientSessionLayout`.
+    // eslint-disable-next-line luckystack/no-local-socket-enumeration -- per-instance guard in front of a cross-instance emit: when this session's sockets live on ANOTHER instance the update is skipped (known limitation, reported in the 0.10.0 handoff, not fixed here)
     if (io.sockets.adapter.rooms.has(token)) {
       io.to(token).emit(socketEventNames.updateSession, JSON.stringify(persistedWithoutToken));
     }
@@ -416,11 +422,14 @@ const deleteSession = async (
 
     if (raw && resolvedUserId) {
       const { getIoInstance } = await import('@luckystack/core');
-      const ioInstance = getIoInstance();
+      //? `{ raw: true }`: reads the per-instance room map on purpose (see the
+      //? eslint-disable below), so bypass the dev guard meant for fan-out code.
+      const ioInstance = getIoInstance({ raw: true });
 
       // Reuse the same logout flow as single-session enforcement.
       if (ioInstance && !options?.skipSocketLogout) {
         const { logout } = await import('./logout');
+        // eslint-disable-next-line luckystack/no-local-socket-enumeration -- per-instance by construction: only this session's sockets on THIS instance are logged out here; sockets on other instances are not reached (known limitation, reported in the 0.10.0 handoff, not fixed here)
         const sockets = ioInstance.sockets.adapter.rooms.get(token);
 
         if (sockets) {

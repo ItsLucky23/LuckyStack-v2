@@ -94,7 +94,51 @@ owning service fans out over the shared Socket.io Redis adapter; Redis delivers
 to remote sockets but does not remotely execute the handler.
 
 Auth, receiver policy, rate limits, validation, response typing, `AbortSignal`,
-timeout and offline queue semantics are transport-equivalent.
+timeout and offline queue semantics are transport-equivalent — with one
+deliberate exception, below.
+
+## Room membership is transport-specific
+
+`sync.requireRoomMembership` asks "is the requester in the room it targets?".
+The two transports answer that from different sources, on purpose:
+
+| Transport | What is tested | Source |
+| --- | --- | --- |
+| `socket` | **Physical** membership: the originating socket is in the formatted room right now | `socket.rooms` of the socket that sent the request |
+| `routed-http` | **Logical** membership: the session says it belongs there | the session's persisted `roomCodes`, plus the caller's own token-room (every session implicitly owns its own token-room) |
+
+The socket check tests the exact room the fan-out will deliver to. The HTTP
+path has no originator socket — the request may even land on an instance that
+holds none of the caller's sockets — so the persisted list is the only
+membership source it has, and it is the one that survives a reconnect. An
+anonymous HTTP caller has no session and therefore no membership: it fails
+closed with `sync.notRoomMember`.
+
+**On `routed-http`, a successful `syncRequest` does not prove that you are in
+the room yourself or that you will receive the fan-out.** The two sources
+diverge in exactly two cases:
+
+- `roomCodes` lists the room but no socket has (re)joined it → HTTP allows the
+  request, the socket transport would answer `sync.notRoomMember`, and the
+  originator will not receive the fan-out (it has no socket in the room).
+- A socket joined the room but the session's `roomCodes` does not list it →
+  the reverse: the socket transport allows, HTTP rejects.
+
+In development (`logging.devLogs`) the HTTP handler warns when the membership
+check passed on `roomCodes` while the caller has no socket in the room it
+targets — that is the first case above, caught before you wonder why your own
+tab never updates.
+
+Unrelated to membership, and now transport-independent: an empty target room
+is `sync.noReceiversFound` on both transports (before 0.10.0 the HTTP path
+returned `success` with zero recipients). Recipients are resolved BEFORE the
+`_server` handler runs, so when that error — or a recipient-lookup failure
+(`sync.serverExecutionFailed` from an adapter request timeout) — is returned,
+nothing has been persisted and a retry is safe. Why that order: the lookup can
+fail on its own (an instance on the same adapter key that does not answer), and
+an error reported after the mutation was saved made the caller retry a change
+that had already happened. See `packages/sync/docs/room-fanout.md` §1 and §8
+and `packages/sync/docs/error-states.md`.
 
 ## Creating a Sync Event
 

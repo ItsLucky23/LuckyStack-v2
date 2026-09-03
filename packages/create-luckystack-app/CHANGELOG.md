@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-09-03
+
+### Fixed
+
+- **The four scaffold locales carry every `sync.*` error code the framework can emit.** `sync.receiverNotAllowed` and `sync.notRoomMember` (403, both transports) were missing — a user saw the literal key on screen, because `translate()` renders a missing key as the key — and so were `invalidVersion`, `failedRequest`, `requestTimeout`, `disabled` and `devToolsUnavailable`. A test in `@luckystack/sync` now holds `nl`/`en`/`de`/`fr` in parity with the exported `SYNC_ERROR_CODES`, so the list cannot grow without the scaffold following.
+
 ## [0.9.1] - 2026-08-29
 
 ### Fixed

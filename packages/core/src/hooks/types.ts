@@ -475,11 +475,13 @@ export interface ApiAuthRejectedPayload {
 //?     `serverOutput`. Useful when no `_client` file is present and `serverOutput`
 //?     contains PII that should not reach every room member verbatim.
 //?
-//? NOTE: `recipientUserId` is null on the hot path to avoid a session read per
-//? recipient. Opt in to resolution by registering a `resolveRecipientUser`
-//? function in your hook registration (the framework will call it and populate
-//? the field before dispatching). When no resolver is registered the field stays
-//? null and the hook must derive the user from `recipientSocketId` itself if needed.
+//? NOTE: `recipientUserId` is ALWAYS null — resolving it would cost a session
+//? read per recipient on the hot path, and there is no opt-in resolver (an
+//? earlier version of this comment promised a `resolveRecipientUser` option
+//? that never existed). The fan-out loop already knows each recipient's session
+//? TOKEN, so it is passed as `recipientToken`; a handler that needs the user
+//? reads the session by that token itself, and only for the recipients it cares
+//? about.
 export interface PreSyncRecipientPayload {
   /** Resolved route name (`sync/board/moveCard/v1`). */
   routeName: string;
@@ -488,9 +490,14 @@ export interface PreSyncRecipientPayload {
   /** Socket id of THIS recipient. */
   recipientSocketId: string;
   /**
-   * Recipient's session user id.  `null` by default (avoids a Redis read per
-   * recipient on the hot path).  Populated when the consumer registers a
-   * `resolveRecipientUser` function via `registerHookHandler` options.
+   * Session token of THIS recipient, as read from its socket handshake — the
+   * same value the fan-out uses for `ignoreSelf`. `null` for an anonymous
+   * socket. Cheap: no session read is performed to produce it.
+   */
+  recipientToken: string | null;
+  /**
+   * Always `null`. Kept on the payload for backward compatibility; resolve the
+   * user from `recipientToken` when you need it.
    */
   recipientUserId: string | null;
   /** The server-validated output about to be sent. */

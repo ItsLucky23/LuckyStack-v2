@@ -15,6 +15,7 @@ import type { EslintRule } from './internal/ruleTypes.js';
 
 import noArbitraryTailwindColor from './rules/no-arbitrary-tailwind-color.js';
 import noDirectPrismaImportInComponents from './rules/no-direct-prisma-import-in-components.js';
+import noLocalSocketEnumeration from './rules/no-local-socket-enumeration.js';
 import noRawFetchInSrc from './rules/no-raw-fetch-in-src.js';
 import noRawTryCatch from './rules/no-raw-try-catch.js';
 import noUnsafeApiWrappers from './rules/no-unsafe-api-wrappers.js';
@@ -28,6 +29,7 @@ const allRules: Record<string, EslintRule> = {
   'no-raw-fetch-in-src': noRawFetchInSrc,
   'no-unsafe-api-wrappers': noUnsafeApiWrappers,
   'no-unsafe-sync-wrappers': noUnsafeSyncWrappers,
+  'no-local-socket-enumeration': noLocalSocketEnumeration,
   'prefer-luckystack-dropdown': preferLuckystackDropdown,
   'prefer-luckystack-confirm': preferLuckystackConfirm,
   'prefer-luckystack-notify': preferLuckystackNotify,
@@ -48,6 +50,8 @@ const ruleSeverities: Record<string, Linter.RuleSeverity> = {
   'luckystack/no-raw-fetch-in-src': hasApi || hasCore ? 'error' : 'off',
   'luckystack/no-unsafe-api-wrappers': hasApi ? 'error' : 'off',
   'luckystack/no-unsafe-sync-wrappers': hasSync ? 'error' : 'off',
+  // Local Socket.io maps (`.adapter.rooms`, iterating `io.sockets.sockets`) only see one instance.
+  'luckystack/no-local-socket-enumeration': hasCore || hasSync ? 'error' : 'off',
 
   // Warnings — enabled by default per framework owner's preference.
   'luckystack/prefer-luckystack-dropdown': 'warn',

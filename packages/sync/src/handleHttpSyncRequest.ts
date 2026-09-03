@@ -4,7 +4,7 @@
 //? values. (The former `user!` assertion at the `validateRequest` call site was
 //? removed once core made `validateRequest` null-safe — CORE-06.)
 /* eslint-disable @typescript-eslint/no-unnecessary-condition, @typescript-eslint/restrict-template-expressions, @typescript-eslint/prefer-nullish-coalescing, @typescript-eslint/no-non-null-assertion, eqeqeq */
-import type { BaseSessionLayout as SessionLayout, ErrorFormatter, PostSyncFanoutPayload, PostSyncExecutePayload } from '@luckystack/core';
+import type { BaseSessionLayout as SessionLayout, ErrorFormatter, PostSyncFanoutPayload, PostSyncExecutePayload, RoomSocket } from '@luckystack/core';
 import {
   readSession,
   getProjectConfig,
@@ -457,7 +457,7 @@ async function stageRunAuthorizeHooks(
   return null;
 }
 
-// ─── Stage 5: input validation ────────────────────────────────────────────────
+// ─── Stage 6: input validation ────────────────────────────────────────────────
 
 //? Returns an error response when preSyncValidate stops or input validation
 //? fails, or null when validation passes.
@@ -542,7 +542,7 @@ async function stageValidateInput(
   return null;
 }
 
-// ─── Stage 6: execute the server handler ─────────────────────────────────────
+// ─── Stage 7: execute the server handler ─────────────────────────────────────
 
 //? Returns the server output object on success, or an error response on
 //? failure. The payload reference is shared so span-pinning subscribers work.
@@ -665,20 +665,95 @@ async function stageExecuteServer(
   return { serverOutput: serverSyncResult };
 }
 
-// ─── Stage 7: fanout to room members ─────────────────────────────────────────
+// ─── Stage 5: resolve recipients (before anything is persisted) ──────────────
 
-//? Fans the serverOutput out to every connected socket in the receiver room,
+//? Cross-instance recipient list (RemoteSocket[]) spanning every backend on
+//? the shared Redis adapter, so an HTTP-triggered sync still fans out to room
+//? members on other instances. Branch off the NORMALIZED receiver so
+//? authorize, branch, and fetch all key off the same value (the auth check
+//? used `normalizedReceiver`); using the raw `receiver` here diverged from the
+//? socket handler and was a latent inversion hazard. Route through the core
+//? room-name formatter (PRESENCE-1) so a non-identity
+//? `registerRoomNameFormatter` targets the same physical room sockets joined.
+//?
+//? @adr 0063
+//? Runs BEFORE `_server`, same as the socket handler (`resolveSyncRecipients`):
+//? this query can fail (an adapter `requestsTimeout`) or come back empty, and
+//? when that happened after the mutation was persisted the caller was told
+//? `error` about a change that had been saved — a retry applied it twice. Every
+//? error on this path is now a pre-commit rejection, so a retry is safe.
+async function stageResolveRecipients(
+  resolvedName: string,
+  ctx: Pick<HttpSyncContext, 'normalizedReceiver' | 'user' | 'buildSyncError' | 'preferredLocale'>,
+): Promise<{ sockets: RoomSocket[]; error?: never } | { error: HttpSyncResponse; sockets?: never }> {
+  const { normalizedReceiver, user, buildSyncError, preferredLocale } = ctx;
+  const ioInstance = getIoInstance();
+  const physicalReceiver = normalizedReceiver === 'all' ? 'all' : formatRoomName(normalizedReceiver, { purpose: 'broadcast', userId: user?.id ?? null });
+  const sockets = physicalReceiver === 'all'
+    ? await ioInstance!.fetchSockets()
+    : await ioInstance!.in(physicalReceiver).fetchSockets();
+
+  //? @adr 0058
+  //? Transport parity (DEV-376): an empty room is an ERROR over HTTP too. Until
+  //? 0.10.0 this path treated zero recipients as "normal over the HTTP fallback"
+  //? and answered `success`, so every room bug — wrong room name, socket not
+  //? (re)joined, a formatter mismatch between join and send — was
+  //? indistinguishable from a delivered broadcast on precisely the transport
+  //? built for multi-instance. Same code, same status and same position as
+  //? `handleSyncRequest`: before `_server` runs, so nothing has been persisted.
+  if (sockets.length === 0) {
+    if (shouldLogDev()) {
+      getLogger().warn('http sync: no sockets found for receiver', { receiver: normalizedReceiver, sync: resolvedName, transport: 'http' });
+    }
+    return {
+      error: buildSyncError({
+        response: { status: 'error', errorCode: 'sync.noReceiversFound', httpStatus: 404 },
+        preferred: preferredLocale,
+        userLanguage: user?.language,
+      }),
+    };
+  }
+  return { sockets };
+}
+
+// ─── Stage 8: fanout to room members ─────────────────────────────────────────
+
+//? Fans the serverOutput out to every recipient resolved in stage 5,
 //? respecting `ignoreSelf`, per-recipient hooks, and optional `_client` handlers.
 async function stageFanout(
   resolvedName: string,
   callbackName: string,
   serverOutput: Record<string, unknown>,
+  sockets: RoomSocket[],
   syncObject: Record<string, unknown>,
   functionsObject: Record<string, unknown>,
   ctx: Pick<HttpSyncContext, 'data' | 'normalizedReceiver' | 'token' | 'ignoreSelf' | 'user' | 'buildSyncError' | 'preferredLocale'>,
 ): Promise<HttpSyncResponse | null> {
   const { data, normalizedReceiver, token, ignoreSelf, user, buildSyncError, preferredLocale } = ctx;
-  const ioInstance = getIoInstance();
+
+  //? @adr 0059
+  //? Membership is LOGICAL over HTTP: `stageAuthorizeReceiver` accepted this
+  //? request on the session's persisted `roomCodes` because there is no
+  //? originator socket to test physically (see docs/ARCHITECTURE_SYNC.md,
+  //? "Room membership is transport-specific"). So a caller can pass while none
+  //? of its sockets is in the room — typical right after a reconnect that has
+  //? not re-joined yet. The fan-out then goes to a room the caller is not in,
+  //? and `success` does not mean "I will receive this". The recipient list is
+  //? already in hand, so say so in dev instead of leaving it to be inferred
+  //? from user behaviour.
+  if (
+    shouldLogDev()
+    && token
+    && getProjectConfig().sync.requireRoomMembership
+    && normalizedReceiver !== 'all'
+    && normalizedReceiver !== token
+    && !sockets.some((recipient) => extractTokenFromSocket(recipient) === token)
+  ) {
+    getLogger().warn(
+      `http sync: ${resolvedName} was authorized on the session's roomCodes, but the caller has no socket in "${normalizedReceiver}" — it will not receive this fan-out`,
+      { sync: resolvedName, receiver: normalizedReceiver, transport: 'http' },
+    );
+  }
 
   //? Single payload reference reused by pre/post — span pinning in
   //? `@luckystack/error-tracking` uses WeakMap on this object.
@@ -709,26 +784,6 @@ async function stageFanout(
     });
   }
 
-  //? Over the HTTP/SSE fallback the caller IS the originator, so a receiver
-  //? room with no connected sockets (no peers online, or the originator used
-  //? HTTP instead of a websocket) is normal — NOT an error. Fall back to an
-  //? empty set so the fanout loop simply runs zero times; the server handler
-  //? already ran and its `serverOutput` is the meaningful result returned below.
-  //? Cross-instance recipient list (RemoteSocket[]) spanning every backend on
-  //? the shared Redis adapter, so an HTTP-triggered sync still fans out to room
-  //? members on other instances. Empty array = no peers online, which is normal
-  //? over the HTTP fallback (the loop just runs zero times).
-  //? Branch off the NORMALIZED receiver so authorize, branch, and fetch all
-  //? key off the same value (the auth check above used `normalizedReceiver`).
-  //? Using the raw `receiver` here diverged from the socket handler and was a
-  //? latent inversion hazard if a future edit changed which value gated auth.
-  //? Route through the core room-name formatter (PRESENCE-1) so a non-identity
-  //? `registerRoomNameFormatter` targets the same physical room sockets joined.
-  const physicalReceiver = normalizedReceiver === 'all' ? 'all' : formatRoomName(normalizedReceiver, { purpose: 'broadcast', userId: user?.id ?? null });
-  const sockets = physicalReceiver === 'all'
-    ? await ioInstance!.fetchSockets()
-    : await ioInstance!.in(physicalReceiver).fetchSockets();
-
   let recipientCount = 0;
   //? Yield to the event loop periodically so a giant `receiver: 'all'` fanout
   //? doesn't starve other requests (parity with the socket handler). Tunables
@@ -752,12 +807,14 @@ async function stageFanout(
 
     //? SYNC-22 — per-recipient fanout hook (parity with the socket handler).
     //? A stop signal SKIPS just this recipient (loop continues; not counted).
-    //? `recipientUserId` is null on the hot path (no per-recipient session
-    //? read); a handler can derive it from `recipientSocketId` / `receiver`.
+    //? `recipientUserId` is always null (no per-recipient session read on the
+    //? hot path); the recipient's TOKEN is already known here, so it is passed
+    //? along and a handler that needs the user reads the session by it.
     const preRecipientResult = await dispatchHook('preSyncRecipient', {
       routeName: resolvedName,
       receiver: normalizedReceiver,
       recipientSocketId: tempSocket.id,
+      recipientToken: tempToken,
       recipientUserId: null,
       serverOutput,
     });
@@ -957,20 +1014,25 @@ async function handleHttpSyncRequestScoped({
     const authorizeHookError = await stageRunAuthorizeHooks(resolvedName, ctx);
     if (authorizeHookError) return authorizeHookError;
 
+    // Stage 5: resolve recipients — before the server handler persists anything.
+    const recipientsResult = await stageResolveRecipients(resolvedName, ctx);
+    if (recipientsResult.error) return recipientsResult.error;
+    const { sockets } = recipientsResult;
+
     let serverOutput: Record<string, unknown> = {};
     if (serverSyncEntry) {
-      // Stage 5: input validation.
+      // Stage 6: input validation.
       const validationError = await stageValidateInput(resolvedName, serverSyncEntry, ctx);
       if (validationError) return validationError;
 
-      // Stage 6: execute the server handler.
+      // Stage 7: execute the server handler.
       const executeResult = await stageExecuteServer(resolvedName, serverSyncEntry, functionsObject, ctx);
       if (executeResult.error) return executeResult.error;
       serverOutput = executeResult.serverOutput;
     }
 
-    // Stage 7: fanout to room members.
-    const fanoutError = await stageFanout(resolvedName, callbackName, serverOutput, syncObject, functionsObject, ctx);
+    // Stage 8: fanout to room members.
+    const fanoutError = await stageFanout(resolvedName, callbackName, serverOutput, sockets, syncObject, functionsObject, ctx);
     if (fanoutError) return fanoutError;
 
     if (shouldLogDev()) {

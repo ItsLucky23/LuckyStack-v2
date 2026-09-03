@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 //? S22 / S13 — transport behavior tests for the two sync entry points. The
 //? entire `@luckystack/core` surface is mocked so the handlers run in isolation
@@ -56,6 +56,9 @@ const state = vi.hoisted((): {
   };
 });
 
+//? One shared logger double so a test can assert on dev warnings.
+const logger = vi.hoisted(() => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }));
+
 const tryCatch = vi.hoisted(() =>
   vi.fn((fn: () => Promise<unknown>): Promise<[unknown, unknown]> =>
     fn().then(
@@ -84,7 +87,7 @@ vi.mock("@luckystack/core", () => {
     })),
     checkRateLimit: vi.fn(() => Promise.resolve({ allowed: true, resetIn: 0 })),
     dispatchHook: vi.fn(() => Promise.resolve({ stopped: false as const })),
-    getLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
+    getLogger: () => logger,
     extractTokenFromSocket: vi.fn(() => null),
     extractLanguageFromHeader: vi.fn(() => null),
     normalizeErrorResponse: vi.fn(({ response }: { response: Record<string, unknown> }) => ({
@@ -417,7 +420,9 @@ describe("strict receiver-auth default — anonymous / non-member denied", () =>
   });
 
   it("HTTP: a session member of the room is allowed through", async () => {
-    const io = makeIoInstance([]);
+    //? One recipient: since 0.10.0 an EMPTY room is `sync.noReceiversFound` on
+    //? HTTP too (see the fan-out parity block below); this test is about auth.
+    const io = makeIoInstance([makeRecipientSocket()]);
     (mockedCore.getIoInstance as ReturnType<typeof vi.fn>).mockReturnValue(io);
     state.session = { id: "u1", roomCodes: ["chat-room"] };
 
@@ -431,5 +436,212 @@ describe("strict receiver-auth default — anonymous / non-member denied", () =>
 
     expect(result.status).toBe("success");
     expect(result.result).toEqual({ status: "success", message: "ok" });
+  });
+});
+
+// ─── 0.10.0 — HTTP fan-out parity, membership warning, recipientToken ────────
+
+describe("0.10.0 — HTTP fan-out parity with the socket transport", () => {
+  const SERVER_OUTPUT = { status: "success" as const, message: "ok" };
+
+  beforeEach(() => {
+    state.syncObject = { "sync/chat/send/v1_server": serverEntry(SERVER_OUTPUT) };
+    state.session = { id: "u1", roomCodes: ["chat-room"] };
+    (mockedCore.extractTokenFromSocket as ReturnType<typeof vi.fn>).mockImplementation(
+      (socket: { id?: string }) => (socket.id === "recipient-1" ? "tokenB" : null),
+    );
+  });
+
+  afterEach(() => {
+    state.config.logging.devLogs = false;
+    (mockedCore.extractTokenFromSocket as ReturnType<typeof vi.fn>).mockImplementation(() => null);
+  });
+
+  const hookNames = (): string[] =>
+    (mockedCore.dispatchHook as ReturnType<typeof vi.fn>).mock.calls.map((call) => String(call[0]));
+
+  it("HTTP: an EMPTY room is sync.noReceiversFound (404), before the _server runs and before preSyncFanout", async () => {
+    const io = makeIoInstance([]);
+    (mockedCore.getIoInstance as ReturnType<typeof vi.fn>).mockReturnValue(io);
+    const entry = serverEntry(SERVER_OUTPUT);
+    state.syncObject = { "sync/chat/send/v1_server": entry };
+
+    const result = await handleHttpSyncRequest({
+      name: "sync/chat/send/v1",
+      data: {},
+      receiver: "chat-room",
+      token: "tokenA",
+      requesterIp: "127.0.0.1",
+    });
+
+    expect(result.status).toBe("error");
+    expect(result.errorCode).toBe("sync.noReceiversFound");
+    expect(result.httpStatus).toBe(404);
+    //? Recipients are resolved BEFORE the server handler (parity with socket), so
+    //? nothing was persisted and the error is a true pre-commit rejection.
+    expect(entry.main).not.toHaveBeenCalled();
+    //? Same position as the socket handler: before the fan-out hooks.
+    expect(hookNames()).not.toContain("preSyncFanout");
+    expect(hookNames()).not.toContain("postSyncFanout");
+  });
+
+  it("HTTP: dev-warns when membership passed on roomCodes but the caller has no socket in the room", async () => {
+    state.config.logging.devLogs = true;
+    const io = makeIoInstance([makeRecipientSocket()]);
+    (mockedCore.getIoInstance as ReturnType<typeof vi.fn>).mockReturnValue(io);
+
+    const result = await handleHttpSyncRequest({
+      name: "sync/chat/send/v1",
+      data: {},
+      receiver: "chat-room",
+      token: "tokenA",
+      requesterIp: "127.0.0.1",
+    });
+
+    expect(result.status).toBe("success");
+    const warning = logger.warn.mock.calls.find((call) => String(call[0]).includes("no socket in"));
+    expect(warning).toBeDefined();
+    expect(String(warning?.[0])).toContain('"chat-room"');
+  });
+
+  it("HTTP: no membership warning when one of the caller's own sockets is in the room", async () => {
+    state.config.logging.devLogs = true;
+    (mockedCore.extractTokenFromSocket as ReturnType<typeof vi.fn>).mockImplementation(() => "tokenA");
+    const io = makeIoInstance([makeRecipientSocket()]);
+    (mockedCore.getIoInstance as ReturnType<typeof vi.fn>).mockReturnValue(io);
+
+    await handleHttpSyncRequest({
+      name: "sync/chat/send/v1",
+      data: {},
+      receiver: "chat-room",
+      token: "tokenA",
+      requesterIp: "127.0.0.1",
+    });
+
+    expect(logger.warn.mock.calls.some((call) => String(call[0]).includes("no socket in"))).toBe(false);
+  });
+
+  it("HTTP + socket: preSyncRecipient carries the recipient's token; recipientUserId stays null", async () => {
+    const io = makeIoInstance([makeRecipientSocket()]);
+    (mockedCore.getIoInstance as ReturnType<typeof vi.fn>).mockReturnValue(io);
+
+    await handleHttpSyncRequest({
+      name: "sync/chat/send/v1",
+      data: {},
+      receiver: "chat-room",
+      token: "tokenA",
+      requesterIp: "127.0.0.1",
+    });
+
+    const originator = makeOriginatorSocket("sock-A", ["chat-room"]);
+    await handleSyncRequest({
+      msg: { name: "sync/chat/send/v1", data: {}, cb: "chat/send/v1", receiver: "chat-room", responseIndex: 1 },
+      socket: asSocketArg(originator),
+      token: "tokenA",
+    });
+
+    const recipientPayloads = (mockedCore.dispatchHook as ReturnType<typeof vi.fn>).mock.calls
+      .filter((call) => call[0] === "preSyncRecipient")
+      .map((call) => call[1] as { recipientSocketId: string; recipientToken: string | null; recipientUserId: string | null });
+    expect(recipientPayloads).toHaveLength(2);
+    for (const payload of recipientPayloads) {
+      expect(payload.recipientSocketId).toBe("recipient-1");
+      expect(payload.recipientToken).toBe("tokenB");
+      expect(payload.recipientUserId).toBeNull();
+    }
+  });
+});
+
+// ─── Recipients are resolved BEFORE the server handler persists anything ──────
+//? A `fetchSockets()` that fails (the Redis adapter's `requestsTimeout` when an
+//? instance on the channel does not answer) or comes back empty used to surface
+//? AFTER `_server` had run: the caller was told `error` about a mutation that
+//? had been saved, and a retry applied it twice. Both transports now resolve
+//? the recipients first, so every error on this path is a pre-commit rejection.
+describe("recipients resolve before _server — a fan-out failure never masks a committed mutation", () => {
+  const SERVER_OUTPUT = { status: "success" as const, message: "ok" };
+  const FETCH_TIMEOUT = new Error("timeout reached while waiting for fetchSockets response");
+
+  const makeTimingOutIoInstance = () => ({
+    fetchSockets: vi.fn(() => Promise.reject(FETCH_TIMEOUT)),
+    in: vi.fn(() => ({ fetchSockets: vi.fn(() => Promise.reject(FETCH_TIMEOUT)) })),
+  });
+
+  let entry: ReturnType<typeof serverEntry>;
+
+  beforeEach(() => {
+    entry = serverEntry(SERVER_OUTPUT);
+    state.syncObject = { "sync/chat/send/v1_server": entry };
+    state.session = { id: "u1", roomCodes: ["chat-room"] };
+  });
+
+  it("socket: a fetchSockets timeout is sync.serverExecutionFailed and the _server handler never ran", async () => {
+    (mockedCore.getIoInstance as ReturnType<typeof vi.fn>).mockReturnValue(makeTimingOutIoInstance());
+    const originator = makeOriginatorSocket("sock-A", ["chat-room"]);
+
+    await handleSyncRequest({
+      msg: { name: "sync/chat/send/v1", data: {}, cb: "chat/send/v1", receiver: "chat-room", responseIndex: 1 },
+      socket: asSocketArg(originator),
+      token: "tokenA",
+    });
+
+    const ack = originator._emits.find((e) => e.event === "sync-1");
+    expect(ack?.payload).toMatchObject({ status: "error", errorCode: "sync.serverExecutionFailed" });
+    expect(entry.main).not.toHaveBeenCalled();
+  });
+
+  it("socket: an EMPTY room is sync.noReceiversFound and the _server handler never ran", async () => {
+    (mockedCore.getIoInstance as ReturnType<typeof vi.fn>).mockReturnValue(makeIoInstance([]));
+    const originator = makeOriginatorSocket("sock-A", ["chat-room"]);
+
+    await handleSyncRequest({
+      msg: { name: "sync/chat/send/v1", data: {}, cb: "chat/send/v1", receiver: "chat-room", responseIndex: 1 },
+      socket: asSocketArg(originator),
+      token: "tokenA",
+    });
+
+    const ack = originator._emits.find((e) => e.event === "sync-1");
+    expect(ack?.payload).toMatchObject({ status: "error", errorCode: "sync.noReceiversFound" });
+    expect(entry.main).not.toHaveBeenCalled();
+  });
+
+  it("HTTP: a fetchSockets timeout is sync.serverExecutionFailed and the _server handler never ran", async () => {
+    (mockedCore.getIoInstance as ReturnType<typeof vi.fn>).mockReturnValue(makeTimingOutIoInstance());
+
+    const result = await handleHttpSyncRequest({
+      name: "sync/chat/send/v1",
+      data: {},
+      receiver: "chat-room",
+      token: "tokenA",
+      requesterIp: "127.0.0.1",
+    });
+
+    expect(result.status).toBe("error");
+    expect(result.errorCode).toBe("sync.serverExecutionFailed");
+    expect(entry.main).not.toHaveBeenCalled();
+  });
+
+  it("both transports: with recipients present the _server handler runs exactly once and the originator gets success", async () => {
+    (mockedCore.getIoInstance as ReturnType<typeof vi.fn>).mockReturnValue(makeIoInstance([makeRecipientSocket()]));
+    const originator = makeOriginatorSocket("sock-A", ["chat-room"]);
+
+    await handleSyncRequest({
+      msg: { name: "sync/chat/send/v1", data: {}, cb: "chat/send/v1", receiver: "chat-room", responseIndex: 1 },
+      socket: asSocketArg(originator),
+      token: "tokenA",
+    });
+    const ack = originator._emits.find((e) => e.event === "sync-1");
+    expect(ack?.payload).toMatchObject({ status: "success" });
+    expect(entry.main).toHaveBeenCalledTimes(1);
+
+    const result = await handleHttpSyncRequest({
+      name: "sync/chat/send/v1",
+      data: {},
+      receiver: "chat-room",
+      token: "tokenA",
+      requesterIp: "127.0.0.1",
+    });
+    expect(result.status).toBe("success");
+    expect(entry.main).toHaveBeenCalledTimes(2);
   });
 });

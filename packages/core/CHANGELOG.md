@@ -5,7 +5,24 @@ All notable changes to `@luckystack/core` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.10.0] - 2026-09-03
+
+### Added
+
+- **`resolveSocketAdapterKey(): string`** — the derived adapter key (see Changed below), exported so a consumer that wires its own adapter (or a probe) can join the framework's cluster by construction instead of by copying a string.
+- **`getRoomSockets(room, { userId? })`** — the one short path to "who is in this room". Routes the LOGICAL room code through the room-name formatter under the canonical `'broadcast'` purpose and calls `io.in(...).fetchSockets()`, so the result spans every instance behind the Redis adapter; `'all'` returns every socket everywhere; throws when no Socket.io server is registered (a silent `[]` is the failure class it exists to remove). Added because a consumer hand-rolled this three times and got it wrong three times — a per-instance map, the raw name where sockets joined the formatted one, the sender's id for a shared room (DEV-376).
+- **`getIoInstance({ raw: true })` + a dev-only guard.** Outside production `getIoInstance()` returns a view of the server that throws `LocalSocketEnumerationError` on `sockets.adapter.rooms`, `sockets.adapter.sids` and on ENUMERATING `sockets.sockets` (`values` / `keys` / `entries` / `forEach` / `size` / `for…of` / spread); `sockets.sockets.get(id)` stays allowed. The lint rule below catches what is written, this catches what is computed. Production always gets the raw server; framework internals and the Redis adapter never see the guard.
+- **ESLint rule `luckystack/no-local-socket-enumeration`** (`@luckystack/core/eslint`, on when `@luckystack/core` or `@luckystack/sync` is installed): the same three shapes as a lint error, with the fix named in the message. Opt out per site with `// eslint-disable-next-line luckystack/no-local-socket-enumeration -- <why>`.
+- **`PreSyncRecipientPayload.recipientToken`** — the recipient's session token (null for an anonymous socket). The fan-out loop already had it; a per-recipient guard no longer needs a socket lookup plus a session read to learn who it is talking to.
+
+### Fixed
+
+- The `PreSyncRecipientPayload` docs promised a `resolveRecipientUser` option on `registerHookHandler` that never existed. `recipientUserId` is always `null`; resolve the user from `recipientToken` when you need it.
+
+### Changed
+
+- **The Socket.io Redis-adapter key is derived per environment.** `attachSocketRedisAdapter` now passes `key: resolveSocketAdapterKey()` (`<PROJECT_NAME>:<LUCKYSTACK_ENV | NODE_ENV>:socket.io`) to `@socket.io/redis-adapter` unless `adapterOptions.key` is given; before, every LuckyStack server used upstream's fixed default `socket.io`. The key names the adapter's pub/sub channels, so two deployments that merely shared a Redis server (a dev laptop tunnelled into the staging Redis) were one Socket.io cluster: staging's broadcasts reached the developer's sockets and staging's `fetchSockets()` waited on a sleeping laptop until the request timeout. Instances of ONE environment (same `PROJECT_NAME`, same `LUCKYSTACK_ENV`) stay together. **Rollout note:** during a rolling deploy of this version, old-key and new-key instances do not see each other until the rollout completes — invisible on a single replica. Sessions and other Redis keys are still namespaced by `PROJECT_NAME` only; the adapter key isolates the socket cluster, not the data.
+- `RoomNameFormatterContext.userId` is documented as CONTEXT ONLY: under `'broadcast'` the framework passes the joiner on join/rejoin, the SENDER on fan-out and the originator on `broadcastStream`, so for a shared room the value differs per call. A formatter must not fold it into a content room's physical name. No behaviour change — the contract was implicit and unwritten.
 
 ## [0.8.7] - 2026-08-18
 

@@ -156,16 +156,17 @@ incoming msg (Socket.io 'sync' event)
         validateRequest(auth.additional)   -> auth.forbidden
  8. dispatchHook('preSyncAuthorize')       -> stop signal becomes error envelope
  9. applySyncRateLimits()                  -> sync.rateLimitExceeded
-10. If _server exists:
+10. Resolve recipients (cross-instance, both transports, BEFORE anything is persisted — see ./room-fanout.md §1):
+        receiver === 'all'  -> every socket on every instance (fetchSockets())
+        otherwise           -> formatRoomName(receiver, 'broadcast') -> io.in(room).fetchSockets()
+        fetchSockets throws -> sync.serverExecutionFailed (adapter request timeout; nothing persisted)
+        empty list          -> sync.noReceiversFound (nothing persisted)
+11. If _server exists:
         validateInputByType(clientInput)   -> sync.invalidInputType
         tryCatch(serverMain(...))          -> sync.serverExecutionFailed
         status !== 'success' | 'error'     -> sync.invalidServerResponse
         status === 'error'                 -> server's errorCode (normalized)
         status === 'success'               -> serverOutput = result (minus status)
-11. Resolve recipients:
-        receiver === 'all'  -> io.sockets.sockets (Map of every connected socket)
-        otherwise           -> io.sockets.adapter.rooms.get(receiver) (Set of IDs)
-        no sockets found    -> sync.noReceiversFound
 12. dispatchHook('preSyncFanout')          -> stop signal becomes error envelope
 13. Per-recipient loop (with periodic event-loop yield):
         if (ignoreSelf && token === recipientToken) continue
@@ -201,7 +202,8 @@ Per-recipient failures inside step 13 do **not** abort the fanout — every othe
 | Server execution | Thrown | `sync.serverExecutionFailed` | originator ack |
 | Server return | `status: 'error'` from `_server` | route-supplied `errorCode` | originator ack |
 | Server return | Anything other than `success`/`error` | `sync.invalidServerResponse` | originator ack |
-| Fanout | No sockets in room | `sync.noReceiversFound` | originator ack |
+| Recipients (before `_server`) | No sockets in room | `sync.noReceiversFound` | originator ack |
+| Recipients (before `_server`) | `fetchSockets()` threw (adapter request timeout) | `sync.serverExecutionFailed` | originator ack |
 | Fanout | `preSyncFanout` stop | hook's `errorCode` | originator ack |
 | Per-recipient | `_client` thrown | `sync.clientExecutionFailed` | that recipient only |
 | Per-recipient | `_client` returned `status: 'error'` | route code or `sync.clientRejected` | that recipient only |
