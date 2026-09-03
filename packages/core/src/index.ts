@@ -6,6 +6,7 @@ export type { DeepPartial } from './configUtils';
 export { createRegistry } from './createRegistry';
 export type { Registry, RegistryOptions } from './createRegistry';
 export { escapeHtml } from './escapeHtml';
+export { ROUTED_DATA_QUERY_KEY, buildRoutedGetUrl } from './routedDataQuery';
 export { ensurePeerDepInstalled, loadPeer } from './peerDeps';
 export type { PeerRequire } from './peerDeps';
 export * from './serviceRoute';

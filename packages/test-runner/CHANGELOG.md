@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.1] - 2026-09-03
+
+### Fixed
+
+- Layer 5: `ctx.callApi(input)` on a `GET` route silently dropped `input`, so the server always saw `data = {}` and any `GET` route with a required field rejected the call with `api.invalidInputType` before `main()` ran. `input` now travels as the `__luckystack_data` query-string value, encoded by the shared `buildRoutedGetUrl` helper from `@luckystack/core` — the same contract the real client sends and the server reads. Non-`GET` routes are unchanged (JSON body).
+
 ## [0.8.5] - 2026-08-17
 
 ### Changed

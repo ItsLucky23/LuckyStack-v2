@@ -8,7 +8,15 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-import { getCsrfConfig, getPrismaClient, getProjectConfig, getSrcDir, tryCatch, tryCatchSync } from '@luckystack/core';
+import {
+  buildRoutedGetUrl,
+  getCsrfConfig,
+  getPrismaClient,
+  getProjectConfig,
+  getSrcDir,
+  tryCatch,
+  tryCatchSync,
+} from '@luckystack/core';
 
 import {
   assertProjectConfigLoader,
@@ -162,7 +170,15 @@ export const discoverCustomTestFiles = (srcDir: string = getSrcDir()): Discovere
 //? test file's `customTests` cases receive a context already bound to the
 //? route the file lives next to, so authors don't repeat `page/name/version`.
 export interface TestContext {
-  /** Invoke the route under test. Page / name / version are baked in. */
+  /**
+   * Invoke the route under test. Page / name / version are baked in.
+   *
+   * `input` travels exactly like the real client sends it: as the JSON body
+   * for POST / PUT / DELETE routes, and as the `__luckystack_data` query-string
+   * value for GET routes (a GET cannot carry a body). Either way the server
+   * validates it as the route's `data`, so a GET route with required fields
+   * receives them.
+   */
   //? Two type parameters by design — `TInput` lets callers document the
   //? typed shape they're sending even though we don't validate against it
   //? here (the route's own runtime validation does). The ESLint rule
@@ -316,7 +332,8 @@ const parseResponse = async (response: Response, state: TestSessionState): Promi
   return parsed;
 };
 
-const buildCallApi = (
+/** @internal Exported for the unit test only; consumers use `TestContext.callApi`. */
+export const buildCallApi = (
   baseUrl: string,
   routePath: string,
   state: TestSessionState,
@@ -328,16 +345,19 @@ const buildCallApi = (
 ): TestContext['callApi'] => {
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- must match TestContext['callApi'] generic signature
   return async <TInput = unknown, TOutput = unknown>(input: TInput): Promise<TOutput> => {
-    const url = `${baseUrl.replace(/\/$/, '')}/api/${routePath}`;
+    const path = `${baseUrl.replace(/\/$/, '')}/api/${routePath}`;
     const headers: Record<string, string> = { 'Content-Type': 'application/json', Origin: new URL(baseUrl).origin };
     if (state.token) headers.Cookie = `${cookieName}=${state.token}`;
     if (state.csrfToken) headers[getCsrfConfig().headerName] = state.csrfToken;
     const controller = new AbortController();
     const timeoutHandle = setTimeout(() => { controller.abort(); }, DEFAULT_CALL_TIMEOUT_MS);
     const init: RequestInit = { method, headers, signal: controller.signal };
-    //? GET / HEAD requests cannot carry a body (fetch throws). Every other
-    //? method sends the JSON payload.
-    if (method !== 'GET' && method !== 'HEAD') init.body = JSON.stringify(input ?? {});
+    //? GET / HEAD requests cannot carry a body (fetch throws), so the payload
+    //? rides the query string under the same reserved key the real client
+    //? uses and the server reads. Every other method sends the JSON body.
+    const bodyless = method === 'GET' || method === 'HEAD';
+    const url = bodyless ? buildRoutedGetUrl(path, input ?? {}) : path;
+    if (!bodyless) init.body = JSON.stringify(input ?? {});
     const [fetchError, response] = await tryCatch(() => fetch(url, init));
     clearTimeout(timeoutHandle);
     if (fetchError || !response) {

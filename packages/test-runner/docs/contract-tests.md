@@ -291,6 +291,7 @@ await runContractTests({
 ## Edge cases and gotchas
 
 - **`GET` endpoints ignore `inputFor`.** The handler still calls `inputFor`, but the body is dropped before `fetch` sees it. Query-string fuzz is not in scope for the contract layer.
+- **Layer 5 (`ctx.callApi`) does NOT drop `GET` input.** Unlike the contract layer above, a custom test's `callApi(input)` on a `GET` route sends `input` as the `__luckystack_data` query-string value — the same encoding the real client uses and the server reads — so a `GET` route with required fields is exercised with real data. Only the contract layer treats `GET` as data-less.
 - **`headers` are merged after `Content-Type: application/json`.** If you pass `Content-Type` yourself you will override the default; the framework parses based on the header so this is intentional.
 - **`baseUrl` trailing slash is normalized once.** `http://localhost/` and `http://localhost` produce identical requests. Embedded `//` further down the path is not collapsed.
 - **`requestTimeoutMs` is per-request, not per-sweep.** A 30-endpoint sweep with the default 5000ms timeout can run for over two minutes if every endpoint stalls. The sweep itself has no overall timeout.

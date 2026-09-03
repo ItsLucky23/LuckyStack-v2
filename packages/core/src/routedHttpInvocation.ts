@@ -1,4 +1,5 @@
 import { httpFetch } from './csrf';
+import { buildRoutedGetUrl } from './routedDataQuery';
 import tryCatch from './tryCatchClient';
 import tryCatchSync from './tryCatchSync';
 import type { HttpMethodLiteral } from './apiMethodMapRegistry';
@@ -127,12 +128,8 @@ const buildRequest = ({
   //? the query string: it lands in access/proxy logs, history and `Referer`.
   //? Sensitive data belongs on a route that declares POST (ARCHITECTURE_HTTP.md).
   if (method === 'GET') {
-    const params = new URLSearchParams();
-    params.set('__luckystack_data', JSON.stringify(data));
-    if (stream) params.set('stream', 'true');
-    const separator = path.includes('?') ? '&' : '?';
     return {
-      url: `${path}${separator}${params.toString()}`,
+      url: buildRoutedGetUrl(path, data, stream ? { stream: 'true' } : undefined),
       init: { method, headers, signal },
     };
   }

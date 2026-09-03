@@ -70,6 +70,7 @@ export { normalizeErrorResponseCore } from './responseNormalizer';
 
 export { getCsrfToken, clearCsrfToken, httpFetch } from './csrf';
 export { invokeRoutedHttp } from './routedHttpInvocation';
+export { ROUTED_DATA_QUERY_KEY, buildRoutedGetUrl } from './routedDataQuery';
 export type {
   RoutedHttpInvocationInput,
   RoutedInvocationFailure,

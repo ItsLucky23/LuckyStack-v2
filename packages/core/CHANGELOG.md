@@ -5,6 +5,12 @@ All notable changes to `@luckystack/core` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.1] - 2026-09-03
+
+### Added
+
+- **`buildRoutedGetUrl(path, data, extraParams?)` + `ROUTED_DATA_QUERY_KEY`** (root and `/client` entry) — the one place that encodes a `GET` payload as the reserved `__luckystack_data` query value. The client's routed-HTTP path already did this inline; it now calls the helper, and `@luckystack/test-runner` 0.10.1 uses the same helper for Layer-5 `ctx.callApi` so the two can no longer drift. No wire-format change.
+
 ## [0.10.0] - 2026-09-03
 
 ### Added
