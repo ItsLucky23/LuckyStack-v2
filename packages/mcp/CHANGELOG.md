@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- `@modelcontextprotocol/sdk` floor raised to `^1.31.0` (GHSA-6qxp-vccf-f47h: below 1.31.0 the SDK's OAuth client could send credentials to an authorization server chosen by the MCP server). Consumers with an older lockfile now resolve a fixed version on their next install.
+
 ## [0.9.0] - 2026-08-28
 
 ### Changed
