@@ -4,7 +4,7 @@
 
 ## What this package does
 
-Generated-type-driven test layers voor LuckyStack APIs. Walkt elke endpoint uit de generated `apiMethodMap` en draait vijf progressive layers: contract smoke (Zod-valid input), auth enforcement, rate-limit, crash-resistance fuzz, en per-route custom tests (`<name>_v<N>.tests.ts` naast `_api/`/`_sync/` sources). Elke layer is independent runnable; `runAllTests` orchestreert alles in volgorde en levert een geaggregeerde summary op. Reporter/fixture/layer-extension registries laten consumers eigen checks plug-in zonder de framework te forken.
+Generated-type-driven test layers voor LuckyStack APIs en sync routes. Walkt elke endpoint uit de generated `apiMethodMap` (plus elke sync route uit `syncMetaMap` wanneer die wordt meegegeven) en draait vijf progressive layers: contract smoke (Zod-valid input), auth enforcement, rate-limit, crash-resistance fuzz, en per-route custom tests (`<name>_v<N>.tests.ts` naast `_api/`/`_sync/` sources). Elke layer is independent runnable; `runAllTests` orchestreert alles in volgorde en levert een geaggregeerde summary op. Reporter/fixture/layer-extension registries laten consumers eigen checks plug-in zonder de framework te forken.
 
 ## When to USE this package
 
@@ -20,17 +20,22 @@ Generated-type-driven test layers voor LuckyStack APIs. Walkt elke endpoint uit 
 - Voor frontend-UI tests — gebruik Playwright/`webapp-testing` skill, deze runner is server-only.
 - Wanneer er geen generated `apiMethodMap` beschikbaar is (project gebruikt geen `@luckystack/devkit`).
 - Wanneer de target server productie is — fuzz/rate-limit layers maken honderden requests en `/_test/reset` bestaat alleen bij exact `NODE_ENV=development|test` plus een verplicht `TEST_RESET_TOKEN`.
-- Voor sync-event testing via de auto-sweep — die walkt momenteel alleen API endpoints, niet de sync map (sync support voor de auto-layers staat op de roadmap maar is nog niet geleverd). Layer 5 (`runCustomTests` / `<name>_v<N>.tests.ts`) ondersteunt al wél sync routes via per-route testfiles naast `_sync/` sources.
+
+Sync routes: de auto-sweep layers dekken ze alleen wanneer `runAllTests` de generated `syncMetaMap` (+ optioneel `syncInputSchemas`) krijgt; zonder `syncMetaMap` logt `runAllTests` een waarschuwing dat sync routes niet geswept worden. Sync probes gaan over Socket.io (de pipeline van echte clients) tenzij het project `routed-http` is of `syncTransport: 'http'` gezet is; de CSRF-layer probet sync altijd over HTTP. Per run één wegwerp-room; met een `authToken` joint de sweep-sessie die room zodat room-membership-enforcement een member ziet.
 
 ## Function Index
 
 | Function / Export | 1-regel | Deep doc |
 |---|---|---|
-| `runAllTests({ apiMethodMap, apiMetaMap, apiInputSchemas, baseUrl, ... })` | Orchestrator: draait contract + auth + rate-limit + fuzz + custom (Layer 5) in volgorde, levert een `RunAllTestsSummary`. | → docs/contract-tests.md |
+| `runAllTests({ apiMethodMap, apiMetaMap, apiInputSchemas, syncMetaMap?, syncInputSchemas?, baseUrl, ... })` | Orchestrator: draait contract + auth + rate-limit + csrf + fuzz + custom (Layer 5) in volgorde, levert een `RunAllTestsSummary` en schrijft die als JSON naar `outputFile`. `filter` wordt vóór de requests toegepast. | → docs/contract-tests.md |
 | `runCustomTests(input)` | Layer 5: draait per-route tests. Direct callers moeten lazy `loadProjectConfig` meegeven; env/secrets resolven vóór test-module imports. `runAllTests` gebruikt een interne already-prepared entrypoint om pointer-reload te voorkomen. | → docs/contract-tests.md |
 | `discoverCustomTestFiles(srcDir?)` | Walker die elke `<name>_v<N>.tests.ts` onder de configured src dir yields. | → docs/contract-tests.md |
 | `logRunAllSummary(summary)` | Pretty-print één `RunAllTestsSummary`. | → docs/extension-hooks.md |
 | `walkEndpoints(apiMethodMap)` | Genereert `EndpointDescriptor[]` uit de generated map | → docs/contract-tests.md |
+| `walkSyncEndpoints(syncMap)` | Zelfde voor sync routes (`syncMetaMap` of `syncMethodMap`); descriptors krijgen `kind: 'sync'` | → docs/contract-tests.md |
+| `sendProbe(input)` / `createHttpProbeTransport(opts?)` / `defaultProbeTransport` | Eén HTTP-probe (GET-payload in de `__luckystack_data` query) / transport die API- en `/sync/*`-routes over HTTP bereikt | → docs/contract-tests.md |
+| `createSocketProbeTransport(opts)` | Transport die sync probes als Socket.io `sync` emit verstuurt | → docs/contract-tests.md |
+| `createSampleInputFor({ apiInputSchemas?, syncInputSchemas?, stringPrefix? })` | `inputFor`-factory: Zod-valid sample per API- of sync-route | → docs/contract-tests.md |
 | `runContractCheck({ endpoint, baseUrl, inputFor?, headers? })` | Single-endpoint contract smoke | → docs/contract-tests.md |
 | `runContractTests({ apiMethodMap, baseUrl, skip?, inputFor?, headers?, onResult? })` | Full sweep contract layer | → docs/contract-tests.md |
 | `runAuthEnforcementCheck({ endpoint, baseUrl, inputFor? })` | Single-endpoint auth check (verwacht 401 zonder token) | → docs/auth-tests.md |
@@ -39,7 +44,7 @@ Generated-type-driven test layers voor LuckyStack APIs. Walkt elke endpoint uit 
 | `runRateLimitTests({ apiMethodMap, apiMetaMap, baseUrl, skip?, inputFor?, headers?, maxRateLimitToTest?, resetBetweenEndpoints?, resetToken?, onResult? })` | Sweep alle `rateLimit: N` endpoints | → docs/rate-limit-tests.md |
 | `runFuzzCheck({ endpoint, baseUrl, headers? })` | Single-endpoint crash-resistance fuzz | → docs/fuzz-tests.md |
 | `runFuzzTests({ apiMethodMap, baseUrl, skip?, headers?, onResult? })` | Sweep fuzz layer (nightly CI) | → docs/fuzz-tests.md |
-| `resetServerState({ baseUrl, token? })` | POST naar `/_test/reset` om rate limits + standaard Redis-sessienamespaces te wissen; niet app-DB/custom adapters | → docs/rate-limit-tests.md |
+| `resetServerState({ baseUrl, token?, only? })` | POST naar `/_test/reset`. Zonder `only` wist hij rate limits + standaard Redis-sessienamespaces; met `only` alleen de genoemde targets (de runner stuurt altijd `only: ['rateLimits']`). Nooit app-DB/custom adapters | → docs/rate-limit-tests.md |
 | `resolveTestBaseUrl({ cwd?, fallbackUrl? })` | Resolves `TEST_BASE_URL` → actually-bound dev port advertisement → caller fallback, so an auto-hop does not create false connection failures. | → docs/contract-tests.md |
 | `resolveTestEnvironment({ loadProjectConfig? })` | Laadt `.env`-lagen en resolveert optionele secret-manager-pointers in het testproces vóór DB/Redis-backed Layer-5 modules importeren. | → docs/contract-tests.md |
 | `sampleSchemaInput(schema, options?)` | Genereert Zod-valid sample payload uit een schema. `options.stringPrefix` tagt UNCONSTRAINED strings (finding #98) — format/checked strings blijven ongeprefixt zodat ze valid blijven. | → docs/contract-tests.md |
@@ -53,7 +58,10 @@ Generated-type-driven test layers voor LuckyStack APIs. Walkt elke endpoint uit 
 | `registerTestReporter(reporter)` | Plug-in onResult/onSummary/webhookUrl callbacks | → docs/extension-hooks.md |
 | `getTestReporter()` | Lees actieve reporter callbacks | → docs/extension-hooks.md |
 | `resetTestExtensionsForTests()` | Clear alle registries (alleen voor interne tests) | → docs/extension-hooks.md |
-| Type: `EndpointDescriptor` | `{ page, name, version, method, fullPath }` | → docs/contract-tests.md |
+| Type: `EndpointDescriptor` | `{ page, name, version, method, fullPath, kind? }` — `kind` ontbreekt = `'api'` | → docs/contract-tests.md |
+| Type: `SyncMetaMap` / `SyncMetaEntry` | Spiegel van de generated `syncMetaMap` (auth + rateLimit per sync route) | → docs/contract-tests.md |
+| Type: `ProbeTransport` / `ProbeTransportRequest` / `ProbeRequestInput` / `ProbeResponse` / `HttpProbeTransportOptions` / `SocketProbeTransportOptions` | Probe-transport contract | → docs/contract-tests.md |
+| Type: `InputSchemaMap` / `CreateSampleInputForOptions` | Inputs voor `createSampleInputFor` | → docs/contract-tests.md |
 | Type: `HttpMethod` | `'GET' \| 'POST' \| 'PUT' \| 'DELETE'` | → docs/contract-tests.md |
 | Type: `ContractCheckResult` | Single-result shape (status, httpStatus, responseStatus, errorCode, reason, durationMs) | → docs/contract-tests.md |
 | Type: `RunContractSummary` | Aggregate shape (total, passed, failed, skipped, results[]) | → docs/contract-tests.md |
@@ -66,7 +74,8 @@ Generated-type-driven test layers voor LuckyStack APIs. Walkt elke endpoint uit 
 | Type: `RunRateLimitTestsInput` / `RateLimitCheckInput` | Inputs voor rate-limit layer | → docs/rate-limit-tests.md |
 | Type: `RunFuzzTestsInput` / `FuzzCheckInput` | Inputs voor fuzz layer | → docs/fuzz-tests.md |
 | Type: `ResetServerStateInput` | Input voor `resetServerState` | → docs/rate-limit-tests.md |
-| Type: `TestContext` | `{ callApi, callSync, watchStream, session, prisma, expect }` — handed naar elke Layer-5 custom-tests case. | → docs/contract-tests.md |
+| Type: `TestContext` | `{ callApi, callSync, watchStream, session, prisma, expect }` — handed naar elke Layer-5 custom-tests case. `callSync` volgt `transport.invocation` van het project (`socket` → echte Socket.io emit, `routed-http` → `/sync/*`). | → docs/contract-tests.md |
+| Type: `CallSyncOptions` | `callSync` opts: `receiver`, `ignoreSelf`, `transport` (per-call override), `joinRoom` (default `true`: de case-socket joint eerst `receiver`) | → docs/contract-tests.md |
 | `ctx.watchStream(roomCode)` | Open een second-socket (socket B) joined aan `roomCode` om de chunk stream van `broadcastStream`/`streamTo`/`_client_v{N}` te observeren. Returnt `StreamWatcher<TChunk>` met `.chunks[]`, `.stopAt(predicate, timeoutMs?)`, `.waitForCount(n, timeoutMs?)`, `.close()`. Watchers worden auto-closed na elke case. | → docs/contract-tests.md |
 | `openStreamWatcher(input)` | Lower-level factory voor `watchStream` — direct bruikbaar buiten een `TestContext` (custom layers, ad-hoc harness scripts). | → docs/contract-tests.md |
 | Type: `StreamWatcher<TChunk>` | `{ readonly chunks, stopAt, waitForCount, close }` — observable chunk stream voor één route. | → docs/contract-tests.md |
@@ -84,7 +93,11 @@ Generated-type-driven test layers voor LuckyStack APIs. Walkt elke endpoint uit 
 - `TEST_RESET_TOKEN` (env, optional, server-side) — wanneer gezet moet `resetServerState({ token })` deze meesturen als `X-Test-Reset-Token`. Verplicht voor staging/preview deploys die het endpoint over het netwerk exposen.
 - `RunRateLimitTestsInput.maxRateLimitToTest` (default `50`) — endpoints met hogere `rateLimit` worden geskipt om duizenden requests in CI te vermijden.
 - `RunRateLimitTestsInput.resetBetweenEndpoints` (default `false`) — hit `/_test/reset` voor elke endpoint zodat het shared IP-bucket schoon is.
-- `RunAllTestsInput.resetBookends` (default `true` wanneer een reset-token beschikbaar is) — POST `/_test/reset` één keer vóór en één keer ná de auto-sweep (finding #98: clean slate + cleanup zodat geen echte rows worden geëdit en geen `lstest_*` testdata achterblijft). Zonder token (`resetToken`/`TEST_RESET_TOKEN`) worden de bookends met een logregel geskipt, niet gefaald.
+- `RunAllTestsInput.resetBookends` (default `true` wanneer een reset-token beschikbaar is) — POST `/_test/reset?only=rateLimits` één keer vóór en één keer ná de auto-sweep, zodat geen limiter-bucket leeggelopen achterblijft. Wist alleen limiter-state: sessies (ook die van `authToken`) blijven staan, en de app-database wordt nooit aangeraakt — door de sweep aangemaakte `lstest_*` rows blijven dus bestaan. Zonder token (`resetToken`/`TEST_RESET_TOKEN`) worden de bookends met een logregel geskipt, niet gefaald.
+- `RunAllTestsInput.outputFile` (default `TEST_OUTPUT_FILE` env, anders `test-results.json`; `false` = uit) — `runAllTests` schrijft de volledige summary-JSON zelf; een entry-script hoeft dat niet meer te doen.
+- `RunAllTestsInput.syncMetaMap` / `syncInputSchemas` — generated door devkit; zonder `syncMetaMap` worden sync routes niet geswept.
+- `RunAllTestsInput.syncTransport` (`'socket' | 'http'`, default afgeleid van `transport.invocation`) — hoe de sweep sync routes bereikt.
+- `RunAllTestsInput.filter` (het `testAll.ts` entry-script vult hem uit `TEST_FILTER`) — substring op `<page>/<name>/<version>`; niet-matchende routes worden niet aangevraagd (niet alleen uit het rapport gefilterd).
 - `registerTestLayer({ name, run })` — custom check per endpoint (CORS, business rules, custom auth-schemes, multi-tenant isolation).
 - `registerTestFixture(typeKey, { valid, invalid })` — realistic payloads die de fuzz layer prefereert boven schema-random.
 - `registerTestReporter({ onResult?, onSummary?, webhookUrl?, webhookAuth? })` — wire per-result/per-summary callbacks of POST de summary naar een webhook.

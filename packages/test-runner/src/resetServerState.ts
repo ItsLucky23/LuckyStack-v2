@@ -1,4 +1,5 @@
-import { getProjectConfig, tryCatch } from '@luckystack/core';
+import { getProjectConfig, TEST_RESET_ONLY_PARAM, tryCatch } from '@luckystack/core';
+import type { TestResetTarget } from '@luckystack/core';
 
 //? Calls the server's /_test/reset endpoint. Used between rate-limit test
 //? endpoints to drain the shared IP-based limiter bucket so one endpoint's
@@ -15,10 +16,19 @@ export interface ResetServerStateInput {
   baseUrl: string;
   token?: string;
   requestTimeoutMs?: number;
+  /**
+   * Clear only these targets (`?only=`). Omit for the server's default reset,
+   * which ALSO deletes every Redis session — including an authenticated sweep's
+   * own. The runner itself always passes `['rateLimits']`.
+   */
+  only?: TestResetTarget[];
 }
 
-export const resetServerState = async ({ baseUrl, token, requestTimeoutMs }: ResetServerStateInput): Promise<boolean> => {
-  const url = `${baseUrl.replace(/\/$/, '')}${getProjectConfig().http.testResetEndpoint}`;
+export const resetServerState = async ({ baseUrl, token, requestTimeoutMs, only }: ResetServerStateInput): Promise<boolean> => {
+  const endpoint = `${baseUrl.replace(/\/$/, '')}${getProjectConfig().http.testResetEndpoint}`;
+  const url = only && only.length > 0
+    ? `${endpoint}?${new URLSearchParams({ [TEST_RESET_ONLY_PARAM]: only.join(',') }).toString()}`
+    : endpoint;
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };
   if (token) headers['X-Test-Reset-Token'] = token;
 

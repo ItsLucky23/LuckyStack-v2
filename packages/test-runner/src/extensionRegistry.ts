@@ -16,12 +16,19 @@
 //? to prevent accidental wipes from a misbehaving plugin).
 
 export interface TestLayerInput {
-  /** Resolved route name (`api/billing/getInvoice/v1`). */
+  /** Resolved route name (`api/billing/getInvoice/v1` or `sync/chat/send/v1`). */
   endpoint: string;
   /** Method when applicable, undefined for sync endpoints. */
   method?: string;
   /** Bearer token / session token to use for auth-aware checks. */
   authToken?: string;
+  /**
+   * A Zod-valid sample `data` payload for this route — generated from the
+   * route's input schema when `runRegisteredLayers` received the generated
+   * schemas (or an `inputFor`), `{}` otherwise. The same payload the built-in
+   * contract sweep sends, so a layer can exercise the route past validation.
+   */
+  sampleInput?: unknown;
 }
 
 export interface TestLayerResult {

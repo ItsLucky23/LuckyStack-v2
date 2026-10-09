@@ -1,10 +1,12 @@
-import { walkEndpoints } from './walkEndpoints';
 import { runContractCheck } from './contractCheck';
-import { shouldSkip, calculateSummary } from './testLayerHelpers';
-import type { ApiMethodMap, ContractCheckResult, EndpointDescriptor, RunContractSummary } from './types';
+import { shouldSkip, calculateSummary, selectEndpoints, transportFor } from './testLayerHelpers';
+import type { ProbeTransport } from './probeRequest';
+import type { ApiMethodMap, ContractCheckResult, EndpointDescriptor, RunContractSummary, SyncMetaMap } from './types';
 
 export interface RunContractTestsInput {
   apiMethodMap: ApiMethodMap;
+  /** Generated `syncMetaMap`. When given, sync routes are swept too. */
+  syncMetaMap?: SyncMetaMap;
   baseUrl: string;
   /**
    * Endpoints to skip. Matched against `<page>/<name>` (version-agnostic) and
@@ -12,13 +14,17 @@ export interface RunContractTestsInput {
    * are known to need real input (e.g. a file upload).
    */
   skip?: string[];
+  /** Substring filter on `<page>/<name>/<version>`; other routes are not requested at all. */
+  filter?: string;
   inputFor?: (endpoint: EndpointDescriptor) => unknown;
   headers?: Record<string, string>;
+  /** Transport for sync routes (e.g. the socket transport). API routes always use HTTP. */
+  syncTransport?: ProbeTransport;
   onResult?: (result: ContractCheckResult) => void;
 }
 
 export const runContractTests = async (input: RunContractTestsInput): Promise<RunContractSummary> => {
-  const endpoints = walkEndpoints(input.apiMethodMap);
+  const endpoints = selectEndpoints(input);
   const skip = input.skip ?? [];
   const results: ContractCheckResult[] = [];
 
@@ -42,6 +48,7 @@ export const runContractTests = async (input: RunContractTestsInput): Promise<Ru
       baseUrl: input.baseUrl,
       inputFor: input.inputFor,
       headers: input.headers,
+      transport: transportFor(endpoint, input.syncTransport),
     });
     results.push(result);
     input.onResult?.(result);

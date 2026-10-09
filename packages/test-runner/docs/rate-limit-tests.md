@@ -38,7 +38,7 @@ Important details:
 
 ### `runRateLimitTests(input)`
 
-Full sweep. Reads `rateLimit` from `apiMetaMap[page][name][version].rateLimit`, skips endpoints where it is `false`, `undefined`, or above `maxRateLimitToTest`, then runs `runRateLimitCheck` against the rest.
+Full sweep. Reads `rateLimit` from `apiMetaMap[page][name][version].rateLimit` (from `syncMetaMap` for sync routes, which are swept when `syncMetaMap` is given; `filter` narrows the set before any request), skips endpoints where it is `false`, `undefined`, or above `maxRateLimitToTest`, then runs `runRateLimitCheck` against the rest.
 
 Signature:
 
@@ -63,13 +63,13 @@ Behavior notes:
 
 - **Endpoints with `rateLimit: false` are silently skipped.** No `skipped` result, no `onResult` call. The summary's `total` reflects only endpoints with a numeric rate limit.
 - **Endpoints with `rateLimit > maxRateLimitToTest` are skipped loudly.** They appear with `status: 'skipped'` and `reason: 'rateLimit ${N} exceeds maxRateLimitToTest=${max}'`. Bump `maxRateLimitToTest` to cover them, but be aware each endpoint then fires `N+1` requests serially.
-- **`resetBetweenEndpoints: true` calls `resetServerState({ baseUrl, token: resetToken })` before every endpoint** that survives the skip filter. Without this, the limiter bucket on a shared IP (the test runner's host) is not flushed between endpoints — endpoint A's drain requests bleed into endpoint B's window and the N+1 assertion fires too early or too late depending on key collisions.
+- **`resetBetweenEndpoints: true` calls `resetServerState({ baseUrl, token: resetToken, only: ['rateLimits'] })` before every endpoint** that survives the skip filter. Only limiter buckets are cleared, so an authenticated sweep keeps its session. Without this, the limiter bucket on a shared IP (the test runner's host) is not flushed between endpoints — endpoint A's drain requests bleed into endpoint B's window and the N+1 assertion fires too early or too late depending on key collisions.
 - **`resetToken` is required when `TEST_RESET_TOKEN` is set on the server.** Always set this in any non-prod environment that is reachable over the network (staging, preview). The server is fail-closed: missing token = 403, unset env var server-side = 403 (never "open").
 - **`onResult` fires for tested AND `maxRateLimitToTest`-skipped endpoints**, but not for `rateLimit: false` endpoints (those don't show up at all).
 
 ### `resetServerState(input)`
 
-POST to the server's `/_test/reset` endpoint. Used between rate-limit probes and at CI bookends to clear framework-owned limiter/default-session state; it is not a general application-database reset.
+POST to the server's `/_test/reset` endpoint. Used between rate-limit probes and at the `runAllTests` bookends to clear framework-owned limiter (and, unscoped, default-session) state; it is not an application-database reset.
 
 Signature:
 
@@ -79,8 +79,12 @@ resetServerState(input: ResetServerStateInput): Promise<boolean>
 interface ResetServerStateInput {
   baseUrl: string;
   token?: string;
+  requestTimeoutMs?: number;
+  only?: TestResetTarget[]; // sent as `?only=`; omit for the server's default reset
 }
 ```
+
+Pass `only` to clear exactly those targets. Omitting it gives the server's default reset, which also deletes every Redis session — including an authenticated sweep's own. The runner itself therefore always passes `only: ['rateLimits']`.
 
 Returns `true` when the server responds 2xx, `false` on network error, parse error, or non-2xx. The error is swallowed deliberately — the most common reason for `false` is "the route is disabled in this environment", and the caller usually wants to proceed anyway.
 
@@ -97,7 +101,9 @@ Gating, in order:
 
 What it clears (when both gates pass):
 
-- **All rate-limit buckets** via `clearAllRateLimits()` from `@luckystack/core`. Every key under the rate-limit Redis namespace is dropped. Always cleared.
+**`?only=<target>[,<target>]`** clears exactly the listed targets and nothing else. The valid targets are the shared list in core `TEST_RESET_TARGETS` (rate limits, sessions, active users, hooks), so client and server cannot drift. An unknown or empty target is a `400` with `errorCode: 'test.invalidResetTarget'` — a typo must not silently reset nothing, or everything. Without `only`, the default below applies unchanged:
+
+- **All rate-limit buckets** via `clearAllRateLimits()` from `@luckystack/core`. Every key under the rate-limit Redis namespace is dropped.
 - **Default Redis session namespaces** matching `formatKey('-session', '') + ':*'` and `formatKey('-activeUsers', '') + ':*'`. They are scanned in batches of 200 and follow the registered Redis key formatter.
 - **Registered runtime hooks** when `?include=hooks` is in the query string. NOT included by default because framework-internal handlers (e.g. presence postLogout) register at boot — clearing them would require a server restart to recover.
 
@@ -139,6 +145,8 @@ interface RunRateLimitTestsInput {
 interface ResetServerStateInput {
   baseUrl: string;
   token?: string;
+  requestTimeoutMs?: number;
+  only?: TestResetTarget[];
 }
 ```
 
@@ -255,5 +263,5 @@ Endpoints with `rateLimit: 100` will appear as skipped with the reason inline.
 - **The `validation.failed` trap.** If the validator rejects every drain request before the limiter sees them, the framework still counts the request — but verifying this assumption is the user's responsibility. Use `inputFor` to provide payloads that survive validation when in doubt.
 - **`maxRateLimitToTest` accidentally too high.** With `maxRateLimitToTest: 1000` and 30 endpoints, the sweep fires `~30000` requests serially. This will time out CI long before it completes. Default 50 is deliberate.
 - **`/_test/reset` returning false from `resetServerState`.** Most common cause: `NODE_ENV !== 'development' | 'test'` on the server. Second most common: missing token. Third: route disabled via custom routing. The runner does not retry — it returns `false` and proceeds. The next endpoint's window will be polluted; consider failing the sweep early.
-- **Sessions cleared as collateral damage.** `resetServerState` always drops sessions and active users in addition to limiter buckets. If you have a long-running logged-in test alongside this layer, run the rate-limit sweep first, then re-establish the session.
+- **Sessions cleared as collateral damage — only on an unscoped reset.** `resetServerState` without `only` drops sessions and active users in addition to limiter buckets. The runner's own resets pass `only: ['rateLimits']` and leave sessions alone; a direct call without `only` still logs out every logged-in test.
 - **`?include=hooks` is opt-in for a reason.** Do not call `resetServerState` with this flag in a long-running test process — framework-internal hooks register only at boot, and dropping them mid-run will break presence, post-logout cleanup, and similar side-effects until restart.

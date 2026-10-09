@@ -30,6 +30,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **The Socket.io Redis-adapter key is derived per environment.** `attachSocketRedisAdapter` now passes `key: resolveSocketAdapterKey()` (`<PROJECT_NAME>:<LUCKYSTACK_ENV | NODE_ENV>:socket.io`) to `@socket.io/redis-adapter` unless `adapterOptions.key` is given; before, every LuckyStack server used upstream's fixed default `socket.io`. The key names the adapter's pub/sub channels, so two deployments that merely shared a Redis server (a dev laptop tunnelled into the staging Redis) were one Socket.io cluster: staging's broadcasts reached the developer's sockets and staging's `fetchSockets()` waited on a sleeping laptop until the request timeout. Instances of ONE environment (same `PROJECT_NAME`, same `LUCKYSTACK_ENV`) stay together. **Rollout note:** during a rolling deploy of this version, old-key and new-key instances do not see each other until the rollout completes — invisible on a single replica. Sessions and other Redis keys are still namespaced by `PROJECT_NAME` only; the adapter key isolates the socket cluster, not the data.
 - `RoomNameFormatterContext.userId` is documented as CONTEXT ONLY: under `'broadcast'` the framework passes the joiner on join/rejoin, the SENDER on fan-out and the originator on `broadcastStream`, so for a shared room the value differs per call. A formatter must not fold it into a content room's physical name. No behaviour change — the contract was implicit and unwritten.
 
+### Added
+
+- `ROUTED_DATA_QUERY_KEY` + `buildRoutedGetUrl(path, data, extraParams?)`, exported from the root entry and `@luckystack/core/client` — the GET half of the routed-HTTP wire contract (a GET's payload rides the query string). The client and `@luckystack/test-runner` now build that URL in one place, so the reserved key cannot drift between them.
+- `TEST_RESET_TARGETS`, `TEST_RESET_ONLY_PARAM`, `isTestResetTarget` and the `TestResetTarget` type — the `/_test/reset?only=` selector contract shared by `@luckystack/server` (which clears) and `@luckystack/test-runner` (which asks).
+
 ## [0.8.7] - 2026-08-18
 
 ### Added

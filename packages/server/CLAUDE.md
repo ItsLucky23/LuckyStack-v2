@@ -69,6 +69,7 @@ One-call server bootstrap for a LuckyStack project. Wires together a raw Node.js
 - `SERVER_IP` (env, optional, default `127.0.0.1`) — bind address fallback when `options.ip` is omitted.
 - `NODE_ENV` (env, required for security-sensitive branches) — `development` / `test` toggle devkit hot reload + REPL and gate `/_test/reset`.
 - `TEST_RESET_TOKEN` (env, required for `/_test/reset` to be reachable at all) — must match the `x-test-reset-token` request header. No fallback "no auth" mode.
+- `/_test/reset?only=<target>[,<target>]` (query) — clear only the listed targets (core `TEST_RESET_TARGETS`); unknown/empty → `400 test.invalidResetTarget`. Without `only` the default reset (rate limits + sessions + activeUsers, hooks via `?include=hooks`) is unchanged.
 - `projectConfig.http.healthEndpoint` (config) — path served by `handleHealthRoute`. Default `/_health`.
 - `projectConfig.http.liveEndpoint` (config) — path served by `handleLivezRoute`. Default `/livez`.
 - `projectConfig.http.readyEndpoint` (config) — path served by `handleReadyzRoute`. Default `/readyz`.

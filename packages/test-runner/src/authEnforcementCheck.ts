@@ -1,5 +1,6 @@
 import type { ContractCheckResult, EndpointDescriptor } from './types';
-import { sendProbe } from './probeRequest';
+import { defaultProbeTransport } from './probeRequest';
+import type { ProbeTransport } from './probeRequest';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
 
@@ -17,6 +18,8 @@ export interface AuthEnforcementCheckInput {
   inputFor?: (endpoint: EndpointDescriptor) => unknown;
   /** Per-call request timeout in ms. Defaults to 5000. */
   requestTimeoutMs?: number;
+  /** How the probe reaches the server. Defaults to HTTP. */
+  transport?: ProbeTransport;
 }
 
 //? Auth-enforcement layer: for each `auth.login: true` endpoint, call it with
@@ -28,15 +31,14 @@ export const runAuthEnforcementCheck = async (
   input: AuthEnforcementCheckInput,
 ): Promise<ContractCheckResult> => {
   const { endpoint, baseUrl } = input;
-  const url = `${baseUrl.replace(/\/$/, '')}/${endpoint.fullPath}`;
   const body = input.inputFor ? input.inputFor(endpoint) : {};
   const started = Date.now();
 
-  //? No session cookie, no auth header — deliberately. Origin IS sent so the
-  //? server's origin policy doesn't 403 before the auth check can run.
-  const result = await sendProbe({
-    url,
-    method: endpoint.method,
+  //? No session cookie, no auth header — deliberately (over a socket transport:
+  //? an anonymous socket). Origin IS sent so the server's origin policy doesn't
+  //? 403 before the auth check can run.
+  const result = await (input.transport ?? defaultProbeTransport).send({
+    endpoint,
     baseUrl,
     body,
     requestTimeoutMs: input.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,

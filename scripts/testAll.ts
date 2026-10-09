@@ -13,8 +13,8 @@
 //?   TEST_NO_SWEEP=1        — skip all sweep layers (only run custom tests)
 //?   TEST_ONLY_CUSTOM=1     — alias for TEST_NO_SWEEP
 //?   TEST_NO_CUSTOM=1       — skip per-route custom tests
+//?   TEST_OUTPUT_FILE       — results JSON path (default `test-results.json`)
 
-import fs from 'node:fs';
 import { resolveTestBaseUrl } from './resolveTestBaseUrl';
 
 //? `runAllTests.loadProjectConfig` imports the PROJECT config lazily after the
@@ -22,8 +22,8 @@ import { resolveTestBaseUrl } from './resolveTestBaseUrl';
 //? this lets @luckystack/test-runner resolve secret-manager pointers BEFORE any
 //? Layer-5 module touches Prisma/Redis directly.
 import { logRunAllSummary, runAllTests } from '../packages/test-runner/src';
-import { apiInputSchemas } from '../src/_sockets/apiInputSchemas.generated';
-import { apiMetaMap, apiMethodMap } from '../src/_sockets/apiTypes.generated';
+import { apiInputSchemas, syncInputSchemas } from '../src/_sockets/apiInputSchemas.generated';
+import { apiMetaMap, apiMethodMap, syncMetaMap } from '../src/_sockets/apiTypes.generated';
 
 const baseUrl = resolveTestBaseUrl();
 const skip = (process.env.TEST_SKIP ?? '').split(',').map(s => s.trim()).filter(Boolean);
@@ -42,6 +42,8 @@ const summary = await runAllTests({
   loadProjectConfig: async () => (await import('../config')).default,
   apiMetaMap,
   apiInputSchemas,
+  syncMetaMap,
+  syncInputSchemas,
   baseUrl,
   authToken,
   skip,
@@ -53,13 +55,6 @@ const summary = await runAllTests({
 });
 
 logRunAllSummary(summary);
-
-//? Machine-readable results — so an AI agent or CI can parse pass/fail +
-//? per-test reasons without scraping the terminal. Override path via
-//? TEST_OUTPUT_FILE. Gitignored by default.
-const outPath = process.env.TEST_OUTPUT_FILE ?? 'test-results.json';
-fs.writeFileSync(outPath, JSON.stringify(summary, null, 2), 'utf8');
-console.log(`[luckystack-test] full results written to ${outPath}`);
 
 if (summary.totalFailed > 0) {
   process.exit(1);

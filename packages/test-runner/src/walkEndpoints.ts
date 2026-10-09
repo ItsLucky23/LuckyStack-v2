@@ -1,4 +1,4 @@
-import type { EndpointDescriptor, HttpMethod, SyncMethodMap } from './types';
+import type { EndpointDescriptor, HttpMethod, SyncMetaMap, SyncMethodMap } from './types';
 
 type ApiMethodMap = Partial<Record<string, Partial<Record<string, Partial<Record<string, string>>>>>>;
 
@@ -45,24 +45,29 @@ export const walkEndpoints = (apiMethodMap: ApiMethodMap): EndpointDescriptor[] 
   return endpoints;
 };
 
-//? Walk the generated `syncMethodMap` and produce a flat list of sync-route
-//? descriptors. Each descriptor's `fullPath` is `sync/<page>/<name>/<version>`.
-//? Sync routes always use POST over the HTTP-fallback transport regardless of
-//? the declared method, so the method is hardcoded to `POST` here.
-export const walkSyncEndpoints = (syncMethodMap: SyncMethodMap): EndpointDescriptor[] => {
+//? Walk a generated sync route map — the `syncMetaMap` devkit emits, or a
+//? `syncMethodMap`-shaped map — and produce a flat list of sync-route
+//? descriptors. Only the page → name → version keys matter; the leaf value is
+//? ignored. Each descriptor's `fullPath` is `sync/<page>/<name>/<version>` and
+//? its `kind` is `'sync'`. Sync routes always POST over the HTTP transport, so
+//? the method is hardcoded to `POST` here.
+type SyncRouteMap = Partial<Record<string, Partial<Record<string, Partial<Record<string, unknown>>>>>>;
+
+export const walkSyncEndpoints = (syncMap: SyncMethodMap | SyncMetaMap | SyncRouteMap): EndpointDescriptor[] => {
   const endpoints: EndpointDescriptor[] = [];
-  for (const [page, nameMap] of Object.entries(syncMethodMap)) {
+  for (const [page, nameMap] of Object.entries(syncMap)) {
     if (!nameMap) continue;
     for (const [name, versionMap] of Object.entries(nameMap)) {
       if (!versionMap) continue;
-      for (const [version, method] of Object.entries(versionMap)) {
-        if (method === undefined) continue;
+      for (const [version, leaf] of Object.entries(versionMap)) {
+        if (leaf === undefined) continue;
         endpoints.push({
           page,
           name,
           version,
           method: 'POST',
           fullPath: `sync/${page}/${name}/${version}`,
+          kind: 'sync',
         });
       }
     }

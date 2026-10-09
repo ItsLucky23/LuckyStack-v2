@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The auto-sweep layers (contract, auth, rate-limit, CSRF, fuzz) now cover sync routes when `runAllTests` receives the generated `syncMetaMap` (+ optionally `syncInputSchemas` for Zod-valid sync payloads). Sync probes travel over Socket.io — the pipeline real clients use — unless the project's `transport.invocation` is `routed-http` or `syncTransport: 'http'` is set; the CSRF layer always probes sync over HTTP, since CSRF is an HTTP-only guard. Each run uses one throwaway `lstest-room-<uuid>` room, which the sweep session joins when an `authToken` is given, so room-membership enforcement sees a member. Without `syncMetaMap`, `runAllTests` warns that sync routes are not swept.
+- New exports: `createHttpProbeTransport`, `createSocketProbeTransport`, `defaultProbeTransport`, `sendProbe` and the `ProbeTransport` family of types; `createSampleInputFor` + `InputSchemaMap`; `SyncMetaMap` / `SyncMetaEntry`; `CallSyncOptions`. `EndpointDescriptor` gains an optional `kind` (`walkSyncEndpoints` sets `'sync'`; absent means API).
+- `runAllTests` writes the full summary JSON itself: `outputFile` option, defaulting to `TEST_OUTPUT_FILE`, else `test-results.json`; `false` disables it. Entry scripts no longer need their own write.
+- `resetServerState` accepts `only?: TestResetTarget[]` to clear just those targets (`/_test/reset?only=`).
+- Registered custom layers receive `sampleInput` in `TestLayerInput` (the same Zod-valid payload the contract sweep sends), and `runRegisteredLayers` accepts `syncMetaMap`, `filter`, `apiInputSchemas`, `syncInputSchemas` and `inputFor`. `method` is `undefined` for sync endpoints.
+
+### Changed
+
+- **`ctx.callSync` follows the project's `transport.invocation`.** For a socket-mode project (the default) it now emits a real Socket.io `sync` instead of always posting to `/sync/*`, and the case's socket joins `opts.receiver` first (except `'all'`; opt out with `joinRoom: false`). Override per call with `opts.transport: 'http'`. New `opts.ignoreSelf`. A test that relied on HTTP-only behaviour in a socket-mode project must pass `transport: 'http'`.
+- **The runner's own resets no longer clear sessions.** The `runAllTests` bookends and the rate-limit layer's between-endpoint reset send `only=rateLimits`, so an authenticated sweep is no longer logged out by its own reset. A direct `resetServerState` call without `only` still clears sessions as before.
+- `filter` (`TEST_FILTER`) is passed to every layer and applied before any request. Previously every route was swept and only the report was filtered.
+
+### Fixed
+
+- GET routes receive their sample payload: probes encode it into the reserved `__luckystack_data` query key (core `buildRoutedGetUrl`) instead of dropping it, so a GET route with a required field no longer fails validation in every layer.
+- The bookend documentation no longer claims the reset drops rows the sweep created. `/_test/reset` never touched the application database; `lstest_*` rows persist.
+
 ## [0.10.1] - 2026-09-03
 
 ### Fixed

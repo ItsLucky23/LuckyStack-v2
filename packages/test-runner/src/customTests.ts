@@ -23,11 +23,14 @@ import {
   resolveTestEnvironment,
   type ResolveTestEnvironmentInput,
 } from './resolveTestEnvironment';
+import type { Socket } from 'socket.io-client';
+
 import {
   openStreamWatcher,
   type StreamChunkFrame,
   type StreamWatcher,
 } from './streamWatcher';
+import { connectTestSocket, emitSyncOverSocket, joinTestRoom } from './testSocket';
 //? `ApiMethodMap` mirrors the generated `apiMethodMap` shape (page → name →
 //? version → method) and is a type-only import, so there's still no import-time
 //? coupling to the consumer's generated artifact.
@@ -166,6 +169,17 @@ export const discoverCustomTestFiles = (srcDir: string = getSrcDir()): Discovere
   return found.toSorted((a, b) => a.filePath.localeCompare(b.filePath));
 };
 
+export interface CallSyncOptions {
+  /** Room the sync targets (the server requires one). */
+  receiver?: string;
+  /** Skip the sender's own socket in the fan-out (socket transport). */
+  ignoreSelf?: boolean;
+  /** Force a transport. Defaults to the project's `transport.invocation`. */
+  transport?: 'socket' | 'http';
+  /** Socket transport: join `receiver` before sending. Default `true`. */
+  joinRoom?: boolean;
+}
+
 //? Test fixture shapes. The TestContext is built per route — each per-route
 //? test file's `customTests` cases receive a context already bound to the
 //? route the file lives next to, so authors don't repeat `page/name/version`.
@@ -185,8 +199,16 @@ export interface TestContext {
   //? otherwise flags it as "used once"; the documentation value is real.
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- callsite-documentation use
   callApi: <TInput = unknown, TOutput = unknown>(input: TInput) => Promise<TOutput>;
+  /**
+   * Invoke the sync route under test over the SAME transport the project's
+   * real client uses (`transport.invocation`): Socket.io for `'socket'` (the
+   * default), the `/sync/*` HTTP route for `'routed-http'`. Override per call
+   * with `opts.transport`. Over the socket, the case's session socket first
+   * joins `opts.receiver` (like a real client joins its room before syncing);
+   * pass `joinRoom: false` to test a non-member.
+   */
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- callsite-documentation use
-  callSync: <TInput = unknown, TOutput = unknown>(input: TInput, opts?: { receiver?: string }) => Promise<TOutput>;
+  callSync: <TInput = unknown, TOutput = unknown>(input: TInput, opts?: CallSyncOptions) => Promise<TOutput>;
   /**
    * Open a second socket connection that joins `roomCode` as a pure
    * subscriber and exposes the incoming chunk stream for assertions.
@@ -372,19 +394,76 @@ export const buildCallApi = (
   };
 };
 
+//? The case's sync socket. Opened lazily on the first socket `callSync`, reopened
+//? when the case's session changes (a `session.login()` after the first call),
+//? and closed with the case's watchers. Tracks joined rooms so repeated calls to
+//? the same receiver join once.
+interface CaseSyncSocket {
+  get: (token: string | null) => Promise<{ socket: Socket; joinedRooms: Set<string> }>;
+  close: () => void;
+}
+
+const createCaseSyncSocket = (baseUrl: string, cookieName: string): CaseSyncSocket => {
+  let current: { socket: Socket; token: string | null; joinedRooms: Set<string> } | null = null;
+  const close = (): void => {
+    current?.socket.disconnect();
+    current = null;
+  };
+  return {
+    get: async (token) => {
+      if (current?.token === token && current.socket.connected) return current;
+      close();
+      const socket = await connectTestSocket({ baseUrl, token, label: 'callSync', sessionCookieName: cookieName });
+      current = { socket, token, joinedRooms: new Set() };
+      return current;
+    },
+    close,
+  };
+};
+
+const resolveSyncTransport = (opts: CallSyncOptions | undefined): 'socket' | 'http' =>
+  opts?.transport ?? (getProjectConfig().transport.invocation === 'routed-http' ? 'http' : 'socket');
+
 const buildCallSync = (
   baseUrl: string,
   routePath: string,
   state: TestSessionState,
   cookieName: string,
+  syncSocket: CaseSyncSocket,
 ): TestContext['callSync'] => {
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- must match TestContext['callSync'] generic signature
-  return async <TInput = unknown, TOutput = unknown>(input: TInput, opts?: { receiver?: string }): Promise<TOutput> => {
+  return async <TInput = unknown, TOutput = unknown>(input: TInput, opts?: CallSyncOptions): Promise<TOutput> => {
+    if (resolveSyncTransport(opts) === 'socket') {
+      const { socket, joinedRooms } = await syncSocket.get(state.token);
+      const { receiver, joinRoom = true } = opts ?? {};
+      if (receiver && receiver !== 'all' && joinRoom && !joinedRooms.has(receiver)) {
+        //? Best-effort: a refused join (e.g. anonymous socket) is not thrown —
+        //? the sync itself then returns the server's real rejection envelope.
+        const [joinError] = await tryCatch(() => joinTestRoom(socket, receiver, { label: 'callSync' }));
+        if (!joinError) joinedRooms.add(receiver);
+      }
+      const outcome = await emitSyncOverSocket(socket, {
+        routePath,
+        data: input,
+        receiver,
+        ignoreSelf: opts?.ignoreSelf,
+        timeoutMs: DEFAULT_CALL_TIMEOUT_MS,
+      });
+      if (outcome.kind === 'timeout') {
+        state.lastResponse = null;
+        throw new Error(`callSync ${routePath} failed: no socket response within ${DEFAULT_CALL_TIMEOUT_MS}ms`);
+      }
+      state.lastResponse = outcome.payload;
+      //? The socket payload is unknown; TOutput is the caller's type contract, verified at the call site
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion, no-restricted-syntax -- socket payload is unknown; cast to TOutput is the boundary
+      return outcome.payload as TOutput;
+    }
+
     const url = `${baseUrl.replace(/\/$/, '')}/sync/${routePath}`;
     const headers: Record<string, string> = { 'Content-Type': 'application/json', Origin: new URL(baseUrl).origin };
     if (state.token) headers.Cookie = `${cookieName}=${state.token}`;
     if (state.csrfToken) headers[getCsrfConfig().headerName] = state.csrfToken;
-    const body = { data: input ?? {}, receiver: opts?.receiver };
+    const body = { data: input ?? {}, receiver: opts?.receiver, ignoreSelf: opts?.ignoreSelf };
     const controller = new AbortController();
     const timeoutHandle = setTimeout(() => { controller.abort(); }, DEFAULT_CALL_TIMEOUT_MS);
     const [fetchError, response] = await tryCatch(() => fetch(url, {
@@ -406,7 +485,7 @@ const buildCallSync = (
 
 interface BuiltContext {
   ctx: TestContext;
-  /** Close every watcher opened during the case. Called by `runCustomTests` after each case. */
+  /** Close every watcher and the sync socket opened during the case. Called by `runCustomTests` after each case. */
   closeAllWatchers: () => Promise<void>;
   /** Per-case session state — read after the run to surface the last response's errorCode. */
   state: TestSessionState;
@@ -446,7 +525,10 @@ const buildContext = (
     return watcher;
   };
 
+  const syncSocket = createCaseSyncSocket(input.baseUrl, cookieName);
+
   const closeAllWatchers = async (): Promise<void> => {
+    syncSocket.close();
     while (watchers.length > 0) {
       const watcher = watchers.pop();
       if (!watcher) continue;
@@ -461,7 +543,7 @@ const buildContext = (
 
   const ctx: TestContext = {
     callApi: buildCallApi(input.baseUrl, routePath, state, cookieName, apiMethod),
-    callSync: buildCallSync(input.baseUrl, routePath, state, cookieName),
+    callSync: buildCallSync(input.baseUrl, routePath, state, cookieName, syncSocket),
     watchStream,
     session: buildSessionHelpers(state),
     //? Lazy: only resolves when a case actually touches `ctx.prisma`, so an

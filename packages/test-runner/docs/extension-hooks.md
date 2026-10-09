@@ -70,9 +70,10 @@ interface TestLayer {
 }
 
 interface TestLayerInput {
-  endpoint: string;          // resolved route, e.g. 'api/billing/getInvoice/v1'
+  endpoint: string;          // resolved route, e.g. 'api/billing/getInvoice/v1' or 'sync/chat/send/v1'
   method?: string;           // HTTP method, undefined for sync endpoints
   authToken?: string;        // bearer/session token for auth-aware checks
+  sampleInput?: unknown;     // Zod-valid sample payload (same one the contract sweep sends), `{}` without schemas
 }
 
 interface TestLayerResult {
@@ -100,7 +101,7 @@ Order is registration order (Map iteration order). The returned array is a fresh
 
 ### `runRegisteredLayers(input)`
 
-Run every registered layer against every endpoint in `apiMethodMap` and emit the aggregate through the registered reporter. This is the shipped entry point for the layer registry — the built-in sweeps never touch it, and it never runs the built-in sweeps.
+Run every registered layer against every endpoint in `apiMethodMap` (plus every sync route in `syncMetaMap` when given) and emit the aggregate through the registered reporter. This is the shipped entry point for the layer registry — the built-in sweeps never touch it, and it never runs the built-in sweeps.
 
 Signature:
 
@@ -109,14 +110,19 @@ runRegisteredLayers(input: RunRegisteredLayersInput): Promise<TestSummary>
 
 interface RunRegisteredLayersInput {
   apiMethodMap: ApiMethodMap;
-  authToken?: string;   // forwarded to each layer's run({ authToken })
-  skip?: string[];      // '<page>/<name>' or '<page>/<name>/<version>'
+  syncMetaMap?: SyncMetaMap;          // also run layers against every sync route
+  authToken?: string;                 // forwarded to each layer's run({ authToken })
+  skip?: string[];                    // '<page>/<name>' or '<page>/<name>/<version>'
+  filter?: string;                    // substring on '<page>/<name>/<version>', same as the sweeps
+  apiInputSchemas?: InputSchemaMap;   // source of each API route's sampleInput
+  syncInputSchemas?: InputSchemaMap;  // source of each sync route's sampleInput
+  inputFor?: (endpoint: EndpointDescriptor) => unknown; // custom sample factory; wins over the schema maps
 }
 ```
 
 Behavior (read from `src/runRegisteredLayers.ts`):
 
-- **Cartesian walk.** For each layer from `listTestLayers()` (registration order) × each endpoint from `walkEndpoints(apiMethodMap)`, it calls `layer.run({ endpoint: endpoint.fullPath, method: endpoint.method, authToken })`. `skip` uses the same two-tier matching as the built-in sweeps; skipped endpoints produce no result.
+- **Cartesian walk.** For each layer from `listTestLayers()` (registration order) × each selected endpoint (API routes, plus sync routes when `syncMetaMap` is given, narrowed by `filter`), it calls `layer.run({ endpoint, method, authToken, sampleInput })` — `method` is `undefined` for sync routes, and `sampleInput` comes from `inputFor` or the schema maps (strings tagged with the run's test-data marker), so a layer can exercise the route past validation. `skip` uses the same two-tier matching as the built-in sweeps; skipped endpoints produce no result.
 - **Error isolation.** Each `layer.run` is wrapped in `tryCatch`. A throwing layer (or one returning a falsy result) does not abort the walk — it is recorded as a failed `TestResult` whose `message` is the thrown error's message, or `'layer returned no result'`. Each result's `durationMs` is measured around the call. This is the behavior the manual `listTestLayers()` loop lacks, where a throw propagates and skips the rest.
 - **Reporter fan-out.** After each result it calls `reporter.onResult?.(result)`; after the walk it calls `reporter.onSummary?.(summary)`. Both are wrapped in `tryCatch`, so a throwing reporter callback never fails the run — unlike the built-in sweeps, whose `onResult` is called un-wrapped.
 - **Webhook.** If the reporter declares a `webhookUrl`, the summary is POSTed to it: `Content-Type: application/json`, plus `Authorization: Bearer <token>` when `webhookAuth?.type === 'bearer'`, body `JSON.stringify(summary)`, with a 10s `AbortController` timeout. The POST is best-effort (`tryCatch`-wrapped) — a failure never fails the run. A plaintext-`http:` URL pointed at a non-loopback host logs a `console.warn` (the summary carries endpoint paths, error codes, and any bearer token in clear) but is never blocked, since the URL is consumer-self-registered.
@@ -231,6 +237,7 @@ interface TestLayerInput {
   endpoint: string;
   method?: string;
   authToken?: string;
+  sampleInput?: unknown;
 }
 
 interface TestLayerResult {

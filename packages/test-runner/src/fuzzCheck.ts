@@ -1,5 +1,6 @@
 import type { ContractCheckResult, EndpointDescriptor } from './types';
-import { sendProbe } from './probeRequest';
+import { defaultProbeTransport } from './probeRequest';
+import type { ProbeTransport } from './probeRequest';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
 
@@ -28,17 +29,18 @@ export interface FuzzCheckInput {
   headers?: Record<string, string>;
   /** Per-call request timeout in ms. Defaults to 5000. */
   requestTimeoutMs?: number;
+  /** How the probes reach the server. Defaults to HTTP. */
+  transport?: ProbeTransport;
 }
 
 export const runFuzzCheck = async (input: FuzzCheckInput): Promise<ContractCheckResult> => {
   const started = Date.now();
   const requestTimeoutMs = input.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
-  const url = `${input.baseUrl.replace(/\/$/, '')}/${input.endpoint.fullPath}`;
+  const transport = input.transport ?? defaultProbeTransport;
 
   for (const payload of JUNK_PAYLOADS) {
-    const result = await sendProbe({
-      url,
-      method: input.endpoint.method,
+    const result = await transport.send({
+      endpoint: input.endpoint,
       baseUrl: input.baseUrl,
       body: payload,
       headers: input.headers,

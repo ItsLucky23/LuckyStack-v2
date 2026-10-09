@@ -1,5 +1,6 @@
 import type { ContractCheckResult, EndpointDescriptor } from './types';
-import { sendProbe } from './probeRequest';
+import { defaultProbeTransport } from './probeRequest';
+import type { ProbeTransport } from './probeRequest';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
 
@@ -24,6 +25,12 @@ export interface CsrfEnforcementCheckInput {
   expectedErrorCode?: string;
   /** HTTP status expected on CSRF rejection. Defaults to 403; pass `false` to skip. */
   expectedHttpStatus?: number | false;
+  /**
+   * HTTP transport the probe uses (e.g. one carrying the sync `receiver`).
+   * CSRF is an HTTP-only guard, so a non-HTTP transport makes the check skip.
+   * Defaults to plain HTTP.
+   */
+  transport?: ProbeTransport;
 }
 
 //? CSRF-enforcement layer: for each `auth.login: true` state-changing route,
@@ -47,7 +54,15 @@ export const runCsrfEnforcementCheck = async (
       durationMs: 0,
     };
   }
-  const url = `${baseUrl.replace(/\/$/, '')}/${endpoint.fullPath}`;
+  const transport = input.transport ?? defaultProbeTransport;
+  if (transport.name !== 'http') {
+    return {
+      endpoint,
+      status: 'skipped',
+      reason: `CSRF enforcement only applies over HTTP (transport: ${transport.name})`,
+      durationMs: 0,
+    };
+  }
   const body = input.inputFor ? input.inputFor(endpoint) : {};
   const started = Date.now();
   const expectedErrorCode = input.expectedErrorCode ?? DEFAULT_EXPECTED_ERROR_CODE;
@@ -55,9 +70,8 @@ export const runCsrfEnforcementCheck = async (
 
   //? Valid session Cookie + Origin, but NO CSRF header — that omission is the
   //? whole point of the probe.
-  const result = await sendProbe({
-    url,
-    method: endpoint.method,
+  const result = await transport.send({
+    endpoint,
     baseUrl,
     body,
     headers: { Cookie: input.authCookie },

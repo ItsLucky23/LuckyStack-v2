@@ -348,6 +348,12 @@ export {
 } from './cancelRegistry';
 export { getCsrfToken, clearCsrfToken, httpFetch } from './csrf';
 export {
+  TEST_RESET_TARGETS,
+  TEST_RESET_ONLY_PARAM,
+  isTestResetTarget,
+} from './testResetTargets';
+export type { TestResetTarget } from './testResetTargets';
+export {
   issueOneTimeToken,
   consumeOneTimeToken,
   consumeOneTimeTokenJson,

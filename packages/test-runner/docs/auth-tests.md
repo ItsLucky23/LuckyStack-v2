@@ -26,7 +26,7 @@ interface AuthEnforcementCheckInput {
 Flow:
 
 1. Build URL the same way the contract layer does.
-2. Build body via `inputFor?.(endpoint) ?? {}`. `GET` drops the body.
+2. Build body via `inputFor?.(endpoint) ?? {}`. On `GET` it travels in the query string, as in the contract layer.
 3. **Send the request with no session cookie, no `Authorization` header, no `X-CSRF-Token`.** The runner deliberately omits every form of credential — that is the whole point of this layer. `headers` is not a supported field for this reason; passing one would defeat the test.
 4. Parse the JSON. Parse failure is a fail.
 5. Branch on `parsed.status`:
@@ -39,7 +39,7 @@ The accepted error codes are the framework's auth-rejection set, hard-coded in t
 
 ### `runAuthEnforcementTests(input)`
 
-Full sweep. Iterates `walkEndpoints(input.apiMethodMap)` and checks every endpoint that declares an authorization requirement — `apiMetaMap[page][name][version].auth.login === true` OR a non-empty `auth.additional[]` predicate list (`hasAdditional`). Truly-public endpoints (`auth.login: false` AND no `additional[]`, or missing meta) are skipped **silently** — they do not appear in the summary at all. This keeps the report focused on what this layer actually covers; public endpoints are already exercised by the contract layer.
+Full sweep. Iterates every API route (plus every sync route when `syncMetaMap` is given — its requirement is read from `syncMetaMap`), narrowed by `filter` before any request, and checks every endpoint that declares an authorization requirement — `apiMetaMap[page][name][version].auth.login === true` OR a non-empty `auth.additional[]` predicate list (`hasAdditional`). Truly-public endpoints (`auth.login: false` AND no `additional[]`, or missing meta) are skipped **silently** — they do not appear in the summary at all. This keeps the report focused on what this layer actually covers; public endpoints are already exercised by the contract layer.
 
 Signature:
 

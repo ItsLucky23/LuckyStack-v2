@@ -205,6 +205,8 @@ const collectSyncTypes = (
       hasServer: serverFile !== undefined,
       hasClient: clientFile !== undefined,
       ...(syncMeta ? { meta: syncMeta } : {}),
+      //? Same extractors as the API side, so `syncMetaMap` and `apiMetaMap` agree.
+      ...(serverFile ? { serverMeta: { auth: extractAuth(serverFile), rateLimit: extractRateLimit(serverFile) } } : {}),
     });
   }
 

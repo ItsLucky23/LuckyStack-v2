@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The type-map generator emits `syncMetaMap` / `getSyncMeta` (auth + rateLimit per sync route) in `apiTypes.generated.ts` and `syncInputSchemas` / `getSyncInputSchema` (Zod schema of each sync route's `clientInput`) in `apiInputSchemas.generated.ts` — the sync counterparts of `apiMetaMap` and `apiInputSchemas`. Only routes with a `_server_v<N>.ts` file are listed. This lets the `@luckystack/test-runner` auto-sweep layers reach sync routes, not just API routes. A sync input that falls back to `z.any()` is now reported in `apiTypeDiagnostics.generated.json`, like an API input.
+
 ## [0.9.2] - 2026-09-01
 
 ### Fixed

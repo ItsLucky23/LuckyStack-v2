@@ -12,14 +12,18 @@
 
 import { tryCatch, tryCatchSync } from '@luckystack/core';
 
-import { walkEndpoints } from './walkEndpoints';
 import { listTestLayers, getTestReporter } from './extensionRegistry';
-import { shouldSkip } from './testLayerHelpers';
+import { createSampleInputFor } from './sampleInputFor';
+import type { InputSchemaMap } from './sampleInputFor';
+import { createTestDataMarker } from './testDataMarker';
+import { selectEndpoints, shouldSkip } from './testLayerHelpers';
 import type { TestResult, TestSummary } from './extensionRegistry';
-import type { ApiMethodMap } from './types';
+import type { ApiMethodMap, EndpointDescriptor, SyncMetaMap } from './types';
 
 export interface RunRegisteredLayersInput {
   apiMethodMap: ApiMethodMap;
+  /** Generated `syncMetaMap`. When given, layers also run against every sync route. */
+  syncMetaMap?: SyncMetaMap;
   /** Session/bearer token forwarded to each layer's `run({ authToken })`. */
   authToken?: string;
   /**
@@ -27,6 +31,14 @@ export interface RunRegisteredLayersInput {
    * `<page>/<name>/<version>`, same convention as the built-in sweeps.
    */
   skip?: string[];
+  /** Substring filter on `<page>/<name>/<version>`, same as the built-in sweeps. */
+  filter?: string;
+  /** Generated `apiInputSchemas` — source of each API route's `sampleInput`. */
+  apiInputSchemas?: InputSchemaMap;
+  /** Generated `syncInputSchemas` — source of each sync route's `sampleInput`. */
+  syncInputSchemas?: InputSchemaMap;
+  /** Custom sample factory; wins over the schema maps when given. */
+  inputFor?: (endpoint: EndpointDescriptor) => unknown;
 }
 
 //? Whether a webhook URL targets a loopback host (localhost / 127.0.0.0/8 / ::1).
@@ -71,17 +83,29 @@ const postWebhook = async (summary: TestSummary): Promise<void> => {
 
 export const runRegisteredLayers = async (input: RunRegisteredLayersInput): Promise<TestSummary> => {
   const layers = listTestLayers();
-  const endpoints = walkEndpoints(input.apiMethodMap);
+  const endpoints = selectEndpoints(input);
   const reporter = getTestReporter();
   const skip = input.skip ?? [];
   const results: TestResult[] = [];
+  //? Same sample source as the built-in sweeps, tagged with a run-unique marker
+  //? so rows a layer creates are identifiable (finding #98).
+  const inputFor = input.inputFor ?? createSampleInputFor({
+    apiInputSchemas: input.apiInputSchemas,
+    syncInputSchemas: input.syncInputSchemas,
+    stringPrefix: createTestDataMarker(),
+  });
 
   for (const layer of layers) {
     for (const endpoint of endpoints) {
       if (shouldSkip(endpoint, skip)) continue;
       const started = Date.now();
       const [runError, layerResult] = await tryCatch(async () =>
-        layer.run({ endpoint: endpoint.fullPath, method: endpoint.method, authToken: input.authToken }));
+        layer.run({
+          endpoint: endpoint.fullPath,
+          method: endpoint.kind === 'sync' ? undefined : endpoint.method,
+          authToken: input.authToken,
+          sampleInput: inputFor(endpoint),
+        }));
       const durationMs = Date.now() - started;
 
       const result: TestResult = runError || !layerResult

@@ -38,7 +38,7 @@ A custom-route registry sits in front of the static fallback. Both the legacy `c
 | `/livez` | GET | `handleLivezRoute` | `200 { status: 'live' }` | Always 200 when reachable |
 | `/readyz` | GET | `handleReadyzRoute` | `200 { status: 'ready', checks: {...} }` | `503 { status: 'not-ready', checks: {...} }` |
 | `/_health` | GET | `handleHealthRoute` | `200 { status: 'ok', bootUuid, envKey, synchronizedHashes }` | `503 { status: 'degraded', ... }` when boot UUID is missing |
-| `/_test/reset` | POST | `handleTestResetRoute` | `200 { status: 'success', cleared: string[] }` | `404 notFound` or `403 auth.forbidden` — see `security-defaults.md` |
+| `/_test/reset` | POST | `handleTestResetRoute` | `200 { status: 'success', cleared: string[] }` | `404 notFound`, `403 auth.forbidden`, or `400 test.invalidResetTarget` (bad `?only=`) — see `security-defaults.md` |
 | `/uploads/*` | GET | `handleUploadsRoute` | Avatar bytes via `@luckystack/core` `serveAvatar` | `404` from `serveAvatar` when missing |
 | `/auth/api/email-code/request` | POST | `handleAuthEmailCodeRoute` | `200 { status: true }` (anti-enumeration: also for unknown addresses) | `200 { status:false, reason }`, `429` per-IP |
 | `/auth/api/email-code/verify` | POST | `handleAuthEmailCodeRoute` | Login envelope + session transport, or 2FA-challenge envelope | `200 { status:false, reason }`, `429` per-IP |
@@ -54,7 +54,7 @@ A custom-route registry sits in front of the static fallback. Both the legacy `c
 
 > `GET /auth/csrf` issues the token; state-changing requests send it using `getCsrfConfig().headerName` (default `x-csrf-token`). `registerCsrfConfig(...)` also controls the login-absent cookie name/options and token length.
 >
-> `/_test/reset` clears rate limits and only the framework's default Redis session/active-user namespaces. It does not clear application database rows or invoke a custom `SessionAdapter`; custom-storage tests own that cleanup.
+> `/_test/reset` clears rate limits and only the framework's default Redis session/active-user namespaces; `?only=<target>[,<target>]` narrows it to the listed targets (so a logged-in test sweep can drain limiter buckets without deleting its own session). It does not clear application database rows or invoke a custom `SessionAdapter`; custom-storage tests own that cleanup.
 
 ## API Reference — handlers
 

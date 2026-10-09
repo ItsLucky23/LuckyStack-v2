@@ -1,3 +1,7 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 import type { RunContractSummary } from './types';
@@ -59,11 +63,16 @@ vi.mock('./runFuzzTests', () => ({ runFuzzTests: (i: unknown) => runFuzzTests(i)
 vi.mock('./customTests', () => ({
   runCustomTestsAfterEnvironmentPrepared: (i: unknown) => runCustomTests(i),
 }));
-vi.mock('@luckystack/core', () => ({
-  clearAllRateLimits: () => clearAllRateLimits(),
-  getProjectConfig: () => getProjectConfig(),
-  getCsrfConfig: () => getCsrfConfig(),
-}));
+vi.mock('@luckystack/core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@luckystack/core')>();
+  return {
+    clearAllRateLimits: () => clearAllRateLimits(),
+    getProjectConfig: () => getProjectConfig(),
+    getCsrfConfig: () => getCsrfConfig(),
+    tryCatch: actual.tryCatch,
+    tryCatchSync: actual.tryCatchSync,
+  };
+});
 //? `buildAuthHeaders` reaches for the session record to attach a CSRF header
 //? whenever an `authToken` is supplied. Without this mock the orchestrator does
 //? a REAL `await import('@luckystack/login')` — a cold load of that package and
@@ -84,8 +93,14 @@ const baseInput = {
   apiMethodMap: {},
   apiMetaMap: {},
   apiInputSchemas: {},
+  //? An empty sync map: no sync routes to sweep (so no socket is opened), and
+  //? no "syncMetaMap missing" warning in the characterization tests.
+  syncMetaMap: {},
   baseUrl: 'http://localhost:3000',
   loadProjectConfig: vi.fn(() => ({ secretManager: { url: '' } })),
+  //? Never write a real test-results.json from a unit test; the outputFile
+  //? tests opt back in with a temp path.
+  outputFile: false as const,
 };
 
 const originalResetToken = process.env.TEST_RESET_TOKEN;
@@ -284,5 +299,73 @@ describe('runAllTests reset bookends (mutation safety, finding #98)', () => {
   it('does not run bookends when the whole sweep is disabled (noSweep)', async () => {
     await runAllTests({ ...baseInput, resetToken: 'reset-secret', noSweep: true });
     expect(resetServerState).not.toHaveBeenCalled();
+  });
+
+  it('bookends clear rate limits only, so the sweep session survives', async () => {
+    await runAllTests({ ...baseInput, resetToken: 'reset-secret', authToken: 'tok123', sessionCookieName: 'my_cookie' });
+    expect(resetServerState).toHaveBeenCalledTimes(2);
+    for (const call of resetServerState.mock.calls) {
+      expect(call[0]).toMatchObject({ only: ['rateLimits'] });
+    }
+  });
+});
+
+describe('runAllTests filter', () => {
+  it('hands the filter to every sweep layer and the custom layer, so only matching routes are requested', async () => {
+    await runAllTests({ ...baseInput, filter: 'billing/', authToken: 'tok123', sessionCookieName: 'my_cookie' });
+    for (const layer of [runContractTests, runAuthEnforcementTests, runRateLimitTests, runCsrfEnforcementTests, runFuzzTests, runCustomTests]) {
+      expect(layer.mock.calls[0]?.[0]).toMatchObject({ filter: 'billing/' });
+    }
+  });
+
+  it('returns the layer summaries untouched (no report-side re-filtering)', async () => {
+    const summary = await runAllTests({ ...baseInput, filter: 'billing/' });
+    expect(summary.contract).toStrictEqual(summaryOf(2, 0));
+  });
+});
+
+describe('runAllTests syncMetaMap', () => {
+  it('warns that sync routes are not swept when no syncMetaMap is passed', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => { /* swallow expected warning */ });
+    const { syncMetaMap: _omit, ...withoutSync } = baseInput;
+    await runAllTests(withoutSync);
+    expect(warn.mock.calls.some(([message]) => String(message).includes('sync routes are NOT swept'))).toBe(true);
+    warn.mockRestore();
+  });
+});
+
+describe('runAllTests outputFile', () => {
+  const originalOutputFile = process.env.TEST_OUTPUT_FILE;
+  let dir: string;
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lstest-out-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    if (originalOutputFile === undefined) delete process.env.TEST_OUTPUT_FILE;
+    else process.env.TEST_OUTPUT_FILE = originalOutputFile;
+  });
+
+  it('writes the full summary as JSON to outputFile', async () => {
+    const target = path.join(dir, 'results.json');
+    const summary = await runAllTests({ ...baseInput, outputFile: target });
+    expect(JSON.parse(fs.readFileSync(target, 'utf8'))).toStrictEqual(summary);
+  });
+
+  it('falls back to TEST_OUTPUT_FILE when outputFile is not given', async () => {
+    const target = path.join(dir, 'from-env.json');
+    process.env.TEST_OUTPUT_FILE = target;
+    const { outputFile: _omit, ...withoutOutput } = baseInput;
+    await runAllTests(withoutOutput);
+    expect(fs.existsSync(target)).toBe(true);
+  });
+
+  it('writes nothing when outputFile is false', async () => {
+    const target = path.join(dir, 'never.json');
+    process.env.TEST_OUTPUT_FILE = target;
+    await runAllTests({ ...baseInput, outputFile: false });
+    expect(fs.existsSync(target)).toBe(false);
   });
 });

@@ -26,7 +26,7 @@ interface FuzzCheckInput {
 Flow:
 
 1. Iterate the built-in `JUNK_PAYLOADS` list serially.
-2. For each payload, POST/PUT/DELETE it to `${baseUrl}/${endpoint.fullPath}` (or send no body on GET). The body is `JSON.stringify(payload)` so values that lose information under stringify (e.g. `undefined` keys, `NaN`) round-trip through the wire encoding the same as in production.
+2. For each payload, POST/PUT/DELETE it to `${baseUrl}/${endpoint.fullPath}` (on GET the payload rides the query string, under the same reserved key the real client uses). The body is `JSON.stringify(payload)` so values that lose information under stringify (e.g. `undefined` keys, `NaN`) round-trip through the wire encoding the same as in production.
 3. After each request:
    - **No response (fetch error, abort, DNS):** fail with `reason: 'fuzz probe crashed (no response) with payload: ...'`. The reason includes the first 80 chars of the payload JSON.
    - **`httpStatus >= 500` WITH a valid envelope:** **pass**. A 5xx is deliberately tolerated as long as the body is still a `{ status: 'error', errorCode }` envelope — that means the framework caught the error and shaped it, which is exactly the crash-resistance property this layer checks. Only the envelope checks below can fail a probe; the status code alone never does.
@@ -38,7 +38,7 @@ The loop stops at the first failing probe. The result captures only that probe's
 
 ### `runFuzzTests(input)`
 
-Full sweep. Iterates `walkEndpoints(input.apiMethodMap)` and runs `runFuzzCheck` against each.
+Full sweep. Iterates every API route (plus every sync route when `syncMetaMap` is given), narrowed by `filter` before any request, and runs `runFuzzCheck` against each. In an authenticated (cookie) sweep, state-changing routes are reported as skipped to avoid junk-body mutations on the test database — every sync route counts as state-changing, so an authenticated sweep does not fuzz sync routes.
 
 Signature:
 
@@ -54,7 +54,7 @@ interface RunFuzzTestsInput {
 }
 ```
 
-There is no per-endpoint metadata filtering here — every endpoint is fuzzed, regardless of `auth.login` or `rateLimit`. `skip` matching follows the same two-tier convention as the other sweeps: `'<page>/<name>'` for version-agnostic, `'<page>/<name>/<version>'` for specific.
+There is no per-endpoint metadata filtering here — every endpoint (bar the authenticated-sweep skip above) is fuzzed, regardless of `auth.login` or `rateLimit`. `skip` matching follows the same two-tier convention as the other sweeps: `'<page>/<name>'` for version-agnostic, `'<page>/<name>/<version>'` for specific.
 
 `onResult` fires once per endpoint (after all junk payloads for that endpoint have run, or at the first failing probe). It is NOT called per junk payload.
 

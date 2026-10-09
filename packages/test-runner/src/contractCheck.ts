@@ -1,5 +1,6 @@
 import type { ContractCheckResult, EndpointDescriptor } from './types';
-import { sendProbe } from './probeRequest';
+import { defaultProbeTransport } from './probeRequest';
+import type { ProbeTransport } from './probeRequest';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
 
@@ -21,6 +22,8 @@ export interface ContractCheckInput {
    * the contract check.
    */
   requestTimeoutMs?: number;
+  /** How the probe reaches the server. Defaults to HTTP. */
+  transport?: ProbeTransport;
 }
 
 //? Contract layer: send any-shape input, accept any response where
@@ -33,13 +36,11 @@ export interface ContractCheckInput {
 //? empty input. Real behavior tests go in the per-endpoint test file.
 export const runContractCheck = async (input: ContractCheckInput): Promise<ContractCheckResult> => {
   const { endpoint, baseUrl } = input;
-  const url = `${baseUrl.replace(/\/$/, '')}/${endpoint.fullPath}`;
   const body = input.inputFor ? input.inputFor(endpoint) : {};
   const started = Date.now();
 
-  const result = await sendProbe({
-    url,
-    method: endpoint.method,
+  const result = await (input.transport ?? defaultProbeTransport).send({
+    endpoint,
     baseUrl,
     body,
     headers: input.headers,

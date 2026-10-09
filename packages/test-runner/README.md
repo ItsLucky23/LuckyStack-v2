@@ -18,8 +18,8 @@ import {
   resolveTestBaseUrl,
   logRunAllSummary,
 } from '@luckystack/test-runner';
-import { apiInputSchemas } from './src/_sockets/apiInputSchemas.generated';
-import { apiMetaMap, apiMethodMap } from './src/_sockets/apiTypes.generated';
+import { apiInputSchemas, syncInputSchemas } from './src/_sockets/apiInputSchemas.generated';
+import { apiMetaMap, apiMethodMap, syncMetaMap } from './src/_sockets/apiTypes.generated';
 import { ports } from './config.ports';
 
 const baseUrl = resolveTestBaseUrl({ fallbackUrl: `http://localhost:${ports.backend}` });
@@ -27,6 +27,8 @@ const summary = await runAllTests({
   apiMethodMap,
   apiMetaMap,
   apiInputSchemas,
+  syncMetaMap,      // omit and sync routes are not swept (a warning says so)
+  syncInputSchemas,
   baseUrl,
   // Loaded only after .env/.env.local. If config.secretManager.url is set,
   // pointers are resolved in THIS process before Layer-5 tests touch Prisma.
@@ -52,7 +54,7 @@ The fuzz layer is intentionally exhaustive and slow — wire it into nightly CI 
 
 ## Server hooks it depends on
 
-- `/_test/reset` endpoint — served by `@luckystack/server` only when `NODE_ENV` is exactly `development` or `test`, and always gated by a non-empty `TEST_RESET_TOKEN`. `resetServerState` clears framework rate-limit state plus the default Redis session/active-user namespaces; it does not clear application database rows or custom `SessionAdapter` stores.
+- `/_test/reset` endpoint — served by `@luckystack/server` only when `NODE_ENV` is exactly `development` or `test`, and always gated by a non-empty `TEST_RESET_TOKEN`. `resetServerState` clears framework rate-limit state plus the default Redis session/active-user namespaces, or only the targets passed as `only` (the runner's own resets clear rate limits only, so an authenticated sweep keeps its session); it does not clear application database rows or custom `SessionAdapter` stores.
 - `apiMethodMap.generated.ts` — produced by `@luckystack/devkit` from your `_api/*` files. Defaults are read via `getApiMethodMapPath()` from `@luckystack/core`.
 
 ## Public API

@@ -10,6 +10,18 @@ export { runCsrfEnforcementTests } from './runCsrfEnforcementTests';
 export { runFuzzCheck } from './fuzzCheck';
 export { runFuzzTests } from './runFuzzTests';
 export { resetServerState } from './resetServerState';
+export { sendProbe, createHttpProbeTransport, defaultProbeTransport } from './probeRequest';
+export type {
+  ProbeRequestInput,
+  ProbeResponse,
+  ProbeTransport,
+  ProbeTransportRequest,
+  HttpProbeTransportOptions,
+} from './probeRequest';
+export { createSocketProbeTransport } from './socketProbeTransport';
+export type { SocketProbeTransportOptions } from './socketProbeTransport';
+export { createSampleInputFor } from './sampleInputFor';
+export type { CreateSampleInputForOptions, InputSchemaMap } from './sampleInputFor';
 export { resolveTestBaseUrl } from './resolveTestBaseUrl';
 export type { ResolveTestBaseUrlOptions } from './resolveTestBaseUrl';
 export { resolveTestEnvironment } from './resolveTestEnvironment';
@@ -24,6 +36,8 @@ export type {
   ContractCheckResult,
   RunContractSummary,
   SyncMethodMap,
+  SyncMetaMap,
+  SyncMetaEntry,
   ApiMethodMap,
   ApiMetaMap,
   ApiMetaEntry,
@@ -46,6 +60,7 @@ export {
 } from './customTests';
 export type {
   CustomTestCase,
+  CallSyncOptions,
   TestContext,
   TestExpect,
   CustomTestResult,

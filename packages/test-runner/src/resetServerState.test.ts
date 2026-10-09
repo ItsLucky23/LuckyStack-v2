@@ -42,6 +42,15 @@ describe('resetServerState', () => {
     expect((call?.[1]?.headers as Record<string, string>)['X-Test-Reset-Token']).toBe('secret');
   });
 
+  it('appends ?only= when a target list is given, and nothing without one', async () => {
+    const fetchMock = vi.fn((_url: URL | RequestInfo, _init?: RequestInit): Promise<Response> => Promise.resolve(okResponse(true)));
+    globalThis.fetch = fetchMock;
+    await resetServerState({ baseUrl: 'http://localhost:3000', only: ['rateLimits', 'activeUsers'] });
+    await resetServerState({ baseUrl: 'http://localhost:3000', only: [] });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('http://localhost:3000/_test/reset?only=rateLimits%2CactiveUsers');
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('http://localhost:3000/_test/reset');
+  });
+
   it('returns false (does not hang) when the server never responds, via the abort timeout', async () => {
     //? Simulate a connection that is accepted but never answers: fetch only
     //? rejects once its AbortSignal fires. A short requestTimeoutMs keeps the

@@ -3,7 +3,7 @@ import path from 'node:path';
 import * as ts from 'typescript';
 import { getGeneratedApiDocsPath, getGeneratedApiSchemasPath, getGeneratedSocketTypesPath } from '@luckystack/core';
 
-import { mustGet } from '../internal/mapUtils';
+import { getOrInit, mustGet } from '../internal/mapUtils';
 import { typeTextToZodSource } from './zodEmitter';
 import { findExtractionFailure } from './extractionDiagnostics';
 
@@ -80,7 +80,120 @@ export interface SyncTypeEntry {
 	hasServer: boolean;
 	hasClient: boolean;
 	meta?: DocsMetaSnapshot;
+	//? Present only when the route has a `_server_v<N>.ts` file. A client-only
+	//? sync is not a callable route, so it gets no `syncMetaMap` entry and no
+	//? `syncInputSchemas` entry.
+	serverMeta?: SyncServerMeta;
 }
+
+export interface SyncServerMeta {
+	auth: unknown;
+	rateLimit: number | false | undefined;
+}
+
+interface RouteAuthSnapshot {
+	login: boolean;
+	additional?: Record<string, unknown>[];
+	hasAdditional?: boolean;
+}
+
+const compareVersions = (a: { version: string }, b: { version: string }): number =>
+	a.version.localeCompare(b.version, undefined, { numeric: true });
+
+//? The `auth` + `rateLimit` fields of one `apiMetaMap` / `syncMetaMap` entry.
+//? Shared so the test-runner sweeps read API and sync routes under identical
+//? rules: `rateLimit` omitted when undeclared, `additional` only when
+//? non-empty, `hasAdditional` only when true.
+const renderRouteMetaFields = (authValue: unknown, rateLimit: number | false | undefined): string => {
+	const auth: RouteAuthSnapshot = authValue && typeof authValue === 'object'
+		? authValue as RouteAuthSnapshot
+		: { login: false, hasAdditional: false };
+	const rateLimitPart = rateLimit === undefined
+		? ''
+		: `, rateLimit: ${rateLimit === false ? 'false' : String(rateLimit)}`;
+	const additionalPart = auth.additional && auth.additional.length > 0
+		? `, additional: ${JSON.stringify(auth.additional)}`
+		: '';
+	return `auth: { login: ${auth.login ? 'true' : 'false'}${additionalPart}${auth.hasAdditional ? ', hasAdditional: true' : ''} }${rateLimitPart}`;
+};
+
+//? Same fallback for API and sync input schemas (DD-DEVKIT-D2 lives in zodEmitter).
+const inputSchemaSource = (typeText: string): string =>
+	typeTextToZodSource(typeText) ?? 'z.any() /* unparseable input type */';
+
+interface ServerSyncRoute {
+	version: string;
+	clientInput: string;
+	serverMeta: SyncServerMeta;
+}
+
+//? Server sync routes as `[page, [name, versions[]][]][]`, every level sorted
+//? like the other emitted maps. Pages with only client files are dropped.
+const groupServerSyncRoutes = (
+	syncTypesByPage: Map<string, Map<string, SyncTypeEntry>>,
+): [string, [string, ServerSyncRoute[]][]][] => {
+	const pages: [string, [string, ServerSyncRoute[]][]][] = [];
+	for (const pagePath of [...syncTypesByPage.keys()].toSorted()) {
+		const grouped = new Map<string, ServerSyncRoute[]>();
+		for (const [syncKey, entry] of mustGet(syncTypesByPage, pagePath, 'syncTypesByPage')) {
+			if (!entry.serverMeta) continue;
+			const { name, version } = splitVersionedKey(syncKey);
+			getOrInit(grouped, name, () => []).push({ version, clientInput: entry.clientInput, serverMeta: entry.serverMeta });
+		}
+		if (grouped.size === 0) continue;
+		pages.push([
+			pagePath,
+			[...grouped.keys()].toSorted().map((name) => [name, mustGet(grouped, name, 'grouped').toSorted(compareVersions)]),
+		]);
+	}
+	return pages;
+};
+
+//? Body of a `page -> name -> version -> <value>` object literal.
+const renderServerSyncRouteMap = (
+	syncTypesByPage: Map<string, Map<string, SyncTypeEntry>>,
+	renderValue: (route: ServerSyncRoute) => string,
+): string => {
+	let body = '';
+	for (const [pagePath, syncs] of groupServerSyncRoutes(syncTypesByPage)) {
+		body += `  '${pagePath}': {\n`;
+		for (const [syncName, routes] of syncs) {
+			body += `    '${syncName}': {\n`;
+			for (const route of routes) {
+				body += `      '${route.version}': ${renderValue(route)},\n`;
+			}
+			body += `    },\n`;
+		}
+		body += `  },\n`;
+	}
+	return body;
+};
+
+const buildSyncMetaMapSource = (syncTypesByPage: Map<string, Map<string, SyncTypeEntry>>): string => `export interface SyncMetaEntry {
+	auth: { login: boolean; additional?: Record<string, unknown>[]; hasAdditional?: boolean };
+	rateLimit?: number | false;
+}
+
+export const syncMetaMap: Record<string, Record<string, Record<string, SyncMetaEntry>>> = {
+${renderServerSyncRouteMap(syncTypesByPage, (route) => `{ ${renderRouteMetaFields(route.serverMeta.auth, route.serverMeta.rateLimit)} }`)}};
+
+export const getSyncMeta = (pagePath: string, syncName: string, version: string): SyncMetaEntry | undefined => {
+	return syncMetaMap[pagePath]?.[syncName]?.[version];
+};
+`;
+
+const buildSyncInputSchemasSource = (syncTypesByPage: Map<string, Map<string, SyncTypeEntry>>): string => `
+export const syncInputSchemas: Record<string, Record<string, Record<string, z.ZodTypeAny>>> = {
+${renderServerSyncRouteMap(syncTypesByPage, (route) => inputSchemaSource(route.clientInput))}};
+
+export const getSyncInputSchema = (
+	pagePath: string,
+	syncName: string,
+	version: string,
+): z.ZodTypeAny | undefined => {
+	return syncInputSchemas[pagePath]?.[syncName]?.[version];
+};
+`;
 
 const buildImportStatements = ({
 	namedImports,
@@ -300,9 +413,9 @@ const collectFallbacks = (
 			}
 			return;
 		}
-		//? The generated Zod artifact contains API INPUT schemas only. Running
-		//? this check on outputs/sync/streams produces false diagnostics for a
-		//? converter that is never used on those fields.
+		//? The generated Zod artifact contains INPUT schemas only (API input +
+		//? server-sync clientInput). Running this check on outputs/streams
+		//? produces false diagnostics for a converter never used on those fields.
 		const zodSrc = checkZod ? typeTextToZodSource(value) : null;
 		if (zodSrc?.includes('z.any()')) {
 			entries.push({ route, kind, field, fallback: value.slice(0, 80), reason: 'zod-any-fallback' });
@@ -323,7 +436,7 @@ const collectFallbacks = (
 		for (const [syncKey, entry] of syncs) {
 			const { name, version } = splitVersionedKey(syncKey);
 			const route = `${pagePath}/${name}@${version}`;
-			flagField(route, 'sync', 'clientInput', entry.clientInput);
+			flagField(route, 'sync', 'clientInput', entry.clientInput, entry.serverMeta !== undefined);
 			flagField(route, 'sync', 'serverOutput', entry.serverOutput, false, !entry.hasServer);
 			flagField(route, 'sync', 'clientOutput', entry.clientOutput, false, !entry.hasClient);
 			flagField(route, 'sync', 'serverStream', entry.serverStream);
@@ -535,16 +648,7 @@ export const apiMetaMap: Record<string, Record<string, Record<string, ApiMetaEnt
 		for (const apiName of [...grouped.keys()].toSorted()) {
 			content += `    '${apiName}': {\n`;
 			for (const { version, entry } of mustGet(grouped, apiName, 'grouped').toSorted((a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }))) {
-				const auth = entry.auth && typeof entry.auth === 'object'
-					? entry.auth as { login: boolean; additional?: Record<string, unknown>[]; hasAdditional?: boolean }
-					: { login: false, hasAdditional: false };
-				const rateLimitPart = entry.rateLimit === undefined
-					? ''
-					: `, rateLimit: ${entry.rateLimit === false ? 'false' : String(entry.rateLimit)}`;
-				const additionalPart = auth.additional && auth.additional.length > 0
-					? `, additional: ${JSON.stringify(auth.additional)}`
-					: '';
-				content += `      '${version}': { method: '${entry.method}', auth: { login: ${auth.login ? 'true' : 'false'}${additionalPart}${auth.hasAdditional ? ', hasAdditional: true' : ''} }${rateLimitPart} },\n`;
+				content += `      '${version}': { method: '${entry.method}', ${renderRouteMetaFields(entry.auth, entry.rateLimit)} },\n`;
 			}
 			content += `    },\n`;
 		}
@@ -557,6 +661,7 @@ export const getApiMeta = (pagePath: string, apiName: string, version: string): 
 	return apiMetaMap[pagePath]?.[apiName]?.[version];
 };
 
+${buildSyncMetaMapSource(syncTypesByPage)}
 // Sync Type Definitions
 // 
 
@@ -657,9 +762,9 @@ declare module '@luckystack/core/typemap' {
 
 	validateGeneratedTypeIdentifiers(content);
 
-	//? Zod schemas for every API input. Runtime validators + test-runner fuzz
+	//? Zod schemas for every API input + sync-server clientInput. Runtime validators + test-runner fuzz
 	//? use this file. Emitted alongside the type map so the two always track.
-	const schemasContent = buildSchemasContent({ typesByPage });
+	const schemasContent = buildSchemasContent({ typesByPage, syncTypesByPage });
 
 	//? Diagnostics: collect routes with degraded type extraction so the
 	//? generator exposes them in a machine-readable file rather than only
@@ -680,13 +785,16 @@ declare module '@luckystack/core/typemap' {
 
 const buildSchemasContent = ({
 	typesByPage,
+	syncTypesByPage,
 }: {
 	typesByPage: Map<string, Map<string, ApiTypeEntry>>;
+	syncTypesByPage: Map<string, Map<string, SyncTypeEntry>>;
 }): string => {
 	const sortedPages = [...typesByPage.keys()].toSorted();
 
 	let body = `/* eslint-disable */
-//? Auto-generated Zod schemas for every API input. Driven by the same walk
+//? Auto-generated Zod schemas for every API input and every sync-server
+//? clientInput. Driven by the same walk
 //? as apiTypes.generated.ts; see @luckystack/devkit/src/typeMap/zodEmitter.ts
 //? for the TS-AST â†’ Zod converter. Types that fall outside the converter's
 //? scope emit \`z.any()\` with a TODO comment.
@@ -712,8 +820,7 @@ export const apiInputSchemas: Record<string, Record<string, Record<string, z.Zod
 			for (const { version, entry } of mustGet(grouped, apiName, 'grouped').toSorted(
 				(a, b) => a.version.localeCompare(b.version, undefined, { numeric: true }),
 			)) {
-				const schemaSrc = typeTextToZodSource(entry.input) ?? 'z.any() /* unparseable input type */';
-				body += `      '${version}': ${schemaSrc},\n`;
+				body += `      '${version}': ${inputSchemaSource(entry.input)},\n`;
 			}
 			body += `    },\n`;
 		}
@@ -730,6 +837,8 @@ export const getApiInputSchema = (
 	return apiInputSchemas[pagePath]?.[apiName]?.[version];
 };
 `;
+
+	body += buildSyncInputSchemasSource(syncTypesByPage);
 
 	return body;
 };

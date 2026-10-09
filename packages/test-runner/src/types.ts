@@ -26,13 +26,31 @@ export interface ApiMetaEntry {
 
 export type ApiMetaMap = Partial<Record<string, Partial<Record<string, Partial<Record<string, ApiMetaEntry>>>>>>;
 
+//? Mirror of the generated `syncMetaMap` (page → name → version → meta), emitted
+//? by devkit next to `apiMetaMap`. A sync route has no HTTP method of its own —
+//? only the auth requirement and rate limit its `_server` file declares.
+export interface SyncMetaEntry {
+  auth: ApiMetaEntry['auth'];
+  rateLimit?: number | false;
+}
+
+export type SyncMetaMap = Partial<Record<string, Partial<Record<string, Partial<Record<string, SyncMetaEntry>>>>>>;
+
+//? The part of a meta entry the sweep layers read. Both `ApiMetaEntry` and
+//? `SyncMetaEntry` satisfy it, so one set of helpers serves both route kinds.
+export type RouteMetaEntry = Pick<ApiMetaEntry, 'auth' | 'rateLimit'>;
+
+export type RouteMetaMap = Partial<Record<string, Partial<Record<string, Partial<Record<string, RouteMetaEntry>>>>>>;
+
 export interface EndpointDescriptor {
   page: string;
   name: string;
   version: string;
   method: HttpMethod;
-  /** `api/<page>/<name>/<version>` */
+  /** `api/<page>/<name>/<version>` or `sync/<page>/<name>/<version>` */
   fullPath: string;
+  /** Route kind. Absent means `'api'` — only `walkSyncEndpoints` sets `'sync'`. */
+  kind?: 'api' | 'sync';
 }
 
 export interface ContractCheckResult {

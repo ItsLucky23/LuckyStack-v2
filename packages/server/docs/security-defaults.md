@@ -122,9 +122,11 @@ x-test-reset-token: <value of TEST_RESET_TOKEN>
 
 **What the reset clears:**
 
+Without `?only=` the default below runs. With `?only=<target>[,<target>]` exactly the listed targets run and nothing else; the valid targets are core's `TEST_RESET_TARGETS` (shared with `@luckystack/test-runner`, so the two sides cannot drift). An unknown or empty target returns `400 { status: 'error', errorCode: 'test.invalidResetTarget' }` — a typo must not silently reset nothing, or everything. The selector exists because the default also deletes the session an authenticated test sweep runs on; the runner therefore always sends `only=rateLimits`.
+
 | Step | Action |
 | --- | --- |
-| 1 | `clearAllRateLimits()` — purges in-memory + Redis rate-limit counters. Always reported in `cleared`. |
+| 1 | `clearAllRateLimits()` — purges in-memory + Redis rate-limit counters. Reported in `cleared` whenever it runs. |
 | 2 | `redis SCAN` + `DEL` keys matching `<projectName>-session:*`. Reported as `'sessions'` when at least one key is deleted. |
 | 3 | `redis SCAN` + `DEL` keys matching `<projectName>-activeUsers:*`. Reported as `'activeUsers'` when at least one key is deleted. |
 | 4 (opt-in) | When `?include=hooks` is supplied, `clearAllHooks()` empties every framework hook registration. Reported as `'hooks'`. |
@@ -137,7 +139,7 @@ x-test-reset-token: <value of TEST_RESET_TOKEN>
 
 **Errors / edge cases:**
 
-- Malformed `req.url` is detected with `URL.canParse(rawUrl, base)`. When false, `?include=hooks` is treated as absent.
+- Malformed `req.url` is detected with `URL.canParse(rawUrl, base)`. When false, the query is treated as empty: no `only`, no `?include=hooks` — the default reset runs.
 - Redis `SCAN`+`DEL` errors are swallowed per pattern — the cleared array simply omits the label.
 - The hook-clear is opt-in because clearing every hook also removes framework-internal registrations (e.g. presence's `postLogout`).
 

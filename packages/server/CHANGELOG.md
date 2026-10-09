@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `/_test/reset` accepts `?only=<target>[,<target>]` to clear exactly those targets (the shared list in core `TEST_RESET_TARGETS`). An unknown or empty target is `400 test.invalidResetTarget` — a typo must not silently reset nothing, or everything. Without `only` the default reset is unchanged. This lets an authenticated test sweep drain limiter buckets without deleting its own session.
+
 ## [0.8.7] - 2026-08-18
 
 ### Added

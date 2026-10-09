@@ -1,8 +1,13 @@
 import type { ContractCheckResult, EndpointDescriptor } from './types';
-import { sendProbe } from './probeRequest';
+import { defaultProbeTransport } from './probeRequest';
+import type { ProbeTransport } from './probeRequest';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
-const EXPECTED_ERROR_CODE = 'api.rateLimitExceeded';
+
+//? The limiter's rejection code is namespaced by route kind: `api.*` from the
+//? API pipeline, `sync.*` from both sync pipelines (socket + HTTP).
+const expectedErrorCodeFor = (endpoint: EndpointDescriptor): string =>
+  endpoint.kind === 'sync' ? 'sync.rateLimitExceeded' : 'api.rateLimitExceeded';
 
 //? Error codes the server emits BEFORE the rate-limit pipeline runs (auth guard
 //? + server-level CSRF middleware). When a drain response carries one of these,
@@ -16,12 +21,18 @@ const EXPECTED_ERROR_CODE = 'api.rateLimitExceeded';
 //?     (handleHttpApiRequest.ts).
 //?   - `auth.csrfMismatch` — cookie-mode state-changing route, CSRF gate
 //?     (server/httpRoutes/csrfMiddleware.ts).
+//?   - `sync.notRoomMember` / `sync.receiverNotAllowed` / `sync.missingReceiver`
+//?     — sync receiver checks, which run after auth and before the limiter
+//?     (handleSyncRequest.ts / handleHttpSyncRequest.ts).
 //? Validation (`api.invalidInputType`) runs AFTER the limiter, so it is NOT a
 //? pre-limiter code and is deliberately excluded.
 const PRE_LIMITER_ERROR_CODES = new Set([
   'auth.required',
   'auth.forbidden',
   'auth.csrfMismatch',
+  'sync.notRoomMember',
+  'sync.receiverNotAllowed',
+  'sync.missingReceiver',
 ]);
 
 export interface RateLimitCheckInput {
@@ -32,26 +43,28 @@ export interface RateLimitCheckInput {
   headers?: Record<string, string>;
   /** Per-call request timeout in ms. Defaults to 10000. */
   requestTimeoutMs?: number;
+  /** How the probes reach the server. Defaults to HTTP. */
+  transport?: ProbeTransport;
 }
 
 //? Rate-limit layer: fire `rateLimit + 1` requests back to back and assert the
-//? last one is rejected with `api.rateLimitExceeded`. All preceding requests
-//? are allowed to return either success or any other envelope — only the N+1
-//? matters for this layer.
+//? last one is rejected with `api.rateLimitExceeded` (`sync.rateLimitExceeded`
+//? for a sync route). All preceding requests are allowed to return either
+//? success or any other envelope — only the N+1 matters for this layer.
 //?
 //? This layer mutates server-side state (limiter counters). Run it after the
 //? contract + auth layers, or against a dedicated test instance. The server's
 //? clearAllRateLimits() utility can reset state between runs.
 export const runRateLimitCheck = async (input: RateLimitCheckInput): Promise<ContractCheckResult> => {
   const { endpoint, baseUrl, rateLimit } = input;
-  const url = `${baseUrl.replace(/\/$/, '')}/${endpoint.fullPath}`;
   const body = input.inputFor ? input.inputFor(endpoint) : {};
   const started = Date.now();
   const requestTimeoutMs = input.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+  const expectedErrorCode = expectedErrorCodeFor(endpoint);
+  const transport = input.transport ?? defaultProbeTransport;
 
-  const send = () => sendProbe({
-    url,
-    method: endpoint.method,
+  const send = () => transport.send({
+    endpoint,
     baseUrl,
     body,
     headers: input.headers,
@@ -92,7 +105,7 @@ export const runRateLimitCheck = async (input: RateLimitCheckInput): Promise<Con
 
   const { httpStatus, parsed } = final;
 
-  if (parsed?.status === 'error' && parsed.errorCode === EXPECTED_ERROR_CODE) {
+  if (parsed?.status === 'error' && parsed.errorCode === expectedErrorCode) {
     return {
       endpoint,
       status: 'pass',
@@ -111,7 +124,7 @@ export const runRateLimitCheck = async (input: RateLimitCheckInput): Promise<Con
     httpStatus,
     responseStatus,
     errorCode: parsed?.errorCode,
-    reason: `expected '${EXPECTED_ERROR_CODE}' on request ${rateLimit + 1} but got ${parsed?.status ?? 'none'}/${parsed?.errorCode ?? '(none)'}`,
+    reason: `expected '${expectedErrorCode}' on request ${rateLimit + 1} but got ${parsed?.status ?? 'none'}/${parsed?.errorCode ?? '(none)'}`,
     durationMs,
   };
 };

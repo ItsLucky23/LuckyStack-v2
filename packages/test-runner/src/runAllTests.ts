@@ -1,13 +1,24 @@
 //? Orchestrator — runs all five test layers (contract, auth-enforcement,
 //? rate-limit, fuzz, custom) against a running server and returns a single
 //? combined summary. Consumers call this from their own thin script that
-//? imports the generated `apiMethodMap` + `apiInputSchemas`.
+//? imports the generated `apiMethodMap` + `apiInputSchemas` (and, to sweep
+//? sync routes too, `syncMetaMap` + `syncInputSchemas`).
 
-import { clearAllRateLimits, getCsrfConfig, getProjectConfig } from '@luckystack/core';
+import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
 
-import { sampleSchemaInput } from './schemaSampleInput';
+import type { Socket } from 'socket.io-client';
+import { clearAllRateLimits, getCsrfConfig, getProjectConfig, tryCatch, tryCatchSync } from '@luckystack/core';
+
+import { createSampleInputFor } from './sampleInputFor';
+import type { InputSchemaMap } from './sampleInputFor';
 import { createTestDataMarker } from './testDataMarker';
 import { resetServerState } from './resetServerState';
+import { createHttpProbeTransport } from './probeRequest';
+import type { ProbeTransport } from './probeRequest';
+import { createSocketProbeTransport } from './socketProbeTransport';
+import { connectTestSocket, joinTestRoom } from './testSocket';
 import { runContractTests } from './runContractTests';
 import { runAuthEnforcementTests } from './runAuthEnforcementTests';
 import { runRateLimitTests } from './runRateLimitTests';
@@ -19,15 +30,33 @@ import {
   resolveTestEnvironment,
   type ResolveTestEnvironmentInput,
 } from './resolveTestEnvironment';
-import { calculateSummary, LAYER_KEYS } from './testLayerHelpers';
+import { LAYER_KEYS } from './testLayerHelpers';
 import type { CustomTestResult, RunCustomTestsSummary } from './customTests';
-import type { ApiMethodMap, ApiMetaMap, ContractCheckResult, EndpointDescriptor, RunContractSummary } from './types';
-import type { ZodType } from 'zod';
-
-type ApiInputSchemas = Partial<Record<string, Partial<Record<string, Partial<Record<string, ZodType | undefined>>>>>>;
+import type { ApiMethodMap, ApiMetaMap, EndpointDescriptor, RunContractSummary, SyncMetaMap } from './types';
 
 export interface RunAllTestsInput {
   apiMethodMap: ApiMethodMap;
+  /**
+   * Generated `syncMetaMap` (from `apiTypes.generated.ts`). When given, the
+   * sweep layers exercise every sync route too; without it sync routes are
+   * not swept (a warning says so).
+   */
+  syncMetaMap?: SyncMetaMap;
+  /** Generated `syncInputSchemas` (from `apiInputSchemas.generated.ts`) — Zod-valid sync sample payloads. */
+  syncInputSchemas?: InputSchemaMap;
+  /**
+   * How sync routes are probed. Defaults to the project's own
+   * `transport.invocation`: `'socket'` → Socket.io (the pipeline real clients
+   * hit), `'routed-http'` → the `/sync/*` HTTP route. The CSRF layer always
+   * probes over HTTP — CSRF is an HTTP-only guard.
+   */
+  syncTransport?: 'socket' | 'http';
+  /**
+   * Write the full `RunAllTestsSummary` as JSON to this path (relative to the
+   * process cwd). Defaults to `TEST_OUTPUT_FILE`, else `test-results.json`;
+   * `false` disables the file.
+   */
+  outputFile?: string | false;
   /**
    * Lazy loader for the consumer's default `config.ts` export. Required so
    * runAllTests cannot silently skip a configured secret manager; resolution
@@ -35,7 +64,7 @@ export interface RunAllTestsInput {
    */
   loadProjectConfig: NonNullable<ResolveTestEnvironmentInput['loadProjectConfig']>;
   apiMetaMap: ApiMetaMap;
-  apiInputSchemas: ApiInputSchemas;
+  apiInputSchemas: InputSchemaMap;
   baseUrl: string;
   /** Cookie name for the session token. Defaults to the project's configured session cookie name (`projectConfig.http.sessionCookieName`). */
   sessionCookieName?: string;
@@ -66,12 +95,14 @@ export interface RunAllTestsInput {
    */
   resetToken?: string;
   /**
-   * Contract-test mutation safety (finding #98). When a reset token is
-   * available, the sweep POSTs `/_test/reset` ONCE before the first layer
-   * (clean slate — no real row the generated payloads could clobber) and ONCE
-   * after the last (drop whatever the sweep created, so no test data persists).
+   * When a reset token is available, the sweep POSTs
+   * `/_test/reset?only=rateLimits` ONCE before the first layer (no bucket left
+   * drained by an earlier run) and ONCE after the last (the custom layer and the
+   * next run start unthrottled). Only limiter state is cleared: sessions — the
+   * `authToken` session above all — survive, so `TEST_RESET_TOKEN` can be set
+   * on an authenticated sweep. The reset never touches the app database.
    * Defaults to ON; set `false` to opt out. With no token the bookends are
-   * silently skipped with a logged note (they can't run — `/_test/reset` 403s).
+   * skipped with a logged note (they can't run — `/_test/reset` 403s).
    */
   resetBookends?: boolean;
 }
@@ -86,14 +117,6 @@ export interface RunAllTestsSummary {
   totalPassed: number;
   totalFailed: number;
 }
-
-const inputForEndpoint = (apiInputSchemas: ApiInputSchemas, stringPrefix: string) =>
-  (endpoint: EndpointDescriptor): unknown => {
-    const schema = apiInputSchemas[endpoint.page]?.[endpoint.name]?.[endpoint.version];
-    //? Tag generated strings with the run-unique test-data marker so any rows
-    //? the sweep creates are identifiable + collision-free (finding #98).
-    return schema ? sampleSchemaInput(schema, { stringPrefix }) : {};
-  };
 
 //? Decide whether the contract-sweep reset bookends should run. Returns the
 //? token to use, or null to skip. When the bookends are requested (the default)
@@ -111,19 +134,6 @@ const resolveResetBookendToken = (input: RunAllTestsInput): string | null => {
     return null;
   }
   return token;
-};
-
-const matchesFilter = (endpoint: EndpointDescriptor, filter: string | undefined): boolean => {
-  if (!filter) return true;
-  return `${endpoint.page}/${endpoint.name}/${endpoint.version}`.includes(filter);
-};
-
-const filterResults = (results: ContractCheckResult[], filter: string | undefined): ContractCheckResult[] =>
-  filter ? results.filter(r => matchesFilter(r.endpoint, filter)) : results;
-
-const cloneSummary = (summary: RunContractSummary, filter: string | undefined): RunContractSummary => {
-  if (!filter) return summary;
-  return calculateSummary(filterResults(summary.results, filter));
 };
 
 //? Build the Cookie (and CSRF) headers sweep layers send when an `authToken`
@@ -163,97 +173,143 @@ const buildAuthHeaders = async (input: RunAllTestsInput): Promise<Record<string,
   return headers;
 };
 
-//? Run the four auto-sweep layers (contract → auth → rate-limit → fuzz) in
-//? order, honoring the per-layer disable flags, and write each filtered
-//? summary onto `summary`. Mutates `summary` in place — identical to the
-//? prior inline block. The auth and rate-limit / fuzz nesting + ordering is
-//? preserved exactly (auth always runs in the sweep; rate-limit + fuzz are
-//? individually gated).
+interface SyncSweepTransports {
+  /** Transport the contract / auth / rate-limit / fuzz layers use for sync routes. */
+  sweep: ProbeTransport;
+  /** HTTP transport the CSRF layer uses for sync routes (CSRF is HTTP-only). */
+  csrf: ProbeTransport;
+  close: () => Promise<void>;
+}
+
+//? Prepare sync-route probing: one throwaway room per run that every sync probe
+//? targets, joined by the sweep's session so room-membership enforcement
+//? (`sync.requireRoomMembership`, default on) sees a member — exactly what a
+//? real client does before syncing. The HTTP pipeline reads membership from
+//? the session's persisted room codes, which the join writes; the socket
+//? transport additionally joins on its own socket. Without an `authToken`
+//? nothing can join, so sync probes see what an anonymous client sees.
+const prepareSyncSweep = async (input: RunAllTestsInput): Promise<SyncSweepTransports> => {
+  const receiver = `lstest-room-${crypto.randomUUID()}`;
+  const sessionCookieName = input.sessionCookieName ?? getProjectConfig().http.sessionCookieName;
+  const mode = input.syncTransport
+    ?? (getProjectConfig().transport.invocation === 'routed-http' ? 'http' : 'socket');
+  const http = createHttpProbeTransport({ syncReceiver: receiver });
+
+  let memberSocket: Socket | null = null;
+  if (input.authToken) {
+    const authToken = input.authToken;
+    const [connectError, socket] = await tryCatch(() => connectTestSocket({
+      baseUrl: input.baseUrl,
+      token: authToken,
+      label: 'sync sweep',
+      sessionCookieName,
+    }));
+    if (connectError || !socket) {
+      console.warn(`[test-runner] runAllTests: could not open a socket for the sync sweep — ${connectError?.message ?? 'no socket'}; sync probes will be rejected as non-members.`);
+    } else {
+      memberSocket = socket;
+      const [joinError] = await tryCatch(() => joinTestRoom(socket, receiver, { label: 'sync sweep' }));
+      if (joinError) console.warn(`[test-runner] runAllTests: ${joinError.message}; sync probes will be rejected as non-members.`);
+    }
+  }
+
+  const sweep = mode === 'socket'
+    ? createSocketProbeTransport({ baseUrl: input.baseUrl, receiver, sessionCookieName })
+    : http;
+
+  return {
+    sweep,
+    csrf: http,
+    close: async () => {
+      await sweep.close?.();
+      memberSocket?.disconnect();
+    },
+  };
+};
+
+//? Run the auto-sweep layers (contract → auth → rate-limit → csrf → fuzz) in
+//? order, honoring the per-layer disable flags, and write each summary onto
+//? `summary`. Every layer receives `filter`, so a filtered run only REQUESTS
+//? the matching routes (it used to sweep everything and filter the report).
 const runSweepLayers = async (
   input: RunAllTestsInput,
   summary: RunAllTestsSummary,
   headers: Record<string, string>,
   inputFor: (endpoint: EndpointDescriptor) => unknown,
 ): Promise<void> => {
-  //? Reset bookend — BEFORE the sweep. With a clean DB no real record exists for
-  //? the generated sample payloads to accidentally edit/delete (finding #98).
+  const resetToken = input.resetToken ?? process.env.TEST_RESET_TOKEN;
+  //? Reset bookend — BEFORE the sweep: no limiter bucket left drained by an
+  //? earlier run. Limiter state only — the sweep's own session must survive.
   const resetBookendToken = resolveResetBookendToken(input);
   if (resetBookendToken) {
-    await resetServerState({ baseUrl: input.baseUrl, token: resetBookendToken });
+    await resetServerState({ baseUrl: input.baseUrl, token: resetBookendToken, only: ['rateLimits'] });
   }
 
-  const contract = await runContractTests({
+  const hasSyncRoutes = Object.keys(input.syncMetaMap ?? {}).length > 0;
+  const sync = hasSyncRoutes ? await prepareSyncSweep(input) : null;
+  const shared = {
     apiMethodMap: input.apiMethodMap,
+    syncMetaMap: input.syncMetaMap,
     baseUrl: input.baseUrl,
     skip: input.skip,
-    headers,
-    inputFor,
+    filter: input.filter,
+    syncTransport: sync?.sweep,
+  };
+
+  //? The layers must not leave sockets open when one throws.
+  const [layerError] = await tryCatch(async () => {
+    summary.contract = await runContractTests({ ...shared, headers, inputFor });
+
+    summary.auth = await runAuthEnforcementTests({ ...shared, apiMetaMap: input.apiMetaMap, inputFor });
+
+    if (!input.noRateLimit) {
+      summary.rateLimit = await runRateLimitTests({
+        ...shared,
+        apiMetaMap: input.apiMetaMap,
+        headers,
+        inputFor,
+        //? Reset the shared per-IP rate-limit bucket between endpoints so a
+        //? neighbour saturating the window doesn't cause false pass/fail on the
+        //? next endpoint. Requires the server to expose /_test/reset (NODE_ENV in
+        //? { 'development', 'test' } AND TEST_RESET_TOKEN set + matching header).
+        resetBetweenEndpoints: true,
+        //? Thread the reset token (explicit input, else the TEST_RESET_TOKEN env the
+        //? server validates against) — without it `/_test/reset` returns 403 and the
+        //? between-endpoint reset silently never happens.
+        resetToken,
+      });
+    }
+
+    //? CSRF-enforcement layer: probes that the framework's CSRF middleware rejects
+    //? state-changing authenticated requests carrying NO CSRF header. It can only
+    //? reach the CSRF check past the auth guard with a valid session, so it runs
+    //? only when an `authToken` is supplied (and the layer isn't disabled). Without
+    //? a token there is nothing to probe — the layer is silently skipped, leaving
+    //? behavior unchanged for tokenless sweeps.
+    if (!input.noCsrf && headers.Cookie) {
+      summary.csrf = await runCsrfEnforcementTests({
+        ...shared,
+        apiMetaMap: input.apiMetaMap,
+        authCookie: headers.Cookie,
+        inputFor,
+        syncTransport: sync?.csrf,
+      });
+    }
+
+    if (!input.noFuzz) {
+      summary.fuzz = await runFuzzTests({ ...shared, headers });
+    }
   });
-  summary.contract = cloneSummary(contract, input.filter);
 
-  const auth = await runAuthEnforcementTests({
-    apiMethodMap: input.apiMethodMap,
-    apiMetaMap: input.apiMetaMap,
-    baseUrl: input.baseUrl,
-    skip: input.skip,
-    inputFor,
-  });
-  summary.auth = cloneSummary(auth, input.filter);
+  await sync?.close();
 
-  if (!input.noRateLimit) {
-    const rateLimit = await runRateLimitTests({
-      apiMethodMap: input.apiMethodMap,
-      apiMetaMap: input.apiMetaMap,
-      baseUrl: input.baseUrl,
-      skip: input.skip,
-      headers,
-      inputFor,
-      //? Reset the shared per-IP rate-limit bucket between endpoints so a
-      //? neighbour saturating the window doesn't cause false pass/fail on the
-      //? next endpoint. Requires the server to expose /_test/reset (NODE_ENV in
-      //? { 'development', 'test' } AND TEST_RESET_TOKEN set + matching header).
-      resetBetweenEndpoints: true,
-      //? Thread the reset token (explicit input, else the TEST_RESET_TOKEN env the
-      //? server validates against) — without it `/_test/reset` returns 403 and the
-      //? between-endpoint reset silently never happens.
-      resetToken: input.resetToken ?? process.env.TEST_RESET_TOKEN,
-    });
-    summary.rateLimit = cloneSummary(rateLimit, input.filter);
-  }
-
-  //? CSRF-enforcement layer: probes that the framework's CSRF middleware rejects
-  //? state-changing authenticated requests carrying NO CSRF header. It can only
-  //? reach the CSRF check past the auth guard with a valid session, so it runs
-  //? only when an `authToken` is supplied (and the layer isn't disabled). Without
-  //? a token there is nothing to probe — the layer is silently skipped, leaving
-  //? behavior unchanged for tokenless sweeps.
-  if (!input.noCsrf && headers.Cookie) {
-    const csrf = await runCsrfEnforcementTests({
-      apiMethodMap: input.apiMethodMap,
-      apiMetaMap: input.apiMetaMap,
-      baseUrl: input.baseUrl,
-      authCookie: headers.Cookie,
-      skip: input.skip,
-      inputFor,
-    });
-    summary.csrf = cloneSummary(csrf, input.filter);
-  }
-
-  if (!input.noFuzz) {
-    const fuzz = await runFuzzTests({
-      apiMethodMap: input.apiMethodMap,
-      baseUrl: input.baseUrl,
-      skip: input.skip,
-      headers,
-    });
-    summary.fuzz = cloneSummary(fuzz, input.filter);
-  }
-
-  //? Reset bookend — AFTER the sweep. Drops every row the sweep's generated
-  //? payloads created so no `lstest_*` test data persists in the DB (finding #98).
+  //? Reset bookend — AFTER the sweep: the custom layer and the next run start
+  //? with fresh limiter buckets.
   if (resetBookendToken) {
-    await resetServerState({ baseUrl: input.baseUrl, token: resetBookendToken });
+    await resetServerState({ baseUrl: input.baseUrl, token: resetBookendToken, only: ['rateLimits'] });
   }
+
+  if (layerError) throw layerError;
 };
 
 //? Run the custom (Layer 5) sweep, after clearing the per-route rate-limit
@@ -353,12 +409,24 @@ export const runAllTests = async (input: RunAllTestsInput): Promise<RunAllTestsS
         + 'Pass the generated apiMetaMap to enable those checks.',
       );
     }
+    //? Sync routes are only swept when the generated syncMetaMap is passed —
+    //? say so instead of letting them silently go without transport coverage.
+    if (!input.syncMetaMap) {
+      console.warn(
+        '[test-runner] runAllTests: no syncMetaMap passed — sync routes are NOT swept. '
+        + 'Pass the generated syncMetaMap (+ syncInputSchemas) to cover them.',
+      );
+    }
   }
 
   const headers = await buildAuthHeaders(input);
   //? One marker per run so every generated string this sweep posts is tagged
   //? with the same recognizable `lstest_<uuid>_` prefix (finding #98).
-  const inputFor = inputForEndpoint(input.apiInputSchemas, createTestDataMarker());
+  const inputFor = createSampleInputFor({
+    apiInputSchemas: input.apiInputSchemas,
+    syncInputSchemas: input.syncInputSchemas,
+    stringPrefix: createTestDataMarker(),
+  });
 
   if (!input.noSweep) {
     await runSweepLayers(input, summary, headers, inputFor);
@@ -369,8 +437,25 @@ export const runAllTests = async (input: RunAllTestsInput): Promise<RunAllTestsS
   }
 
   computeTotals(summary);
+  writeSummaryFile(summary, input.outputFile);
 
   return summary;
+};
+
+//? Machine-readable results, so CI or an AI agent can read pass/fail + the
+//? per-result reasons without scraping the terminal. A write failure is
+//? reported, never thrown — the summary is still returned to the caller.
+const writeSummaryFile = (summary: RunAllTestsSummary, outputFile: string | false | undefined): void => {
+  if (outputFile === false) return;
+  const target = path.resolve(outputFile ?? process.env.TEST_OUTPUT_FILE ?? 'test-results.json');
+  const [writeError] = tryCatchSync(() => {
+    fs.writeFileSync(target, JSON.stringify(summary, null, 2), 'utf8');
+  });
+  if (writeError) {
+    console.warn(`[test-runner] runAllTests: could not write ${target} — ${writeError.message}`);
+    return;
+  }
+  console.log(`[test-runner] full results written to ${target}`);
 };
 
 //? ── Colored, list-based reporting ───────────────────────────────────────

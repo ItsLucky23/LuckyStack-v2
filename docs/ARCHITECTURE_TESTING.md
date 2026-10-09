@@ -119,7 +119,7 @@ The two layers below run against a **live server** (`npm run test`). The server 
 
 ## Layer 1 — Auto-sweep
 
-Built into `@luckystack/test-runner`. Walks `apiMethodMap` (the generated route registry in `src/_sockets/apiTypes.generated.ts`) and runs four progressive checks against every endpoint:
+Built into `@luckystack/test-runner`. Walks `apiMethodMap` (the generated route registry in `src/_sockets/apiTypes.generated.ts`) — plus every sync route in `syncMetaMap` when the entry script passes it, as the scaffolded `scripts/testAll.ts` does — and runs four progressive checks against every endpoint. Sync routes are probed over the transport the project itself uses (`transport.invocation`): Socket.io by default, the `/sync/*` HTTP route for `routed-http`.
 
 | Check | What it asserts | Implementation |
 |---|---|---|
@@ -200,7 +200,12 @@ export const customTests: CustomTestCase[] = [
 export interface TestContext {
   /** Invoke the route under test (page/name/version baked in from the filename). */
   callApi: <TInput, TOutput>(input: TInput) => Promise<TOutput>;
-  callSync: <TInput, TOutput>(input: TInput, opts?: { receiver?: string }) => Promise<TOutput>;
+  /**
+   * Follows the project's `transport.invocation`: a real Socket.io `sync` emit for
+   * 'socket' (default), the `/sync/*` HTTP route for 'routed-http'. Over the socket
+   * the case's session first joins `opts.receiver` (except 'all'), like a real client.
+   */
+  callSync: <TInput, TOutput>(input: TInput, opts?: CallSyncOptions) => Promise<TOutput>;
 
   /** Session helpers — reuse the same fixtures the auth-enforcement sweep uses. */
   session: {
@@ -239,6 +244,8 @@ export interface CustomTestCase {
 }
 ```
 
+`CallSyncOptions` (exported): `receiver`, `ignoreSelf`, `transport` (`'socket' | 'http'`, overrides the project default for one call) and `joinRoom` (default `true`; pass `false` to test a non-member). The case's socket opens on the first socket `callSync`, reopens when the case's session changes, and closes with the case. Before this, `callSync` always used HTTP — a socket-mode project's tests did not exercise the pipeline its clients use.
+
 Throw from `run` to fail the case. The thrown error's message — plus the server's actual `errorCode` from the last `callApi`/`callSync` response — is included in the output. The runner catches; one failing case does not stop the others.
 
 A negative test (one that asserts *that* something fails) is **green** when the expected error occurs — use `ctx.expect.throws(...)` or assert `result.status === 'error'`. Do NOT mark such a case `expectedToFail`: that marker is only for *acknowledged real bugs*, never for "this test verifies a rejection".
@@ -266,6 +273,8 @@ npm run test -- --filter settings     # only routes whose path matches the subst
 ```
 
 Exit code 0 if all pass, 1 if any failed. The CLI prints a per-route table and a final summary count.
+
+`--filter` is applied before any request: non-matching routes are not called at all, in every layer. An authenticated sweep calls every route with its session — a logout-type route would end that session for the rest of the run, so list such routes in `TEST_SKIP`.
 
 ### Side effects
 
@@ -346,6 +355,6 @@ Each failed item shows `<route> :: <case>`, the assertion message, and the **ser
 
 ### Machine-readable output
 
-The full `RunAllTestsSummary` (every layer, every result with `status` / `reason` / `errorCode`, plus `xfailed` / `xpassed` counts on the custom layer) is written to `test-results.json` (override with `TEST_OUTPUT_FILE`, gitignored). Parse that instead of scraping the terminal.
+The full `RunAllTestsSummary` (every layer, every result with `status` / `reason` / `errorCode`, plus `xfailed` / `xpassed` counts on the custom layer) is written to `test-results.json` by `runAllTests` itself (override with `TEST_OUTPUT_FILE` or the `outputFile` option; `outputFile: false` disables it; gitignored). Parse that instead of scraping the terminal.
 
 The route path + test case name are always in the output so you can jump straight to the failing assertion.

@@ -12,10 +12,11 @@
 //?   TEST_NO_SWEEP=1        — skip all sweep layers (only run custom tests)
 //?   TEST_ONLY_CUSTOM=1     — alias for TEST_NO_SWEEP
 //?   TEST_NO_CUSTOM=1       — skip per-route custom tests
+//?   TEST_OUTPUT_FILE       — results JSON path (default `test-results.json`)
 
 import { logRunAllSummary, resolveTestBaseUrl, runAllTests } from '@luckystack/test-runner';
-import { apiInputSchemas } from '../src/_sockets/apiInputSchemas.generated';
-import { apiMetaMap, apiMethodMap } from '../src/_sockets/apiTypes.generated';
+import { apiInputSchemas, syncInputSchemas } from '../src/_sockets/apiInputSchemas.generated';
+import { apiMetaMap, apiMethodMap, syncMetaMap } from '../src/_sockets/apiTypes.generated';
 import { ports } from '../config.ports';
 
 const baseUrl = resolveTestBaseUrl({
@@ -40,6 +41,8 @@ const summary = await runAllTests({
   loadProjectConfig: async () => (await import('../config')).default,
   apiMetaMap,
   apiInputSchemas,
+  syncMetaMap,
+  syncInputSchemas,
   baseUrl,
   authToken,
   skip,

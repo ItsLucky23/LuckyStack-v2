@@ -15,13 +15,9 @@
 //? frames by that `fullName` so a watcher only sees chunks for the route
 //? its test file lives next to.
 
-import { io as createSocketIoClient, Socket } from 'socket.io-client';
-import {
-  buildJoinRoomResponseEventName,
-  socketEventNames,
-  tryCatch,
-  getProjectConfig,
-} from '@luckystack/core';
+import { socketEventNames, tryCatch } from '@luckystack/core';
+
+import { connectTestSocket, joinTestRoom } from './testSocket';
 
 export interface StreamChunkFrame {
   /** Per-request correlation id stamped by the server. */
@@ -63,76 +59,10 @@ export interface OpenStreamWatcherInput {
 }
 
 const DEFAULT_TIMEOUT_MS = 5000;
-const JOIN_RESPONSE_TIMEOUT_MS = 3000;
-const CONNECT_TIMEOUT_MS = 3000;
-
-interface JoinRoomResponse {
-  status?: string;
-  errorCode?: string;
-}
-
-const isJoinRoomResponse = (value: unknown): value is JoinRoomResponse =>
-  typeof value === 'object' && value !== null;
+const LABEL = 'watchStream';
 
 const isStreamChunkFrame = (value: unknown): value is StreamChunkFrame =>
   typeof value === 'object' && value !== null;
-
-//? Monotonic counter — each watcher uses a fresh responseIndex so the
-//? `buildJoinRoomResponseEventName(...)` listener doesn't collide with a
-//? sibling watcher on the same process.
-let responseIndexCounter = 0;
-const nextResponseIndex = (): number => {
-  responseIndexCounter += 1;
-  return responseIndexCounter;
-};
-
-const waitForConnect = (socket: Socket): Promise<void> => {
-  return new Promise<void>((resolve, reject) => {
-    if (socket.connected) {
-      resolve();
-      return;
-    }
-    const timer = setTimeout(() => {
-      cleanup();
-      reject(new Error(`watchStream: socket failed to connect within ${CONNECT_TIMEOUT_MS}ms`));
-    }, CONNECT_TIMEOUT_MS);
-    const onConnect = (): void => {
-      cleanup();
-      resolve();
-    };
-    const onConnectError = (err: Error): void => {
-      cleanup();
-      reject(new Error(`watchStream: connect_error — ${err.message}`));
-    };
-    const cleanup = (): void => {
-      clearTimeout(timer);
-      socket.off('connect', onConnect);
-      socket.off('connect_error', onConnectError);
-    };
-    socket.on('connect', onConnect);
-    socket.on('connect_error', onConnectError);
-  });
-};
-
-const waitForJoinAck = (socket: Socket, responseIndex: number): Promise<void> => {
-  const eventName = buildJoinRoomResponseEventName(responseIndex);
-  return new Promise<void>((resolve, reject) => {
-    const timer = setTimeout(() => {
-      socket.off(eventName, onAck);
-      reject(new Error(`watchStream: joinRoom ack timeout after ${JOIN_RESPONSE_TIMEOUT_MS}ms`));
-    }, JOIN_RESPONSE_TIMEOUT_MS);
-    const onAck = (payload: unknown): void => {
-      clearTimeout(timer);
-      socket.off(eventName, onAck);
-      if (isJoinRoomResponse(payload) && payload.status === 'error') {
-        reject(new Error(`watchStream: joinRoom rejected — ${payload.errorCode ?? 'unknown'}`));
-        return;
-      }
-      resolve();
-    };
-    socket.on(eventName, onAck);
-  });
-};
 
 export const openStreamWatcher = async <TChunk extends StreamChunkFrame = StreamChunkFrame>(
   input: OpenStreamWatcherInput,
@@ -141,21 +71,9 @@ export const openStreamWatcher = async <TChunk extends StreamChunkFrame = Stream
   const chunks: TChunk[] = [];
   const waiters: { predicate: (chunks: TChunk[]) => boolean; resolve: () => void }[] = [];
 
-  //? Authenticate the observer socket in BOTH token modes. `auth.token` is the
-  //? sessionBasedToken (sessionStorage) path; in the DEFAULT cookie mode the
-  //? server reads the token ONLY from the session cookie (extractTokenFromSocket
-  //? ignores handshake.auth.token unless `acceptBearerInCookieMode`), so without
-  //? the Cookie header the observer socket connects anonymously and every
-  //? `joinRoom` is rejected with `auth.required`. In Node, socket.io-client honours
-  //? `extraHeaders` on the websocket handshake, so we set the cookie there.
-  const sessionCookieName = getProjectConfig().http.sessionCookieName;
-  const socket: Socket = createSocketIoClient(input.baseUrl, {
-    transports: ['websocket'],
-    forceNew: true,
-    reconnection: false,
-    auth: input.token ? { token: input.token } : undefined,
-    extraHeaders: input.token ? { Cookie: `${sessionCookieName}=${input.token}` } : undefined,
-  });
+  //? `connectTestSocket` tears the socket down itself when the connect fails,
+  //? so a failed attempt never leaks a socket the caller cannot close.
+  const socket = await connectTestSocket({ baseUrl: input.baseUrl, token: input.token, label: LABEL });
 
   const handleChunk = (raw: unknown): void => {
     if (!isStreamChunkFrame(raw)) return;
@@ -181,23 +99,9 @@ export const openStreamWatcher = async <TChunk extends StreamChunkFrame = Stream
 
   socket.on(socketEventNames.sync, handleChunk);
 
-  //? On a connect timeout / connect_error the socket (and its `sync` listener)
-  //? must be torn down — otherwise every failed attempt leaks one socket that
-  //? is never auto-closed (the caller only tracks the watcher after this
-  //? resolves). Mirror the join-ack cleanup path below.
-  const [connectError] = await tryCatch(() => waitForConnect(socket));
-  if (connectError) {
-    socket.off(socketEventNames.sync, handleChunk);
-    socket.disconnect();
-    throw connectError;
-  }
-
-  const responseIndex = nextResponseIndex();
-  socket.emit(socketEventNames.joinRoom, {
-    group: input.roomCode,
-    responseIndex,
-  });
-  const [joinError] = await tryCatch(() => waitForJoinAck(socket, responseIndex));
+  //? A rejected / unanswered join must tear the socket (and its `sync`
+  //? listener) down — the caller only tracks the watcher after this resolves.
+  const [joinError] = await tryCatch(() => joinTestRoom(socket, input.roomCode, { label: LABEL }));
   if (joinError) {
     socket.off(socketEventNames.sync, handleChunk);
     socket.disconnect();

@@ -1,6 +1,6 @@
 # Contract Tests
 
-The contract layer is the entry point of `@luckystack/test-runner`. It walks every endpoint that the devkit emits into `apiMethodMap.generated.ts`, fires a single well-formed request, and asserts the response conforms to the framework envelope. It is the cheapest and broadest of the four layers — it does NOT prove business logic, it proves the route exists, decodes input without crashing, and replies with `{ status: 'success' | 'error', errorCode? }`.
+The contract layer is the entry point of `@luckystack/test-runner`. It walks every endpoint that the devkit emits into `apiMethodMap.generated.ts` (and every sync route in `syncMetaMap` when one is passed), fires a single well-formed request, and asserts the response conforms to the framework envelope. It is the cheapest and broadest of the four layers — it does NOT prove business logic, it proves the route exists, decodes input without crashing, and replies with `{ status: 'success' | 'error', errorCode? }`.
 
 ## When to use it
 
@@ -24,6 +24,14 @@ type ApiMethodMap = Record<string, Record<string, Record<string, string>>>;
 
 The order is deterministic: it follows `Object.entries` over the generated map, which the devkit emits sorted by page name, then api name, then version. Empty maps return `[]` (not an error).
 
+`walkSyncEndpoints(syncMap)` is the sync counterpart: it takes the generated `syncMetaMap` (or a `syncMethodMap`-shaped map), yields `fullPath: sync/<page>/<name>/<version>`, and marks each descriptor `kind: 'sync'`. A descriptor without `kind` is an API route.
+
+### Sync routes and probe transports
+
+The checks only know "this endpoint, this payload"; a `ProbeTransport` owns the wire. API routes always go over HTTP. Sync routes go over the transport the sweep passes as `syncTransport`: `runAllTests` picks Socket.io (`createSocketProbeTransport` — the same `sync` emit a real client makes) unless the project's `transport.invocation` is `routed-http` or the caller sets `syncTransport: 'http'`, in which case `createHttpProbeTransport` posts the `{ data, receiver }` envelope to `/sync/*`. The CSRF layer always probes sync over HTTP, because CSRF is an HTTP-only guard. Every sync probe in a run targets one throwaway room; with an `authToken` the sweep session joins it first, so room-membership enforcement sees a member rather than rejecting every probe. Without `syncMetaMap`, `runAllTests` warns that sync routes are not swept.
+
+Layer-5 `ctx.callSync` follows the same rule (project `transport.invocation`, per-call `opts.transport` override) — see `docs/ARCHITECTURE_TESTING.md`.
+
 ### `runContractCheck(input)`
 
 Run the contract assertion against one endpoint.
@@ -39,13 +47,14 @@ interface ContractCheckInput {
   inputFor?: (endpoint: EndpointDescriptor) => unknown;
   headers?: Record<string, string>;
   requestTimeoutMs?: number; // default 5000
+  transport?: ProbeTransport; // default: HTTP
 }
 ```
 
 Flow:
 
-1. Build URL: `${baseUrl.replace(/\/$/, '')}/${endpoint.fullPath}` so trailing slashes on `baseUrl` are tolerated.
-2. Build body: `inputFor?.(endpoint) ?? {}`. For `GET` the body is dropped entirely; otherwise it is `JSON.stringify`d.
+1. Build URL: `${baseUrl.replace(/\/$/, '')}/${endpoint.fullPath}` so trailing slashes on `baseUrl` are tolerated. (HTTP transport; a socket transport emits instead — see above.)
+2. Build body: `inputFor?.(endpoint) ?? {}`. For `GET` it rides the query string under the reserved key the real client uses (core `buildRoutedGetUrl`); otherwise it is `JSON.stringify`d.
 3. Send the request with `AbortController` wired to `requestTimeoutMs`. A timeout surfaces as a `fetch` error rather than hanging the sweep.
 4. Parse the JSON body. Any parse error is a contract failure (the framework always returns JSON).
 5. Assert `parsed.status` is exactly `'success'` or `'error'`. Anything else (`null`, `undefined`, missing key, a custom shape) fails with `reason: 'Response missing standard `status` envelope'`.
@@ -55,7 +64,7 @@ Pass criterion: a response that round-trips through the framework envelope, rega
 
 ### `runContractTests(input)`
 
-Full sweep version of `runContractCheck`. Iterates `walkEndpoints(input.apiMethodMap)` serially and aggregates results.
+Full sweep version of `runContractCheck`. Iterates every API route (plus every sync route when `syncMetaMap` is given), narrowed by `filter` before any request is sent, serially, and aggregates results.
 
 Signature:
 
@@ -64,6 +73,9 @@ runContractTests(input: RunContractTestsInput): Promise<RunContractSummary>
 
 interface RunContractTestsInput {
   apiMethodMap: ApiMethodMap;
+  syncMetaMap?: SyncMetaMap;       // sweep sync routes too
+  filter?: string;                 // substring on `<page>/<name>/<version>`
+  syncTransport?: ProbeTransport;  // HTTP when omitted
   baseUrl: string;
   skip?: string[];
   inputFor?: (endpoint: EndpointDescriptor) => unknown;
@@ -73,6 +85,8 @@ interface RunContractTestsInput {
 ```
 
 Behavior:
+
+- **Every route is called with the sweep's session — logout-type routes included.** An authenticated sweep that hits a route which destroys the current session (a logout, account deletion, session revoke) loses its session for every layer after it. Put such routes in `skip` (`TEST_SKIP` in the scaffolded script).
 
 - **Serial, not parallel.** The runner walks endpoints one by one. This avoids tripping shared rate-limit buckets, keeps log output linear, and stops endpoint-ordering bugs from being masked by races. A pool option may land later; do not assume concurrency.
 - **`skip` matching is two-tier.** `skip: ['billing/getInvoice']` skips every version of that endpoint. `skip: ['billing/getInvoice/v2']` skips only v2. Both forms compose: pass both to skip every version AND keep the specific one explicit.
@@ -163,7 +177,8 @@ interface EndpointDescriptor {
   name: string;
   version: string;
   method: HttpMethod;
-  fullPath: string; // `api/<page>/<name>/<version>`
+  fullPath: string; // `api/<page>/<name>/<version>` or `sync/<page>/<name>/<version>`
+  kind?: 'api' | 'sync'; // absent = 'api'
 }
 
 interface ContractCheckResult {
@@ -290,8 +305,7 @@ await runContractTests({
 
 ## Edge cases and gotchas
 
-- **`GET` endpoints ignore `inputFor`.** The handler still calls `inputFor`, but the body is dropped before `fetch` sees it. Query-string fuzz is not in scope for the contract layer.
-- **Layer 5 (`ctx.callApi`) does NOT drop `GET` input.** Unlike the contract layer above, a custom test's `callApi(input)` on a `GET` route sends `input` as the `__luckystack_data` query-string value — the same encoding the real client uses and the server reads — so a `GET` route with required fields is exercised with real data. Only the contract layer treats `GET` as data-less.
+- **`GET` endpoints receive `inputFor` through the query string.** `fetch` cannot send a GET body, so the payload is JSON-encoded under the same reserved query key the real client sends and the server reads. Before this, the payload was dropped and every GET route with a required field failed validation. Layer 5's `ctx.callApi` uses the same encoding.
 - **`headers` are merged after `Content-Type: application/json`.** If you pass `Content-Type` yourself you will override the default; the framework parses based on the header so this is intentional.
 - **`baseUrl` trailing slash is normalized once.** `http://localhost/` and `http://localhost` produce identical requests. Embedded `//` further down the path is not collapsed.
 - **`requestTimeoutMs` is per-request, not per-sweep.** A 30-endpoint sweep with the default 5000ms timeout can run for over two minutes if every endpoint stalls. The sweep itself has no overall timeout.

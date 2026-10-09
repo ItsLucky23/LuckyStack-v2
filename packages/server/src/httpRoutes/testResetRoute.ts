@@ -3,11 +3,17 @@ import {
   clearAllRateLimits,
   getProjectConfig,
   formatKey,
+  isTestResetTarget,
   redis,
+  TEST_RESET_ONLY_PARAM,
   tryCatch,
 } from '@luckystack/core';
+import type { TestResetTarget } from '@luckystack/core';
 import { timingSafeStringEqual } from './timingSafeEqual';
 import type { HttpRouteHandler } from './types';
+
+const splitList = (value: string | null): string[] =>
+  (value ?? '').split(',').map((s) => s.trim()).filter(Boolean);
 
 export const handleTestResetRoute: HttpRouteHandler = async ({ req, res, routePath }) => {
   if (routePath !== getProjectConfig().http.testResetEndpoint) return false;
@@ -44,9 +50,49 @@ export const handleTestResetRoute: HttpRouteHandler = async ({ req, res, routePa
     return true;
   }
 
+  //? Which state to clear. `?only=<target>[,<target>]` clears exactly those
+  //? (e.g. `only=rateLimits` lets an authenticated test sweep reset limiter
+  //? buckets without deleting its own session). Without `only` the legacy
+  //? default applies: rate limits + sessions + activeUsers, plus hooks when
+  //? `?include=hooks`. An unknown target is a 400 — a typo must not silently
+  //? reset nothing (or everything).
+  //? Use a fixed loopback base — `req.headers.host` is client-controlled and
+  //? must not influence URL resolution; only the path and query matter here.
+  //? URL parsing failure is the expected branch for malformed `req.url`, so use
+  //? `URL.canParse` instead of try/catch.
+  const rawUrl = req.url ?? '/';
+  const searchParams = URL.canParse(rawUrl, 'http://localhost')
+    ? new URL(rawUrl, 'http://localhost').searchParams
+    : new URLSearchParams();
+
+  const onlyParam = searchParams.get(TEST_RESET_ONLY_PARAM);
+  let targets: Set<TestResetTarget>;
+  if (onlyParam === null) {
+    targets = new Set<TestResetTarget>(['rateLimits', 'sessions', 'activeUsers']);
+    //? Opt-in hook clear via `?include=hooks` because clearing all hooks would
+    //? also drop framework-internal handlers (e.g. presence postLogout).
+    if (splitList(searchParams.get('include')).includes('hooks')) targets.add('hooks');
+  } else {
+    const requested = splitList(onlyParam);
+    const unknown = requested.filter((target) => !isTestResetTarget(target));
+    if (requested.length === 0 || unknown.length > 0) {
+      res.statusCode = 400;
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({
+        status: 'error',
+        errorCode: 'test.invalidResetTarget',
+        errorParams: [{ key: 'target', value: unknown.join(',') || '(empty)' }],
+      }));
+      return true;
+    }
+    targets = new Set(requested.filter(isTestResetTarget));
+  }
+
   const cleared: string[] = [];
-  await clearAllRateLimits();
-  cleared.push('rateLimits');
+  if (targets.has('rateLimits')) {
+    await clearAllRateLimits();
+    cleared.push('rateLimits');
+  }
 
   //? Flush sessions + activeUsers Redis keys so integration tests start from
   //? a clean slate. Patterns are derived through the shared `formatKey(...)`
@@ -74,20 +120,10 @@ export const handleTestResetRoute: HttpRouteHandler = async ({ req, res, routePa
     return deleted;
   };
 
-  await scanAndDelete(sessionPattern, 'sessions');
-  await scanAndDelete(activeUsersPattern, 'activeUsers');
+  if (targets.has('sessions')) await scanAndDelete(sessionPattern, 'sessions');
+  if (targets.has('activeUsers')) await scanAndDelete(activeUsersPattern, 'activeUsers');
 
-  //? Opt-in hook clear via `?include=hooks` because clearing all hooks would
-  //? also drop framework-internal handlers (e.g. presence postLogout). URL
-  //? parsing failure is the expected branch for malformed `req.url`, so use
-  //? `URL.canParse` instead of try/catch.
-  const rawUrl = req.url ?? '/';
-  //? Use a fixed loopback base — `req.headers.host` is client-controlled and
-  //? must not influence URL resolution; only the path and query matter here.
-  const includeFlag = URL.canParse(rawUrl, 'http://localhost')
-    ? new URL(rawUrl, 'http://localhost').searchParams.get('include') ?? ''
-    : '';
-  if (includeFlag.split(',').map((s) => s.trim()).includes('hooks')) {
+  if (targets.has('hooks')) {
     clearAllHooks();
     cleared.push('hooks');
   }

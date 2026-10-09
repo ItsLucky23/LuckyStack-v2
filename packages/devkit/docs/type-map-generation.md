@@ -196,6 +196,8 @@ const clientInputTypeResult = serverFile
 
 Each `*TypeDetailsFromFile` returns `{ text, unresolvedSymbols }`; the symbols are merged into `unresolvedTypeAliases` / `namedImports` exactly the same way as in the API loop.
 
+When a server file exists, its `auth` and `rateLimit` are read with the SAME extractors as the API side (`extractAuth` / `extractRateLimit`) and feed `syncMetaMap`. Only server-backed routes (cases 1 and 2) get a `syncMetaMap` / `syncInputSchemas` entry: a client-only sync is not a callable route, so there is nothing for the test-runner to sweep.
+
 ---
 
 ## Functions interface (`generateServerFunctions`)
@@ -294,6 +296,10 @@ export interface ApiMetaEntry { method, auth: { login, additional? }, rateLimit?
 export const apiMetaMap: Record<...> = { ... };
 export const getApiMeta = (...): ApiMetaEntry | undefined => ...;
 
+export interface SyncMetaEntry { auth: { login, additional? }, rateLimit? };
+export const syncMetaMap: Record<...> = { ... };   // server-backed syncs only
+export const getSyncMeta = (...): SyncMetaEntry | undefined => ...;
+
 export type SyncServerResponse<T = unknown> = ...;
 export type SyncClientResponse<T = unknown> = ...;
 
@@ -323,7 +329,7 @@ Before writing, `validateGeneratedTypeIdentifiers(content)` parses the content w
 
 ### `schemasContent` -> `apiInputSchemas.generated.ts`
 
-Built by `buildSchemasContent({ typesByPage })`. Loops over the API map again, runs each input type through `typeTextToZodSource` (from `typeMap/zodEmitter.ts`), and emits:
+Built by `buildSchemasContent`. Loops over the API map again, runs each input type through `typeTextToZodSource` (from `typeMap/zodEmitter.ts`), and emits:
 
 ```typescript
 import { z } from 'zod';
@@ -340,7 +346,9 @@ export const getApiInputSchema = (pagePath, apiName, version): z.ZodTypeAny | un
   apiInputSchemas[pagePath]?.[apiName]?.[version];
 ```
 
-`typeTextToZodSource` walks the TS-AST of the inline type literal and emits Zod source. Unsupported shapes fall back to `z.any() /* unparseable input type */` with a TODO. Sync types are NOT in this file — only API inputs (runtime input validation is API-only).
+`typeTextToZodSource` walks the TS-AST of the inline type literal and emits Zod source. Unsupported shapes fall back to `z.any() /* unparseable input type */` with a TODO.
+
+A sibling `syncInputSchemas` / `getSyncInputSchema` pair covers every server-backed sync route, built from its `clientInput` (the `data` the client sends) with the same converter and fallback. It exists so the test-runner sweeps (contract / fuzz) can reach sync routes the way they reach API routes. Sync input fallbacks to `z.any()` are recorded in `apiTypeDiagnostics.generated.json` exactly like API ones. Output and stream types never get a schema.
 
 ### `docsData` -> `apiDocs.generated.json`
 

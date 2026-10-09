@@ -1,27 +1,51 @@
-import { walkEndpoints } from './walkEndpoints';
 import { runRateLimitCheck } from './rateLimitCheck';
 import { resetServerState } from './resetServerState';
-import { shouldSkip, requiresLogin, getRateLimit, calculateSummary, STATE_CHANGING_METHODS } from './testLayerHelpers';
-import type { ApiMethodMap, ApiMetaMap, ContractCheckResult, EndpointDescriptor, RunContractSummary } from './types';
+import {
+  shouldSkip,
+  requiresLogin,
+  getRateLimit,
+  calculateSummary,
+  metaMapFor,
+  selectEndpoints,
+  transportFor,
+  STATE_CHANGING_METHODS,
+} from './testLayerHelpers';
+import type { ProbeTransport } from './probeRequest';
+import type {
+  ApiMethodMap,
+  ApiMetaMap,
+  ContractCheckResult,
+  EndpointDescriptor,
+  RunContractSummary,
+  SyncMetaMap,
+} from './types';
 
 export interface RunRateLimitTestsInput {
   apiMethodMap: ApiMethodMap;
   apiMetaMap: ApiMetaMap;
+  /** Generated `syncMetaMap`. When given, sync routes are swept too. */
+  syncMetaMap?: SyncMetaMap;
   baseUrl: string;
   skip?: string[];
+  /** Substring filter on `<page>/<name>/<version>`; other routes are not requested at all. */
+  filter?: string;
   inputFor?: (endpoint: EndpointDescriptor) => unknown;
   headers?: Record<string, string>;
+  /** Transport for sync routes (e.g. the socket transport). API routes always use HTTP. */
+  syncTransport?: ProbeTransport;
   /**
    * Max rateLimit value to test. Endpoints with a higher limit are skipped
    * to avoid firing thousands of requests in CI.
    */
   maxRateLimitToTest?: number;
   /**
-   * When true, hit `/_test/reset` before each endpoint so limiter state is
-   * clean. Requires the server to allow the endpoint: `NODE_ENV` in
-   * { 'development', 'test' } AND `TEST_RESET_TOKEN` set on the server with a
-   * matching `resetToken` here (an unset token is 403, never open). Without
-   * resetting, the shared IP bucket leaks state between endpoints.
+   * When true, hit `/_test/reset?only=rateLimits` before each endpoint so
+   * limiter state is clean. Only the limiter buckets are cleared — sessions
+   * survive, so an authenticated sweep keeps its session. Requires the server
+   * to allow the endpoint: `NODE_ENV` in { 'development', 'test' } AND
+   * `TEST_RESET_TOKEN` set on the server with a matching `resetToken` here (an
+   * unset token is 403, never open). Without resetting, the shared IP bucket
+   * leaks state between endpoints.
    */
   resetBetweenEndpoints?: boolean;
   /**
@@ -35,7 +59,7 @@ export interface RunRateLimitTestsInput {
 export const runRateLimitTests = async (
   input: RunRateLimitTestsInput,
 ): Promise<RunContractSummary> => {
-  const endpoints = walkEndpoints(input.apiMethodMap);
+  const endpoints = selectEndpoints(input);
   const skip = input.skip ?? [];
   const maxRateLimit = input.maxRateLimitToTest ?? 50;
   //? A login-required route returns `auth.required` BEFORE the rate limiter
@@ -47,10 +71,11 @@ export const runRateLimitTests = async (
   const results: ContractCheckResult[] = [];
 
   for (const endpoint of endpoints) {
-    const rateLimit = getRateLimit(input.apiMetaMap, endpoint);
+    const metaMap = metaMapFor(endpoint, input.apiMetaMap, input.syncMetaMap);
+    const rateLimit = getRateLimit(metaMap, endpoint);
     if (rateLimit === null) continue;
 
-    if (!isAuthenticatedSweep && requiresLogin(input.apiMetaMap, endpoint)) {
+    if (!isAuthenticatedSweep && requiresLogin(metaMap, endpoint)) {
       const skipped: ContractCheckResult = {
         endpoint,
         status: 'skipped',
@@ -63,10 +88,10 @@ export const runRateLimitTests = async (
     }
 
     //? In cookie-mode the rate-limit check fires the endpoint `rateLimit + 1`
-    //? times with junk input. State-changing routes (POST/PUT/DELETE) execute
-    //? real mutation handlers on each hit — skip them to avoid side-effects on
-    //? the test database. Their rate limits are better covered by a custom test
-    //? that supplies valid input.
+    //? times with junk input. State-changing routes (POST/PUT/DELETE — every
+    //? sync route) execute real mutation handlers on each hit — skip them to
+    //? avoid side-effects on the test database. Their rate limits are better
+    //? covered by a custom test that supplies valid input.
     if (isAuthenticatedSweep && STATE_CHANGING_METHODS.has(endpoint.method)) {
       const skipped: ContractCheckResult = {
         endpoint,
@@ -104,7 +129,9 @@ export const runRateLimitTests = async (
     }
 
     if (input.resetBetweenEndpoints) {
-      await resetServerState({ baseUrl: input.baseUrl, token: input.resetToken });
+      //? Limiter buckets only: a full reset also deletes every Redis session,
+      //? including the one an authenticated sweep is running on.
+      await resetServerState({ baseUrl: input.baseUrl, token: input.resetToken, only: ['rateLimits'] });
     }
 
     const result = await runRateLimitCheck({
@@ -113,6 +140,7 @@ export const runRateLimitTests = async (
       rateLimit,
       inputFor: input.inputFor,
       headers: input.headers,
+      transport: transportFor(endpoint, input.syncTransport),
     });
     results.push(result);
     input.onResult?.(result);
