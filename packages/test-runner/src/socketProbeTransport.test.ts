@@ -17,6 +17,7 @@ import { walkSyncEndpoints } from './walkEndpoints';
 
 const COOKIE = 'session_test';
 const received: { name: unknown; data: unknown; receiver: unknown; cb: unknown; member: boolean; cookie: string | undefined }[] = [];
+const intentionalDisconnects: (string | undefined)[] = [];
 let connections = 0;
 let server: http.Server;
 let io: Server;
@@ -43,6 +44,12 @@ beforeAll(async () => {
         buildSyncResponseEventName(msg.responseIndex),
         member ? { status: 'success', result: {} } : { status: 'error', errorCode: 'sync.notRoomMember' },
       );
+    });
+    //? Mirrors presence: an intentional disconnect keeps the session and the
+    //? server closes the socket itself.
+    socket.on(socketEventNames.intentionalDisconnect, () => {
+      intentionalDisconnects.push(cookie);
+      socket.disconnect(false);
     });
   });
   await new Promise<void>((resolve) => { server.listen(0, '127.0.0.1', resolve); });
@@ -98,5 +105,15 @@ describe('createSocketProbeTransport', () => {
     }
     await transport.close?.();
     expect(connections - before).toBe(1);
+  });
+
+  it('closes an authenticated socket with intentionalDisconnect so presence keeps the session; anonymous ones plainly', async () => {
+    if (!syncEndpoint) throw new Error('fixture endpoint missing');
+    const transport = createSocketProbeTransport({ baseUrl, receiver: 'lstest-room-d', sessionCookieName: COOKIE });
+    await transport.send({ endpoint: syncEndpoint, baseUrl, body: {}, headers: { Cookie: `${COOKIE}=tok3` }, requestTimeoutMs: 2000 });
+    await transport.send({ endpoint: syncEndpoint, baseUrl, body: {}, requestTimeoutMs: 2000 });
+    intentionalDisconnects.length = 0;
+    await transport.close?.();
+    expect(intentionalDisconnects).toStrictEqual([`${COOKIE}=tok3`]);
   });
 });

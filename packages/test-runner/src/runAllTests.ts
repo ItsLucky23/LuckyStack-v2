@@ -18,7 +18,7 @@ import { resetServerState } from './resetServerState';
 import { createHttpProbeTransport } from './probeRequest';
 import type { ProbeTransport } from './probeRequest';
 import { createSocketProbeTransport } from './socketProbeTransport';
-import { connectTestSocket, joinTestRoom } from './testSocket';
+import { connectTestSocket, joinTestRoom, releaseTestSocket } from './testSocket';
 import { runContractTests } from './runContractTests';
 import { runAuthEnforcementTests } from './runAuthEnforcementTests';
 import { runRateLimitTests } from './runRateLimitTests';
@@ -222,7 +222,9 @@ const prepareSyncSweep = async (input: RunAllTestsInput): Promise<SyncSweepTrans
     csrf: http,
     close: async () => {
       await sweep.close?.();
-      memberSocket?.disconnect();
+      //? The member socket runs on the caller's `authToken` session — release
+      //? it so presence does not log that session out after the sweep.
+      if (memberSocket) await releaseTestSocket(memberSocket);
     },
   };
 };

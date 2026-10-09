@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - GET routes receive their sample payload: probes encode it into the reserved `__luckystack_data` query key (core `buildRoutedGetUrl`) instead of dropping it, so a GET route with a required field no longer fails validation in every layer.
+- Sockets the runner opens on the caller's `authToken` session (the sync-sweep member socket and the socket probe transport) close with `intentionalDisconnect`, the signal a real client sends on a tab switch. With `@luckystack/presence` installed, a plain close made presence log that session out a few seconds after the sweep.
 - The bookend documentation no longer claims the reset drops rows the sweep created. `/_test/reset` never touched the application database; `lstest_*` rows persist.
 
 ## [0.10.1] - 2026-09-03

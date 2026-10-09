@@ -99,6 +99,37 @@ export const connectTestSocket = async (input: ConnectTestSocketInput): Promise<
   return socket;
 };
 
+const RELEASE_TIMEOUT_MS = 1000;
+
+/**
+ * Close a socket that runs on a session the runner does NOT own (the sweep's
+ * `authToken`) without ending that session.
+ *
+ * With `@luckystack/presence` installed, a token whose last socket closes is
+ * logged out once the short disconnect grace window expires — a closed browser
+ * tab ends the session. A plain `disconnect()` therefore deleted the caller's
+ * session seconds after every sweep. Sending `intentionalDisconnect` first is
+ * the signal a real client sends on a tab switch: presence keeps the session
+ * and the server closes the socket itself. Without presence nobody listens,
+ * so the socket is closed locally after a short wait.
+ */
+export const releaseTestSocket = async (socket: Socket): Promise<void> => {
+  if (!socket.connected) return;
+  await new Promise<void>((resolve) => {
+    const timer = setTimeout(() => {
+      socket.off('disconnect', onDisconnect);
+      resolve();
+    }, RELEASE_TIMEOUT_MS);
+    const onDisconnect = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    socket.once('disconnect', onDisconnect);
+    socket.emit(socketEventNames.intentionalDisconnect);
+  });
+  socket.disconnect();
+};
+
 /**
  * Join `room` and wait for the server's ack. Rejects when the server refuses
  * the join (e.g. `auth.required` for an anonymous socket) or never answers.

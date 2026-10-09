@@ -14,7 +14,7 @@
 import type { Socket } from 'socket.io-client';
 import { tryCatch } from '@luckystack/core';
 
-import { connectTestSocket, emitSyncOverSocket, joinTestRoom } from './testSocket';
+import { connectTestSocket, emitSyncOverSocket, joinTestRoom, releaseTestSocket } from './testSocket';
 import { createHttpProbeTransport } from './probeRequest';
 import type { ProbeResponse, ProbeTransport, ProbeTransportRequest } from './probeRequest';
 
@@ -90,11 +90,15 @@ export const createSocketProbeTransport = (options: SocketProbeTransportOptions)
   };
 
   const close = async (): Promise<void> => {
-    const opened = [...sockets.values()];
+    const opened = [...sockets.entries()];
     sockets.clear();
-    for (const pending of opened) {
+    for (const [key, pending] of opened) {
       const socket = await pending;
-      socket?.disconnect();
+      if (!socket) continue;
+      //? An authenticated socket runs on the caller's session — release it so
+      //? presence does not log that session out when the socket closes.
+      if (key) await releaseTestSocket(socket);
+      else socket.disconnect();
     }
   };
 

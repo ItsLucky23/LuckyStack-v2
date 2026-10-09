@@ -14,6 +14,8 @@ const syncEntry = (overrides: Partial<SyncTypeEntry> = {}): SyncTypeEntry => ({
   serverStream: 'never',
   clientStream: 'never',
   version: 'v1',
+  hasServer: true,
+  hasClient: false,
   serverMeta: { auth: { login: true, hasAdditional: false }, rateLimit: 30 },
   ...overrides,
 });
@@ -99,7 +101,7 @@ describe('syncMetaMap', () => {
 
   it('skips client-only syncs — they are not callable routes', () => {
     const syncs = new Map([
-      ['chat', new Map([['typing@v1', syncEntry({ serverMeta: undefined })]])],
+      ['chat', new Map([['typing@v1', syncEntry({ serverMeta: undefined, hasServer: false, hasClient: true })]])],
     ]);
     const { content, schemasContent } = build({ syncs });
 
@@ -143,7 +145,7 @@ describe('syncInputSchemas', () => {
     const unsupportedByZod = '{ left: string } & { right: string }';
     const syncs = new Map([['chat', new Map([
       ['send@v1', syncEntry({ clientInput: unsupportedByZod })],
-      ['typing@v1', syncEntry({ clientInput: unsupportedByZod, serverMeta: undefined })],
+      ['typing@v1', syncEntry({ clientInput: unsupportedByZod, serverMeta: undefined, hasServer: false, hasClient: true })],
     ])]]);
     const { diagnosticsData } = build({ syncs });
 
