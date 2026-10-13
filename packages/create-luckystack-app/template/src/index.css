@@ -1,6 +1,12 @@
 @import "tailwindcss";
 
 /*
+ * Tailwind never scans node_modules, so classes used only inside LuckyStack's
+ * own components (page-guard loading state, presence indicator) need this.
+ */
+@source "../node_modules/@luckystack/*/dist/**/*.js";
+
+/*
  * COLOR PALETTE
  *
  * Every color used in the UI is defined here as a CSS variable. Tailwind 4

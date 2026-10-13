@@ -11,14 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Scaffolds type-check with TypeScript 7 and run lint, typecheck and build in parallel.** `typescript` is now an alias of `@typescript/typescript6` (typescript-eslint and other compiler-API tools still need the JavaScript API, which TypeScript 7 no longer ships), and `tsc` comes from `@typescript/native` (TypeScript 7, about ten times faster here). `npm run verify` runs lint, `tsc --noEmit`, `vite build` and the server bundle at once; `npm run build` runs the client build and server bundle at once. `scripts/threadBudget.mjs`, `withThreads.mjs` and `runParallel.mjs` keep every tool inside one budget — all cores, or `LUCKYSTACK_MAX_THREADS` — and cap ESLint's workers by memory, because each type-aware worker holds its own TypeScript program (~2 GB in a large project).
 - `tsconfig.json` declares `"types": ["node"]` and the template depends on `@types/node`: TypeScript 6+ no longer loads every visible `@types/*` package by itself, so `process` and the other Node globals would be unknown.
+- `eslint-plugin-react-x` moves from `^1.48.4` to `^5.26.5`: 1.x accepts only TypeScript 4.9–5.x as a peer, so npm refused to install a scaffold with the TypeScript 6 alias. Its `set-state-in-effect` rule flags the measure-before-paint `useLayoutEffect` in the dropdown and floating layer; both lines carry a justified suppression instead of a restructure that would show the menu unpositioned for a frame.
 - New scaffolds and the npm documentation bundle deliver canonical `AGENTS.md` only, with fail-closed instruction/fence validation and regression coverage. Shared hooks no longer regenerate it from a vendor-specific file.
 - Handwritten docs and workflow guidance focus on rationale and safety; new project READMEs no longer require prose pruning when auth/data-layer choices change. Framework identity, roadmap and findings ledgers do not become consumer context. Supported tool-specific permission settings remain unchanged.
 
+### Fixed
+
+- **Classes used only inside LuckyStack's own components reach the CSS.** Tailwind never scans `node_modules`, so a page guard's loading state (`animate-spin`, `border-t-primary`) and the presence indicator's corner classes were missing from a scaffold's stylesheet and rendered unstyled. `src/index.css` now adds `@source "../node_modules/@luckystack/*/dist/**/*.js"`.
+
 ### Upgrading an existing project
 
-1. `package.json` is never touched by `luckystack update`; edit the devDependencies by hand: `"typescript": "npm:@typescript/typescript6@^6.0.2"`, `"@typescript/native": "npm:typescript@^7.0.2"`, `"@types/node": "^22.0.0"`, then reinstall. Keep `typescript-eslint` — its peer range stops below TypeScript 6.1, which the alias satisfies.
+1. `package.json` is never touched by `luckystack update`; edit the devDependencies by hand: `"typescript": "npm:@typescript/typescript6@^6.0.2"`, `"@typescript/native": "npm:typescript@^7.0.2"`, `"@types/node": "^22.0.0"`, `"eslint-plugin-react-x": "^5.26.5"`, then reinstall. Keep `typescript-eslint` — its peer range stops below TypeScript 6.1, which the alias satisfies.
 2. `npx luckystack update` delivers `scripts/threadBudget.mjs`, `withThreads.mjs` and `runParallel.mjs`. Adopt the `lint`, `build` and `verify` scripts from the template by hand: `lint` keeps your own globs and only gains the `node scripts/withThreads.mjs --mb-per-thread 2048` prefix and `--concurrency {threads}`.
 3. `npx luckystack update --app` proposes the `tsconfig.json` change (`"types": ["node"]`); add any other ambient type package the project relied on implicitly, remove `ignoreDeprecations` and `baseUrl` if present (TypeScript 7 rejects both), then run `npm run typecheck`.
+4. Add the `@source "../node_modules/@luckystack/*/dist/**/*.js";` line below `@import "tailwindcss";` in `src/index.css` (an app-owned file, so `update` does not change it).
 
 ## [0.10.2] - 2026-10-09
 
