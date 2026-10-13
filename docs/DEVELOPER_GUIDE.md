@@ -40,6 +40,8 @@ npm run build
 npm run test:unit
 ```
 
+`npm run verify` runs the same gate with lint, typecheck, build and unit tests at the same time. All tools share one thread budget, so together they never claim more than the machine. On a shared machine or CI runner, cap that budget with `LUCKYSTACK_MAX_THREADS`.
+
 When delivery changes, also verify the actual packaged/scaffolded project. A workspace build can succeed while npm users receive missing files or stale instructions. Live tests must use an explicitly selected disposable environment, never shared data by assumption.
 
 Architecture docs explain constraints and trade-offs; the code and tests describe execution. Record significant decisions at wrap-up, not every intermediate idea.

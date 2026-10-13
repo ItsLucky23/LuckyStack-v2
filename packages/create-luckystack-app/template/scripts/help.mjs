@@ -38,9 +38,10 @@ const META = {
   router: { desc: 'Run the load-balancer/router process in front of multiple service nodes.', example: 'npm run router' },
 
   // Build & bundle
-  build: { desc: 'Full production build: packages + generated artifacts + client + server bundle.', example: 'npm run build' },
-  'build:packages': { desc: 'Build all @luckystack/* packages in dependency order.', example: 'npm run build:packages' },
-  buildClient: { desc: 'Build only the client (type maps + tsc + vite build).', example: 'npm run buildClient' },
+  build: { desc: 'Production build: generated artifacts, then client + server bundle in parallel.', example: 'npm run build' },
+  verify: { desc: 'Completion gate in one go: lint, typecheck and build in parallel within one thread budget (LUCKYSTACK_MAX_THREADS).', example: 'LUCKYSTACK_MAX_THREADS=6 npm run verify' },
+  'build:packages': { desc: 'Build all @luckystack/* packages (JavaScript + declarations) in one parallel round.', example: 'npm run build:packages' },
+  buildClient: { desc: 'Build only the client (type maps, then tsc + vite build in parallel).', example: 'npm run buildClient' },
   buildServer: { desc: 'Build only the server bundle (artifacts + bundleServer).', example: 'npm run buildServer' },
   generateArtifacts: { desc: 'Regenerate API/sync type maps + server request types from your routes.', example: 'npm run generateArtifacts' },
   'pack:dry': { desc: 'Build + `npm pack --dry-run` every package (validate tarball contents, write nothing).', example: 'npm run pack:dry' },
@@ -50,13 +51,13 @@ const META = {
   test: { desc: 'Full test run: per-route business-logic tests + auto-sweep (contract/auth/rate-limit/fuzz).', example: 'npm run test' },
   'test:unit': { desc: 'Run the Vitest unit suite.', example: 'npm run test:unit' },
   'test:integration': { desc: 'Run integration tests (need Redis/DB infra).', example: 'npm run test:integration' },
-  typecheck: { desc: 'Type-check the project without emitting files.', example: 'npm run typecheck' },
+  typecheck: { desc: 'Type-check the project with TypeScript 7 without emitting files.', example: 'npm run typecheck' },
 
   // Lint
-  lint: { desc: 'Lint the project (client + server).', example: 'npm run lint' },
+  lint: { desc: 'Lint the project (client + server) in one multi-threaded ESLint run.', example: 'npm run lint' },
   'lint:client': { desc: 'Lint client code (src/).', example: 'npm run lint:client' },
   'lint:server': { desc: 'Lint server code (server/, shared/, config.ts).', example: 'npm run lint:server' },
-  'lint:all': { desc: 'Lint client then server.', example: 'npm run lint:all' },
+  'lint:all': { desc: 'Alias of lint.', example: 'npm run lint:all' },
   'lint:packages': { desc: 'Lint the framework packages (packages/*/src).', example: 'npm run lint:packages' },
 
   // Versioning & publish
@@ -98,7 +99,7 @@ const META = {
 
 const GROUPS = [
   ['Dev', ['client', 'server', 'server:direct', 'cluster', 'router']],
-  ['Build & bundle', ['build', 'build:packages', 'buildClient', 'buildServer', 'generateArtifacts', 'pack:dry', 'prod']],
+  ['Build & bundle', ['build', 'verify', 'build:packages', 'buildClient', 'buildServer', 'generateArtifacts', 'pack:dry', 'prod']],
   ['Test', ['test', 'test:unit', 'test:integration', 'typecheck']],
   ['Lint', ['lint', 'lint:client', 'lint:server', 'lint:all', 'lint:packages']],
   ['Versioning & publish', ['bump', 'publish:packages', 'publish:dry']],
