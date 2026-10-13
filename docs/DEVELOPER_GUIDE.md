@@ -35,12 +35,10 @@ Query existing helpers, routes and dependencies before creating a parallel imple
 Run the narrow affected test during iteration. At completion:
 
 ```sh
-npm run lint
-npm run build
-npm run test:unit
+npm run verify
 ```
 
-`npm run verify` runs the same gate with lint, typecheck, build and unit tests at the same time. All tools share one thread budget, so together they never claim more than the machine. On a shared machine or CI runner, cap that budget with `LUCKYSTACK_MAX_THREADS`.
+It runs lint, typecheck, build and unit tests at the same time. All tools share one thread budget, so together they never claim more than the machine. On a shared machine or CI runner, cap that budget with `LUCKYSTACK_MAX_THREADS`. The separate `lint`, `build` and `test:unit` scripts remain for a narrower check.
 
 When delivery changes, also verify the actual packaged/scaffolded project. A workspace build can succeed while npm users receive missing files or stale instructions. Live tests must use an explicitly selected disposable environment, never shared data by assumption.
 

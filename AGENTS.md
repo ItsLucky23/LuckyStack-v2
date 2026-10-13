@@ -37,7 +37,7 @@ This repository also contains a reference app used to exercise the framework; it
 
 11. Verify at the feature boundary, not after every edit.
     - During implementation, run the narrowest test/typecheck that can expose the changed contract.
-    - Before declaring a feature complete or committing it, run `npm run lint && npm run build && npm run test:unit`. Report actual failures and skipped stages; never label a skipped check successful.
+    - Before declaring a feature complete or committing it, run `npm run verify` (lint, typecheck, build and unit tests in parallel within one thread budget; cap it with `LUCKYSTACK_MAX_THREADS` on a shared machine). Report actual failures and skipped stages; never label a skipped check successful.
     - Documentation-only changes need no compilation while iterating. Delivery/generator changes do need tests, including the consumer boundary.
     - `npm run ai:lint` is report-only unless opted into blocking. Fix a finding or explain a deliberate exception with the supported `luckystack-allow` comment; do not weaken tests to get green.
 12. Before adding helpers, components, routes or cross-cutting capabilities, query the existing surfaces.

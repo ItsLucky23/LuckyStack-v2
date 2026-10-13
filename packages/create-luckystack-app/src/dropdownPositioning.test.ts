@@ -7,7 +7,12 @@ const ROOT_INTERNALS = path.join(ROOT, 'src/_components/dropdownInternals.tsx');
 const TEMPLATE_COMPONENTS = path.join(ROOT, 'packages/create-luckystack-app/template/src/_components/dropdown');
 const TEMPLATE_INTERNALS = path.join(TEMPLATE_COMPONENTS, 'dropdownInternals.tsx');
 
-const read = (file: string): string => fs.readFileSync(file, 'utf8').replaceAll('\r\n', '\n');
+//? Lint-suppression lines are dropped: the scaffold lints with plugins the root
+//? app does not load (react-x), and a directive for an unknown rule is a lint
+//? error there. Parity is about behaviour, not lint configuration.
+const read = (file: string): string => fs.readFileSync(file, 'utf8')
+  .replaceAll('\r\n', '\n')
+  .replaceAll(/^[ \t]*\/\/ eslint-disable-next-line .*\n/gm, '');
 
 const extractDropdownHook = (source: string): string => {
   const start = source.indexOf('export function useDropdownMenu');

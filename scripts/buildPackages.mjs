@@ -137,8 +137,10 @@ const pool = async (items, slots, task) => {
   return results;
 };
 
+//? TypeScript 7 by path: `@typescript/typescript6` pulls in a TypeScript 6
+//? that also installs a `tsc` command, so the bare name is install-order luck.
 const tscArgs = (extra) => [
-  'tsc',
+  'node_modules/@typescript/native/bin/tsc',
   '-b',
   'tsconfig.packages.json',
   ...(serial
@@ -185,7 +187,7 @@ const main = async () => {
   const cleaned = await run({
     name: DECLARATIONS,
     cwd: '.',
-    command: 'npx',
+    command: 'node',
     commandArgs: tscArgs(['--clean']),
     threads: 1,
   });
@@ -199,7 +201,7 @@ const main = async () => {
   );
 
   const [declarations, bundles] = await Promise.all([
-    run({ name: DECLARATIONS, cwd: '.', command: 'npx', commandArgs: tscArgs([]), threads: declarationThreads }),
+    run({ name: DECLARATIONS, cwd: '.', command: 'node', commandArgs: tscArgs([]), threads: declarationThreads }),
     pool(ALL_PACKAGES, bundleSlots, async (name) => {
       const result = await runInPackage(name, ['run', 'build']);
       printResult(result);
