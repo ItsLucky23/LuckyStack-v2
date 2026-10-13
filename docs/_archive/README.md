@@ -1,26 +1,7 @@
-# docs/_archive — point-in-time records (NOT evergreen)
+# Archived point-in-time records
 
-This folder holds **ephemeral documentation**: audits, handoffs, readiness reports, and session
-snapshots. They describe a *problem → solution at a moment in time* and go stale the instant the work
-they describe lands. They are kept for history, **not** as a source of truth.
+These are frozen historical evidence, not current contracts. Consult the status index before acting; an archive is not permission to delete an unresolved finding.
 
-## How docs are split
+New requested audits use the dated findings protocol. Do not resurrect a separate root working-backlog convention or copy an archived implementation description into evergreen documentation. Durable rationale belongs in an accepted decision; current behaviour is established by source and tests.
 
-| Location | Contains | Lifetime |
-|---|---|---|
-| `docs/` (root) | **Evergreen** — architecture, page-purpose, protocols, guides, generated indexes | Kept current; the source of truth |
-| `docs/_archive/` (this folder) | **Superseded / done** point-in-time reports | Frozen history; safe to delete once nobody needs the record |
-| `review/` (repo root) | **Active** working backlog (an audit whose findings are not yet actioned) | Lives until its findings are resolved, then moves here |
-
-## Rules
-
-- **Do not link to `_archive/` from an evergreen doc.** If an evergreen doc needs a fact, copy the fact
-  into the evergreen doc — don't point a live reader at a frozen snapshot.
-- **Not bundled to consumers.** `create-luckystack-app`'s `bundleFrameworkDocs.mjs` skips `_archive/`, so
-  this cruft never pollutes a scaffolded project's AI context.
-- **An audit is "active" until actioned.** A report whose findings still need work belongs in `review/`
-  (or its working folder), not here. Move it here only once it is done or superseded.
-
-## Index
-
-See `INDEX.md` for the per-file status (done / superseded) and what replaced it.
+Archive/planning records are excluded from consumer delivery because another app must not inherit this framework's history as its own obligations.

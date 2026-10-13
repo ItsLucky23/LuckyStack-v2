@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Package design guidance now ships as `AGENTS.md`, not `CLAUDE.md`. Handwritten docs focus on rationale and safety, retaining a minimal existing-project email-code/2FA adoption checklist including persistence and encryption-key prerequisites.
+
 ## [0.10.0] - 2026-09-03
 
 ### Changed

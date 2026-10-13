@@ -90,7 +90,7 @@ const resolveEnvFiles = (root: string): string[] => {
 };
 
 //? Parse KEY names only (never values — `.env.local` holds secrets) from `KEY=…`
-//? lines, skipping comments + blanks. NOTE (CLAUDE.md Rule 16): reading `.env.local`
+//? lines, skipping comments + blanks. NOTE (AGENTS.md safety rule): reading `.env.local`
 //? at all is deliberate and within the letter of the rule — only the LEFT-hand KEY
 //? names are kept; every value is discarded here, so no secret is ever surfaced.
 //? Don't "fix" this by skipping `.env.local` — the scan needs its key names to

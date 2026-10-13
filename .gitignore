@@ -5,7 +5,7 @@
 .runtime-test/
 .env.runtime-test
 
-# Framework AI docs bundled INTO create-luckystack-app at build time (generated copy of repo-root CLAUDE.md/docs/skills/.claude/commands — ships in the tarball, never committed)
+# Framework AI docs bundled INTO create-luckystack-app at build time (generated copy of repo-root AGENTS.md/docs/skills/.claude/commands — ships in the tarball, never committed)
 packages/create-luckystack-app/framework-docs/
 
 # Logs
@@ -73,6 +73,10 @@ dump/
 test-results/
 playwright-report/
 .claude/settings.local.json
+AGENTS.local.md
+CLAUDE.local.md
+.agents/settings.local.json
+.agents/local/
 # Stale scaffold-output artifact (SCAF-N6) — regenerate in CI into a temp dir if needed
 packages/create-luckystack-app/ls-np/
 

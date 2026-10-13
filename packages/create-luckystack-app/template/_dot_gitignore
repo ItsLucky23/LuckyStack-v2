@@ -27,6 +27,10 @@ dump/
 test-results/
 playwright-report/
 .claude/settings.local.json
+AGENTS.local.md
+CLAUDE.local.md
+.agents/settings.local.json
+.agents/local/
 
 # AI-context artifacts — a LOCAL CACHE, deliberately not committed.
 # Every one of these is derived from the code, so a committed copy is a second

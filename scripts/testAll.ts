@@ -1,7 +1,7 @@
 //? `npm run test` — orchestrates all five test layers (contract, auth,
 //? rate-limit, fuzz, custom) against a running server. The server must be
 //? up already; this script does NOT boot it (server start is non-autonomous
-//? per CLAUDE.md). Run `npm run server` in another terminal first.
+//? per AGENTS.md). Run `npm run server` in another terminal first.
 //?
 //? Config via env:
 //?   TEST_BASE_URL          — override; otherwise live dev port → ports.backend fallback

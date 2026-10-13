@@ -166,7 +166,7 @@ const appSection = (productMd) => {
       "## What this app is",
       "",
       "_(no `docs/PRODUCT.md` yet — the AI maintains it: a plain-language description of what this app",
-      "does, for whom, and its key features. On an existing repo the AI offers to backfill it. See CLAUDE.md.)_",
+      "does, for whom, and its key features. On an existing repo the AI offers to backfill it. See AGENTS.md.)_",
     ].join("\n");
   }
   // Strip a leading H1 + the maintainer blockquote note so only the product

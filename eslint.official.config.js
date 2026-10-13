@@ -177,7 +177,7 @@ export default tseslint.config(
   //? `tseslint.configs.strictTypeChecked` in the global `**/*.{ts,tsx}` block
   //? above — they ARE active for server code without needing to repeat them
   //? here. Don't add `eslint-plugin-n` without an `npm install` discussion;
-  //? per CLAUDE.md rule 8 installs require explicit approval.
+  //? per AGENTS.md installs require explicit approval.
   {
     files: [
       'server/**/*.ts',

@@ -74,7 +74,6 @@ const META = {
 
   // AI indexes
   'ai:index': { desc: 'Regenerate docs/AI_QUICK_INDEX.md (cross-repo surfaces).', example: 'npm run ai:index' },
-  'ai:agents-md': { desc: 'Regenerate AGENTS.md from CLAUDE.md (same contract, Codex audience).', example: 'npm run ai:agents-md' },
   'ai:capabilities': { desc: 'Regenerate the helper/component capability snapshot.', example: 'npm run ai:capabilities' },
   'ai:project-index': { desc: 'Regenerate the routes/pages/helpers inventory.', example: 'npm run ai:project-index' },
   'ai:decisions': { desc: 'Regenerate docs/AI_DECISIONS_INDEX.md from docs/decisions/ ADRs.', example: 'npm run ai:decisions' },
@@ -83,7 +82,7 @@ const META = {
   'ai:refresh': { desc: 'Rebuild every AI-context artifact (gitignored local cache). Add --if-missing to build only what is absent.', example: 'npm run ai:refresh' },
   'ai:check-ids': { desc: 'Guard ADR/lesson number identity (duplicates, dangling relates). --backrefs also checks @adr tags in source.', example: 'npm run ai:check-ids -- --backrefs' },
   'ai:graph': { desc: 'Regenerate docs/ai-graph.json (dependency + call graph).', example: 'npm run ai:graph' },
-  'ai:lint': { desc: 'Run the CLAUDE.md invariant linter (no as-any / arbitrary colors / untranslated JSX).', example: 'npm run ai:lint' },
+  'ai:lint': { desc: 'Run the AGENTS.md invariant linter (no as-any / arbitrary colors / untranslated JSX).', example: 'npm run ai:lint' },
 
   // Scaffolding
   'scaffold:test': { desc: 'Create a per-route test stub.', example: 'npm run scaffold:test playground/getData/v1', params: '<page>/<name>/<version>' },
@@ -105,7 +104,7 @@ const GROUPS = [
   ['Lint', ['lint', 'lint:client', 'lint:server', 'lint:all', 'lint:packages']],
   ['Versioning & publish', ['bump', 'publish:packages', 'publish:dry']],
   ['Database (Prisma)', ['prisma:generate', 'prisma:db:push']],
-  ['AI indexes', ['ai:refresh', 'ai:index', 'ai:agents-md', 'ai:capabilities', 'ai:project-index', 'ai:decisions', 'ai:lessons', 'ai:product', 'ai:graph', 'ai:lint', 'ai:check-ids']],
+  ['AI indexes', ['ai:refresh', 'ai:index', 'ai:capabilities', 'ai:project-index', 'ai:decisions', 'ai:lessons', 'ai:product', 'ai:graph', 'ai:lint', 'ai:check-ids']],
   ['Scaffolding', ['scaffold:test', 'scaffold:page']],
   ['Bun (experimental)', ['bun:check', 'bun:server', 'bun:prod']],
   ['Help', ['help']],

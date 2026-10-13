@@ -169,8 +169,7 @@ type SocketArg = Parameters<typeof handleSyncRequest>[0]["socket"];
 //? (id/rooms/handshake/emit/once/off) — a tiny subset of socket.io's `Socket`.
 //? A single boundary assertion through `unknown` is the documented test seam;
 //? both the double-cast guard and `consistent-type-assertions` are disabled
-//? here with this rationale (per CLAUDE.md's "structurally-impossible cases get
-//? an inline disable with a WHY comment").
+//? here with this rationale at the structural test-double boundary.
 const asSocketArg = (socket: OriginatorDouble): SocketArg =>
   // eslint-disable-next-line no-restricted-syntax, @typescript-eslint/consistent-type-assertions -- socket.io Socket test double boundary; the double covers only the members both handlers touch
   socket as unknown as SocketArg;

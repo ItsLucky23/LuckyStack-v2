@@ -15,8 +15,8 @@ export {
   setErrorTrackerUser,
   recordMetricAcrossTrackers,
   startSpanAcrossTrackers,
-  //? ET-N2: previously missing from the barrel — documented in CLAUDE.md but
-  //? caused TS2305 for any consumer following the shutdown / span / filter docs.
+  //? Keep lifecycle/span/filter helpers available through the adapter barrel;
+  //? missing re-exports previously broke consumer imports with TS2305.
   flushErrorTrackers,
   startSpanHandle,
   runWithErrorTrackerIdentity,

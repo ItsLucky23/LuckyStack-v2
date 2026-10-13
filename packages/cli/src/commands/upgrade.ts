@@ -77,8 +77,8 @@ tell the user what's new — ESPECIALLY security (2FA / email-code login) and an
 ${orderedChangelogs.length > 0 ? orderedChangelogs.map((p) => `- ${p.name} (installed ${p.version}) → \`${p.changelog}\``).join('\n') : '- (no CHANGELOGs found — run `npm install` first, then re-run `luckystack upgrade`)'}
 
 If a CHANGELOG has no entry for the installed version (historical 0.2–0.4 gaps),
-also read that package's \`node_modules/@luckystack/<pkg>/CLAUDE.md\` "Config keys"
-section + \`docs/luckystack/decisions/*.md\`.
+also read the package's \`node_modules/@luckystack/<pkg>/AGENTS.md\` design guidance
+and relevant \`docs/luckystack/decisions/*.md\`. Check current config against source.
 
 ## 2. Surface + OFFER
 Ask the user whether to adopt any new feature. Never enable one they didn't ask for.

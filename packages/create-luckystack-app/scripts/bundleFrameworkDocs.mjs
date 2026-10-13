@@ -4,7 +4,7 @@
 //? release flow (`scripts/publishPackages.mjs` → `build:packages`) always runs
 //? before publishing.
 //?
-//? WHY: the scaffold's `aiInstructions` option copies CLAUDE.md / docs / skills /
+//? WHY: the scaffold's `aiInstructions` option copies AGENTS.md / docs / skills /
 //? .claude/commands / branch-logs/README.md into the new project. At runtime the
 //? installed package only has access to its OWN files — the monorepo root is not
 //? in the tarball — so without this bundle the copy silently no-ops for real
@@ -33,12 +33,17 @@ const EXCLUDED_DOC_DIRS = new Set(['_archive', 'plans']);
 
 //? [sourceRelativeToRepoRoot, destRelativeToOutDir, isDirectory]
 const ENTRIES = [
-  ['CLAUDE.md', 'CLAUDE.md', false],
+  ['AGENTS.md', 'AGENTS.md', false],
   ['docs', 'docs', true],
   ['skills', 'skills', true],
   [path.join('.claude', 'commands'), 'claude-commands', true],
   [path.join('branch-logs', 'README.md'), 'branch-logs-README.md', false],
 ];
+
+//? A package without its canonical instructions is not a usable AI-doc bundle.
+if (!fs.existsSync(path.join(REPO_ROOT, 'AGENTS.md'))) {
+  throw new Error('[bundleFrameworkDocs] missing required AGENTS.md');
+}
 
 fs.rmSync(OUT_DIR, { recursive: true, force: true });
 fs.mkdirSync(OUT_DIR, { recursive: true });
@@ -70,9 +75,10 @@ for (const [srcRel, dstRel, isDir] of ENTRIES) {
 //? project they sit next to the identically-named files that project generates
 //? for itself — a second, authoritative-looking answer that is wrong about this
 //? codebase (an eval scenario citing "ADR 0007" finds a real-but-unrelated 0007).
-//? They are also gitignored here, so on a clean CI checkout they may not exist
-//? at all and the bundle must not depend on them. The CONVENTIONS still ship:
-//? every protocol, ARCHITECTURE_* deep-dive and findings/README.md is copied.
+//? The framework's own PRODUCT and ROADMAP likewise describe the wrong app.
+//? Generated artifacts are gitignored here, so on a clean CI checkout they may
+//? not exist at all and the bundle must not depend on them. The CONVENTIONS still ship:
+//? every protocol and ARCHITECTURE_* deep-dive is copied.
 //? Mirrors FRAMEWORK_OWN_RECORDS in src/index.ts — keep both in step.
 const FRAMEWORK_OWN_RECORDS = [
   'AI_QUICK_INDEX.md',
@@ -83,8 +89,11 @@ const FRAMEWORK_OWN_RECORDS = [
   'AI_PRODUCT_OVERVIEW.md',
   'ai-graph.json',
   'ai-product',
+  'PRODUCT.md',
+  'ROADMAP.md',
   'decisions',
   'lessons',
+  'findings',
 ];
 
 let stripped = 0;

@@ -26,14 +26,14 @@ generated index. One short paragraph.
 - **<Option Z>** — rejected because <reason>.
 
 (This section is the whole point of a decision record. If there were no real
-alternatives, this was probably a rule, not a decision — put it in CLAUDE.md
-User Project Rules instead.)
+alternatives, this may not need a decision record. Do not automatically promote
+it into AGENTS.md User Project Rules; obtain approval for a new always-on rule.)
 
 ## Consequences
 
 The trade-offs we accepted, follow-up work this creates, and what would make us
-revisit. Note anything that becomes an always-on rule (and link the CLAUDE.md
-rule with `relates:`).
+revisit. Link related decisions by record number; `relates:` is not a field
+for an AGENTS.md rule number.
 
 <!--
 HOW TO USE THIS FILE
@@ -42,6 +42,6 @@ HOW TO USE THIS FILE
 - Never rewrite history: to change a past decision, add a NEW file and set its
   `supersedes: [NNNN]`, and flip the old file's status to `superseded`.
 - Run `npm run ai:decisions` (autonomous) to refresh docs/AI_DECISIONS_INDEX.md.
-- The AI writes these automatically during sessions when a durable decision is made (no command to run).
+- Capture only a real implemented/confirmed choice at wrap-up under AGENTS.md, never mid-sparring.
 - Spec: docs/DECISION_MEMORY_PROTOCOL.md.
 -->

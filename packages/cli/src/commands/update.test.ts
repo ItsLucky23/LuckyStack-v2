@@ -67,7 +67,8 @@ const project = (): ConsumerProject => ({
 
 describe('isSafeSurfacePath', () => {
   it('accepts the framework-owned bucket and rejects user code', () => {
-    expect(isSafeSurfacePath('CLAUDE.md')).toBe(true);
+    expect(isSafeSurfacePath('AGENTS.md')).toBe(true);
+    expect(isSafeSurfacePath('CLAUDE.md')).toBe(true); // legacy retirement marker
     expect(isSafeSurfacePath('docs/luckystack/ARCHITECTURE_API.md')).toBe(true);
     expect(isSafeSurfacePath('skills/custom/foo.md')).toBe(true);
     expect(isSafeSurfacePath('.claude/commands/save.md')).toBe(true);
@@ -85,7 +86,8 @@ describe('isSafeSurfacePath', () => {
 
 describe('isUpdatablePath (ADR 0025 --app scope)', () => {
   it('framework scope = bucket B only (never src/ or config)', () => {
-    expect(isUpdatablePath('CLAUDE.md', 'framework')).toBe(true);
+    expect(isUpdatablePath('AGENTS.md', 'framework')).toBe(true);
+    expect(isUpdatablePath('CLAUDE.md', 'framework')).toBe(true); // legacy manifest support
     expect(isUpdatablePath('scripts/generateTypeMaps.ts', 'framework')).toBe(true);
     expect(isUpdatablePath('src/_components/LoginForm.tsx', 'framework')).toBe(false);
     expect(isUpdatablePath('config.ts', 'framework')).toBe(false);
@@ -97,7 +99,7 @@ describe('isUpdatablePath (ADR 0025 --app scope)', () => {
     expect(isUpdatablePath('functions/session.ts', 'app')).toBe(true);
     expect(isUpdatablePath('config.ts', 'app')).toBe(true);
     expect(isUpdatablePath('tsconfig.server.json', 'app')).toBe(true);
-    expect(isUpdatablePath('CLAUDE.md', 'app')).toBe(true); //? bucket B still included
+    expect(isUpdatablePath('AGENTS.md', 'app')).toBe(true); //? bucket B still included
   });
 
   it('app scope STILL never touches schema / deps / secrets / manifest', () => {
@@ -151,6 +153,32 @@ describe('choicesToFlags', () => {
   });
 });
 
+describe('AGENTS.md delivery to legacy projects', () => {
+  it('adds canonical AGENTS.md but preserves and flags customized CLAUDE.md for manual retirement', () => {
+    write(consumerDir, 'CLAUDE.md', 'my private project customizations\n');
+    manifestFor(consumerDir, { 'CLAUDE.md': 'upstream old instructions\n' });
+    write(freshDir, 'AGENTS.md', 'new design guidance\n');
+    manifestFor(freshDir, { 'AGENTS.md': 'new design guidance\n' }, { luckystackVersion: '0.9.0' });
+
+    const result = runUpdate(project(), {
+      cliVersion: '0.9.0',
+      renderFreshScaffold: () => ({ projectDir: freshDir, cleanup: () => undefined }),
+    });
+    expect(result.ok).toBe(true);
+    expect(fs.readFileSync(path.join(consumerDir, 'AGENTS.md'), 'utf8')).toBe('new design guidance\n');
+    expect(fs.readFileSync(path.join(consumerDir, 'CLAUDE.md'), 'utf8')).toBe('my private project customizations\n');
+    expect(fs.existsSync(path.join(consumerDir, 'CLAUDE.md.new'))).toBe(false);
+    expect(fs.existsSync(path.join(consumerDir, 'CLAUDE.md.removed'))).toBe(true);
+    const report = fs.readFileSync(path.join(consumerDir, 'dump', fs.readdirSync(path.join(consumerDir, 'dump'))[0] ?? ''), 'utf8');
+    expect(report).toContain('Compare its project-specific rules with AGENTS.md');
+    const updated = readScaffoldManifest(consumerDir);
+    expect(updated?.files.find((entry) => entry.path === 'AGENTS.md')?.sha256).toBe(sha('new design guidance\n'));
+    expect(updated?.files.find((entry) => entry.path === 'CLAUDE.md')?.sha256).toBe(sha('upstream old instructions\n'));
+  });
+});
+
+// Legacy CLAUDE.md fixtures below verify updates from older scaffold versions;
+// new scaffold delivery is AGENTS-only (tested above and in agentsDelivery.test.ts).
 describe('planUpdate', () => {
   it('classifies add / unchanged / overwrite (pristine) / sidecar (modified)', () => {
     //? Consumer state: one pristine file, one user-modified file, one missing.
@@ -293,8 +321,8 @@ describe('applyUpdate + runUpdate (injected fresh render)', () => {
     expect(fs.existsSync(path.join(consumerDir, 'docs/luckystack/AI_RUNBOOKS.md.removed'))).toBe(true);
 
     //? The marker must never read as an order to delete — removing a file is
-    //? user-gated (CLAUDE.md Rule 8), so it has to route through the developer.
-    expect(marker).toContain('Rule 8');
+    //? user-gated (AGENTS.md), so it has to route through the developer.
+    expect(marker).toContain('AGENTS.md');
     expect(marker).toMatch(/propose|recommendation/i);
 
     //? A retired file must never also get a `.new` twin — that is the exact
@@ -315,7 +343,7 @@ describe('applyUpdate + runUpdate (injected fresh render)', () => {
     //? deletion — not tell it to clean up on its own.
     expect(report).toContain('WAIT for their decision');
     expect(report).toContain('ONE batch');
-    expect(report).toContain('Rule 8');
+    expect(report).toContain('AGENTS.md');
   });
 
   it('re-flags an ignored removal on the next update, and stops once the file is gone', () => {

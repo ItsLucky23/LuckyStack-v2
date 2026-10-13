@@ -5,6 +5,13 @@ All notable changes to `create-luckystack-app` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- New scaffolds and the npm documentation bundle deliver canonical `AGENTS.md` only, with fail-closed instruction/fence validation and regression coverage. Shared hooks no longer regenerate it from a vendor-specific file.
+- Handwritten docs and workflow guidance focus on rationale and safety; new project READMEs no longer require prose pruning when auth/data-layer choices change. Framework identity, roadmap and findings ledgers do not become consumer context. Supported tool-specific permission settings remain unchanged.
+
 ## [0.10.2] - 2026-10-09
 
 ### Changed

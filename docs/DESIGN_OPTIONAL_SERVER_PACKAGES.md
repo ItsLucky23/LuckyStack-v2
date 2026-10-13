@@ -1,104 +1,11 @@
-# Optional package architecture
+# Optional server packages — design
 
-<!-- @covers packages/server/src/capabilities.ts, packages/server/src/bootstrap.ts, packages/cli/src/commands -->
+LuckyStack's server can start without every feature package installed. Requiring authentication, presence, email, docs or scheduling just to serve unrelated routes would couple deployment size and dependency risk to unused capabilities. The server discovers installed optional peers and lets them register before consumer overlays, so project customization remains the final writer. Package manifests are authoritative for peer status and ranges.
 
-> Current contract for installing and removing optional LuckyStack packages.
-> Historical implementation plans are preserved by git history and ADRs, not mixed into this current
-> architecture reference.
->
-> Last reviewed: 2026-08-29
+## Capability versus consumer files
 
-## Status
+A plain install is appropriate when a capability can register from a package. A feature that needs project-owned pages, route assets or configuration must also deliver editable consumer files through `luckystack add`; an installed library cannot safely replace those files. For supported additions, removals and current commands consult [`LUCKYSTACK_ADD_GUIDE.md`](./LUCKYSTACK_ADD_GUIDE.md) and [`UPGRADING.md`](./UPGRADING.md). Never silently delete edited login pages on removal.
 
-The install-anything-anytime model is implemented in the current release line. `@luckystack/server`
-boots with optional login, presence, sync, email, error-tracking, cron, docs-ui, and devkit peers when
-they are installed, and degrades only the missing capability when they are absent.
+Login's absence is not permission to omit CSRF protection: cookie-mode writes still need the appropriate stateless double-submit boundary when no session-backed provider exists. Secret-manager stays explicit because unresolved credentials demand a deliberate fail-closed choice. The router is a separate process, not an optional in-process route listener. See [HTTP](./ARCHITECTURE_HTTP.md), [secret manager](./ARCHITECTURE_SECRET_MANAGER.md), and [multi-instance](./ARCHITECTURE_MULTI_INSTANCE.md).
 
-The exact peer ranges and optional flags are defined by package manifests. The public package surfaces
-are documented in each package's `CLAUDE.md` and README.
-
-## 1. Optional server capabilities
-
-| Capability | Package | Installed behavior | Absent behavior |
-|---|---|---|---|
-| Auth/session routes | `@luckystack/login` | Registers the login session provider and auth routes | Auth routes return the disabled contract; core session access stays null-safe |
-| Realtime sync | `@luckystack/sync` | Registers the Socket.io and HTTP/SSE sync handlers | Socket sync listener is not attached; HTTP sync returns `sync.disabled` |
-| Presence | `@luckystack/presence` | Registers connect/disconnect, AFK, room, and activity behavior | Presence lifecycle and peer notifications are skipped |
-| Transactional email | `@luckystack/email` | Registers configured sender adapters | Email is unavailable unless another sender is registered |
-| Error tracking | `@luckystack/error-tracking` | Registers configured tracker adapters and instrumentation | Capture is a safe no-op until a tracker is configured |
-| Recurring jobs | `@luckystack/cron` | Registers the scheduler and `luckystack/cron/*.ts` jobs | No scheduler or jobs run |
-| API docs UI | `@luckystack/docs-ui` | Registers the development API explorer | The docs route is absent |
-| Dev tooling | `@luckystack/devkit` | Enables route discovery, generation, hot reload, and dev supervision | Production artifacts can still run; dev generation requires the tool |
-
-`@luckystack/router` is not an in-process server capability. It is a separate HTTP/WebSocket process for
-multi-instance routing. `@luckystack/secret-manager` is initialized explicitly because its source mode
-controls whether unresolved pointers fail open or fail closed.
-
-## 2. Detection and registration
-
-`packages/server/src/capabilities.ts` detects optional packages once and lazy-loads them only when present.
-`bootstrapLuckyStack` then imports the installed packages' `./register` subpaths before consumer overlays.
-This ordering gives the framework a safe default while preserving the consumer's overlay as the last writer.
-
-The current auto-registered package order is defined by `OPTIONAL_PACKAGES` in `capabilities.ts`. The sync
-package has no server-side register entry; its browser receive bridge is attached from
-`@luckystack/sync/client`. Secret-manager is deliberately outside this list because it has a separate
-explicit initialization path.
-
-## 3. Sessions and CSRF without login
-
-Session reads and writes are owned by the core session-provider registry. `@luckystack/login` registers the
-normal provider when installed; API, sync, presence, and server code use core accessors rather than taking a
-hard runtime dependency on login.
-
-When login is absent, the app has no user identity. Cookie-mode state-changing framework requests therefore
-use the stateless double-submit CSRF contract: the server-issued CSRF cookie must match the
-`x-csrf-token` header. When login is installed, the existing session-bound CSRF path remains authoritative.
-
-## 4. `npm i` versus `luckystack add`
-
-Use a plain package install when the package can self-register at boot:
-
-```sh
-npm i @luckystack/email
-npm i @luckystack/error-tracking
-npm i @luckystack/cron
-npm i @luckystack/sync
-```
-
-Use `npx luckystack add <feature>` when the feature also needs consumer-owned files that file-based routing
-or Vite cannot discover from an uninstalled package:
-
-- `login` copies editable login/register/reset/settings assets;
-- `presence` injects the browser-side provider and indicator mounts;
-- `router` copies topology config and wires its server imports;
-- `docs-ui` copies the consumer docs page;
-- `error-tracking` copies the consumer shim;
-- `secret-manager` wires the explicit config/server blocks.
-
-`error-tracking` and `docs-ui` appear in both lists on purpose, and the distinction is worth getting right:
-the *capability* self-registers on a plain `npm i`, so the feature works. What `add` contributes is the
-consumer-owned file you are meant to edit (the tracker shim, the docs page). Install it either way; reach
-for `add` when you want that file too. `docs/LUCKYSTACK_ADD_GUIDE.md` answers the same question from the
-capability side.
-
-`luckystack remove` reverses supported additions. It never deletes user-owned login pages automatically.
-
-## 5. Scaffold and upgrade propagation
-
-`create-luckystack-app` bundles the framework's docs at package build time; a fresh scaffold receives them
-under `docs/luckystack/` and the corresponding root locations. What is bundled, what is deliberately
-withheld (the framework's own records and the framework-only `CLAUDE.md` sections — and why that matters),
-and the three outcomes `npx luckystack update` can produce per file are one contract, described once in
-[`ARCHITECTURE_PACKAGING.md`](./ARCHITECTURE_PACKAGING.md) §9. It is not repeated here.
-
-Upgrading an installed `@luckystack/*` package refreshes that package's own `CLAUDE.md` and deep docs in
-`node_modules/`.
-
-## 6. Stable references
-
-- Package dependency truth: `packages/<name>/package.json`.
-- Package API guidance: `packages/<name>/CLAUDE.md` and README.
-- Server bootstrap details: `packages/server/docs/create-server.md` and `packages/server/src/capabilities.ts`.
-- Multi-instance behavior: `docs/ARCHITECTURE_MULTI_INSTANCE.md`.
-- Package update behavior: `docs/UPGRADING.md` and `docs/ARCHITECTURE_PACKAGING.md`.
+Current optional registration and behavior live in `packages/server/src/capabilities.ts` and the relevant package README; they are intentionally not mirrored as a hand-maintained capability table here.

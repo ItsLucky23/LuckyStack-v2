@@ -5,12 +5,17 @@ All notable changes to `@luckystack/mcp` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Package design guidance now ships as `AGENTS.md`, not `CLAUDE.md`. Handwritten docs focus on rationale and safety; exact API contracts remain in installed declarations/source.
+
 ## [0.10.2] - 2026-10-09
 
 ### Security
 
 - `@modelcontextprotocol/sdk` floor raised to `^1.31.0` (GHSA-6qxp-vccf-f47h: below 1.31.0 the SDK's OAuth client could send credentials to an authorization server chosen by the MCP server). Consumers with an older lockfile now resolve a fixed version on their next install.
-
 ## [0.9.0] - 2026-08-28
 
 ### Changed

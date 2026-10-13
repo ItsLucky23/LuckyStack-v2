@@ -1,52 +1,23 @@
 # Contributing to LuckyStack
 
-This document covers the conventions framework maintainers follow. End-user
-documentation lives in `docs/DEVELOPER_GUIDE.md` and the per-package
-`packages/*/README.md` files.
+## Keep package boundaries useful
 
-## Versioning policy
+Framework packages must not depend on the reference application's directory layout, ORM or route names. Registries and adapters keep application choices outside reusable framework code; reaching across packages with relative source imports bypasses that boundary.
 
-LuckyStack ships in **lockstep**: every `@luckystack/*` package on npm carries
-the same version number on every release (mirrors the Vite, Vue, and Astro
-release model). Peer-dep ranges between framework packages use `^x.y.z`
-pinned to the current major.
+Reuse the existing configuration, routing and adapter contracts rather than creating a second source of defaults or environment parsing. Consult source/types for their exact shape and package `AGENTS.md` for the reason behind constraints.
 
-Why lockstep:
-- The packages are tightly inter-coupled (`@luckystack/server` requires
-  matching `@luckystack/api` + `@luckystack/login` + `@luckystack/sync`).
-- Consumers don't need to think about compatibility matrices.
-- A single `@luckystack/server@1.4.0` install pulls a coherent set of
-  dependencies.
+## Release compatibility
 
-Independent versioning is not supported and won't be accepted in PRs.
+LuckyStack releases packages in lockstep. This avoids asking consumers to solve an internal compatibility matrix for tightly coupled framework contracts. Independent package versioning is not the accepted release model.
 
-## Publishability
+The release scripts and package manifests determine which workspaces publish. Do not maintain a second package list here. When introducing a package, examine those sources and the existing package scaffold; verify actual tarball contents, not just a successful workspace build.
 
-The repository publishes 16 `@luckystack/*` packages plus the unscoped `create-luckystack-app`: api, cli, core, cron, devkit, docs-ui, email, error-tracking, login, mcp, presence, router, secret-manager, server, sync, test-runner, and create-luckystack-app. Every one has `"private": false` and participates in the lockstep release.
+## Review expectations
 
-`packages/env-resolver/` is a reserved placeholder with no `package.json`; it is not built or published.
+- Keep changes scoped to the requested contract; do not slip in unrelated refactors.
+- Prove regressions with tests and preserve transport-equivalent security.
+- Keep consumer-editable files separate from library-owned implementation.
+- Explain design choices and rejected alternatives, not signatures or execution tours. Use short comments only for non-obvious local rationale.
+- Run the feature-boundary gate in [AGENTS.md](AGENTS.md), plus consumer-delivery checks when scaffold assets change.
 
-## Adding a new framework package
-
-1. Place the package under `packages/<name>/`.
-2. Mirror an existing package's layout: `package.json`, `tsconfig.json`,
-   `tsup.config.ts`, `src/`, `README.md`.
-3. Add it to the appropriate dependency wave in `scripts/buildPackages.mjs` and update the package-count/release checks that enumerate publishable workspaces.
-4. If it ships hooks, add a `src/hookPayloads.ts` augmenting
-   `@luckystack/core`'s `HookPayloads` (see `packages/login/src/hookPayloads.ts`
-   or `packages/server/src/hookPayloads.ts` for the exact pattern).
-5. If it adds runtime configuration knobs, register a registry under
-   `@luckystack/core` (`registerXxx` / `getXxx`) instead of reaching for env
-   vars or relative imports.
-
-## Avoid
-
-- Relative imports that escape the package boundary (`from '../../../...'`).
-  Use registries on `@luckystack/core` instead.
-- Hard-coded filesystem paths. Read from `getProjectConfig().paths` or
-  `getSrcDir()` / etc.
-- Hard-coded route markers (`_api`, `_sync`). Read from `getRoutingRules()`.
-- Direct `process.env.*` reads inside framework packages for anything that
-  belongs in `ProjectConfig` or `DeployConfig`.
-- Direct `@prisma/client` enum imports. Use the user adapter or pass the
-  values in as plain strings.
+See [the contributor setup guide](docs/DEVELOPER_GUIDE.md) for getting started.

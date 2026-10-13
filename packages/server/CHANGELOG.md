@@ -5,12 +5,17 @@ All notable changes to `@luckystack/server` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- Package design guidance now ships as `AGENTS.md`, not `CLAUDE.md`. Handwritten docs focus on rationale and safety; exact API contracts remain in installed declarations/source.
+
 ## [0.10.2] - 2026-10-09
 
 ### Added
 
 - `/_test/reset` accepts `?only=<target>[,<target>]` to clear exactly those targets (the shared list in core `TEST_RESET_TARGETS`). An unknown or empty target is `400 test.invalidResetTarget` — a typo must not silently reset nothing, or everything. Without `only` the default reset is unchanged. This lets an authenticated test sweep drain limiter buckets without deleting its own session.
-
 ## [0.8.7] - 2026-08-18
 
 ### Added

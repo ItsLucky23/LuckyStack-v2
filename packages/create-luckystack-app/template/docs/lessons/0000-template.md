@@ -10,7 +10,7 @@ tags: [runtime, sockets]
 # NNNN — One-line title of the pitfall
 
 > Template seed. Copy to `docs/lessons/NNNN-slug.md` (next free number) and fill in.
-> `npm run ai:lessons` regenerates `docs/AI_LESSONS_INDEX.md` (the hook does it too).
+> `npm run ai:lessons` refreshes the ignored index after capture; the hook only checks.
 > Severity: `low | medium | high | critical`. Distinct from an ADR — a lesson is
 > *what failed and the takeaway*, NOT *why we chose X over Y* (that's `docs/decisions/`).
 

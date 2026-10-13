@@ -81,7 +81,7 @@ const META = {
   'ai:refresh': { desc: 'Rebuild every AI-context artifact (gitignored local cache). Add --if-missing to build only what is absent.', example: 'npm run ai:refresh' },
   'ai:check-ids': { desc: 'Guard ADR/lesson number identity (duplicates, dangling relates). --backrefs also checks @adr tags in source.', example: 'npm run ai:check-ids -- --backrefs' },
   'ai:graph': { desc: 'Regenerate docs/ai-graph.json (dependency + call graph).', example: 'npm run ai:graph' },
-  'ai:lint': { desc: 'Run the CLAUDE.md invariant linter (no as-any / arbitrary colors / untranslated JSX).', example: 'npm run ai:lint' },
+  'ai:lint': { desc: 'Run the AGENTS.md invariant linter (no as-any / arbitrary colors / untranslated JSX).', example: 'npm run ai:lint' },
 
   // Scaffolding
   'scaffold:test': { desc: 'Create a per-route test stub.', example: 'npm run scaffold:test playground/getData/v1', params: '<page>/<name>/<version>' },

@@ -513,7 +513,7 @@ describe('handleHttpApiRequest — pipeline ordering and hooks', () => {
   it('dispatches transformApiResponse on the HTTP transport, AFTER preApiRespond and BEFORE postApiRespond', async () => {
     //? Transport parity: the HTTP handler now runs the same respond-phase hook
     //? sequence as the socket handler (handleApiRequest.emitApiResult), per
-    //? CLAUDE.md "both transports execute the same sequence". This pins that
+    //? Transport parity requires the same policy ordering. This pins that
     //? transformApiResponse fires between preApiRespond and postApiRespond.
     registerRoute();
 

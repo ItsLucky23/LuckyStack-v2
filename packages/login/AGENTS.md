@@ -1,0 +1,7 @@
+# @luckystack/login — design context
+
+Login handles credentials, OAuth, sessions and their lifecycle; consuming applications own identity storage and may register user/session adapters. Do not store persistent user data in sessions. Sanitize session fields before sending them to browsers; never log full tokens or return password hashes. Source: `src/sessionSanitizer.ts`, `src/session.ts`, `src/userAdapter.ts`.
+
+Keep account linking a deliberate product/security choice: changing from provider-scoped accounts to unified email accounts requires database uniqueness and verified identity assumptions (`src/accountStrategy.ts`). Password policy belongs to registration/change/reset, not failed login counting against existing passwords (`src/login.ts`, `src/passwordPolicy.ts`). Keep password-reset and email-change secrets single-use and hashed at rest (`../core/src/oneTimeToken.ts`). An unknown reset email must not change visible behavior (`src/forgotPassword.ts`).
+
+OAuth state protects the callback, and post-login redirects must be validated against trusted origins, including any return URL carried in state. Never turn an untrusted redirect into an authenticated bounce; never silently broaden CORS to make one work. Cookie sessions require CSRF and carefully scoped cross-origin rules. Source: `src/login.ts`, `src/redirectResolver.ts`, `../server/src/httpRoutes/authCallbackRoute.ts`. See `docs/redirect-validation.md`, `docs/session-management.md`, `../server/AGENTS.md`.

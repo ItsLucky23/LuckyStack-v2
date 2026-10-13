@@ -3,7 +3,7 @@ name: save_handoff
 description: Write a session handoff file (solo or parallel-agent mode) capturing done/in-progress/blockers/next-steps/open-questions/files-touched.
 ---
 
-You are writing a handoff document for the current Claude Code session. Work autonomously, do not ask the user clarifying questions, make reasonable inferences from the transcript.
+Write a handoff for the current AI session under `AGENTS.md`. Work autonomously from verified transcript/tool evidence; mark uncertainty instead of inventing facts.
 
 ## Argument parsing
 
@@ -24,7 +24,7 @@ If a file already exists at the target path, append a new dated section to it ra
 3. If the file exists, read it first so you append rather than overwrite.
 4. Scan the session transcript and recent tool calls. Pull out: edited files, ran commands, observed errors, decisions made, questions deferred.
 5. If the repo has a current `branch-logs/<sanitized-branch>.md`, glance at the last entries to ground the timeline.
-6. Write the handoff. Length is whatever the session warrants — 300+ lines is fine if the session was dense; do not pad short sessions.
+6. Write a concise handoff with enough evidence and exact next actions to resume. Do not copy implementation details, pad to a line target or expose secrets.
 
 ## Required sections (in this order)
 
@@ -64,7 +64,7 @@ What the user needs to click / run / observe to confirm the work.
 - No emojis, no decorative banners.
 - Plain markdown headings, plain bullets.
 - Code blocks for any command, error, or file snippet.
-- Be specific: prefer "added `parseArgv` to `packages/server/src/parseArgv.ts`, wired into `index.ts:42`" over "improved arg parsing".
+- Be specific about intent, outcomes, evidence and next actions; use source/diff pointers rather than retelling implementation.
 - If a section is genuinely empty, write `- (none)` rather than omitting the heading.
 
 ## After writing

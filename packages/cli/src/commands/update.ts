@@ -1,5 +1,5 @@
 //? `luckystack update` — refresh the FRAMEWORK-OWNED files a scaffold copied
-//? into this project (docs/luckystack, CLAUDE.md, skills, .claude/commands,
+//? into this project (docs/luckystack, AGENTS.md, skills, .claude/commands,
 //? generator scripts, shared eslint configs, route templates) from the current
 //? framework version. Implements phase 1a of the scaffold-update decision
 //? (ADR 0021); the scaffold-manifest (`.luckystack/scaffold.json`, written by
@@ -52,7 +52,7 @@ export const removedMarkerBody = (relativePath: string, frameworkVersion: string
     `     \`${relativePath}\` (an npm script, the pre-commit hook, another module).`,
     '  2. Take the finding to the developer with a recommendation — remove it, or',
     '     keep it because <reference> still needs it. Deleting a file is NEVER an',
-    '     autonomous action (CLAUDE.md Rule 8): propose, then wait for a yes.',
+    '     autonomous action (AGENTS.md): propose, then wait for a yes.',
     '  3. On a yes to remove: delete the file and this marker together. On a no:',
     '     keep the file, delete only this marker — the project now owns it, the',
     '     framework no longer maintains it.',
@@ -91,6 +91,9 @@ const SAFE_PREFIXES = [
   'scripts/',
 ] as const;
 const SAFE_FILES = new Set([
+  'AGENTS.md',
+  //? Legacy consumers may still have a manifest-tracked CLAUDE.md. Never delete
+  //? it or silently rewrite it; report retirement and request manual review.
   'CLAUDE.md',
   'branch-logs/README.md',
   'eslint.luckystack.config.js',
@@ -491,6 +494,9 @@ export const applyUpdate = (
       '',
     );
   }
+  if (noLongerShipped.includes('CLAUDE.md')) {
+    lines.push('Legacy CLAUDE.md was not deleted or overwritten. Compare its project-specific rules with AGENTS.md before recommending manual retirement; never discard customizations automatically.', '');
+  }
   if (noLongerShipped.length > 0) {
     lines.push(
       `No longer shipped by this framework version (left in place, each flagged with a \`${REMOVED_MARKER_SUFFIX}\` marker):`,
@@ -502,7 +508,7 @@ export const applyUpdate = (
       'Then bring the whole list to the developer in ONE batch with a per-file',
       'recommendation — "safe to remove, nothing references it" or "keep, <X> still',
       'uses it" — and WAIT for their decision. Deleting files is never autonomous',
-      '(CLAUDE.md Rule 8). On a yes: remove the file together with its',
+      '(AGENTS.md). On a yes: remove the file together with its',
       `\`${REMOVED_MARKER_SUFFIX}\` marker. On a no: keep the file and delete only the marker;`,
       'the project owns it from now on. Never merge a marker into a file — it holds',
       'no replacement content, and doing so would destroy the file.',
@@ -596,7 +602,7 @@ export const normalizeScaffoldProjectName = (raw: string): string =>
 
 export interface UpdateOptions {
   cliVersion: string;
-  /** `'framework'` (default) = docs/scripts/CLAUDE.md only; `'app'` (--app) also
+  /** `'framework'` (default) = docs/scripts/AGENTS.md only; `'app'` (--app) also
    *  refreshes framework-authored src/ UI + routes + config (ADR 0025). */
   scope?: UpdateScope;
   /** Injectable for tests/e2e: produce a fresh render dir for the given choices. */
@@ -731,6 +737,9 @@ export const runUpdate = (project: ConsumerProject, options: UpdateOptions): Res
   console.log(`Report: ${reportPath}`);
   if (counts.sidecar > 0) {
     console.log('Merge the listed `.new` sidecars (an AI agent can apply the report), then review with git diff.');
+  }
+  if (fs.existsSync(path.join(project.root, 'CLAUDE.md'))) {
+    console.log('Legacy CLAUDE.md remains untouched. Review its custom rules against AGENTS.md before deciding whether to retire it; update never deletes it.');
   }
   if (scope === 'framework' && counts.add + counts.overwrite + counts.sidecar === 0) {
     console.log('Tip: framework-owned docs/scripts are current. Run `npx luckystack update --app` to also refresh the scaffolded src/ UI + routes (e.g. after a feature release).');

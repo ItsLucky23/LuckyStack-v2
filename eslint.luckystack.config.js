@@ -1,5 +1,5 @@
 //? LuckyStack-specific lint contract. Codifies the prose rules in
-//? CLAUDE.md (no raw try/catch, no raw fetch, prefer framework
+//? AGENTS.md (no raw try/catch, no raw fetch, prefer framework
 //? components, no arbitrary tailwind colors) into actual eslint rules so
 //? `npm run lint` enforces them autonomously.
 //?

@@ -1,37 +1,13 @@
 # DevTools-lag harness
 
-Dependency-vrij meetharnas (Node >= 22, Chrome) voor het DevTools-open lag-onderzoek
-op branch `debug/devtools-lag`. Zie `branch-logs/debug-devtools-lag.md` voor de
-volledige context en resultaten.
-
-## Wat het doet
-
-Chrome DevTools zet bij openen `Debugger.setAsyncCallStackDepth` aan; React 19.2's
-dev-runtime roept `console.createTask()` aan voor elk JSX-element. De combinatie
-verzadigt de main thread. Deze scripts spawnen een schone Chrome met
-remote-debugging-port en meten 4 cellen: {createTask-fix actief | geneutraliseerd}
-× {async-tracking uit | aan (= DevTools-open-simulatie)}.
+Dit harnas helpt debugger-overhead van applicatiewerk te onderscheiden. Een trage meting met DevTools open bewijst niet dat dezelfde vertraging buiten de debugger bestaat; zie `branch-logs/debug-devtools-lag.md` voor historische context.
 
 ## Gebruik
 
-Vereist: draaiende dev-stack (`npm run server` + Vite) en het testaccount
-`devtools-lag@test.local` / `DevTools!Lag42x` (eenmalig registreren via /register).
+Gebruik een toegestane testomgeving en een eigen testaccount; zet inloggegevens niet in documentatie. Start een gezonde dev-stack en gebruik de werkelijk gemelde URL.
 
-```
-# volledige app-meting (logt in, meet /playground: fps + promise/timer-churn):
-node scripts/devtoolsLagHarness/cdpLagTest.mjs "http://localhost:5174/login?backend=81"
+De meet- en analysecommando's staan in de scripts naast dit bestand. Controleer daar hun huidige argumenten voordat je een run start. Vraag toestemming voor browsergebruik en registreer langdurige processen volgens de lokale runtimepolicy.
 
-# stresspagina-meting (grote boom, continue re-renders — dáár zit het createTask-effect):
-node scripts/devtoolsLagHarness/cdpStressTest.mjs "http://localhost:5174/devtools-lag-test?backend=81&n=1500&hz=20"
+## Meetgrens
 
-# Chrome-performance-trace (.json/.json.gz) analyseren op AsyncTask*-events:
-node scripts/devtoolsLagHarness/analyzeTrace.mjs pad/naar/trace.json.gz
-```
-
-Pas poorten aan naar je eigen setup (`?backend=<poort>` werkt alleen in dev).
-
-## Beperking
-
-Het harnas simuleert de *debugger-async-tracking* van DevTools, niet de volledige
-DevTools-frontend (console-object-retentie, source-map-parsing, Elements-mirroring).
-De subjectieve eindcheck "console open vs dicht" blijft een handmatige test.
+De simulatie richt zich op async-tracking door de debugger, niet op alle effecten van de DevTools-interface. Combineer metingen daarom met een handmatige vergelijking van dezelfde pagina met DevTools open en gesloten. Noteer die beperking bij conclusies; verander niet meerdere variabelen tegelijk.

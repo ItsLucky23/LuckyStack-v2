@@ -52,11 +52,8 @@ const CONFIG_TS = 'config.ts';
 const README = 'README.md';
 const DOCS_PAGE = 'src/docs/page.tsx';
 
-//? README paragraphs that describe login as an INSTALLED feature. Mirror of
-//? create-luckystack-app's LOGIN_DOC_EDITS so removing login here strips the same
-//? prose the scaffold would never have emitted for an auth:'none' project. The
-//? auth-pages paragraph is replaced with a neutral "add it later" pointer (the
-//? @luckystack/login package still exists as an option); the rest are deleted.
+//? Legacy scaffold README paragraphs retained for safe package removal from
+//? older consumers. New READMEs are choice-neutral and need no prose pruning.
 const LOGIN_DOC_EDITS = [
   {
     find: "If you selected an **auth** mode (`credentials` / `credentials+oauth`), you'll also find the auth UI under `src/`: `login/page.tsx`, `register/page.tsx`, `reset-password/page.tsx`, and an account-management `settings/page.tsx`. Scaffolded with `auth: 'none'`? Add them later with `npx luckystack add login`.",

@@ -1503,3 +1503,31 @@ PR #9 kreeg om een verwante reden nooit CI: `pull_request` draait tegen `refs/pu
 **Voor Flexbuddy (DEV-400).** Bump `@luckystack/core` + `@luckystack/test-runner` naar 0.10.1, dan `TEST_ONLY_CUSTOM=1 TEST_FILTER=admin/ai npm run test` tegen een draaiende backend → verwacht custom laag 57/57.
 
 **Files:** `branch-logs/{main,INDEX}.md`. Tag `v0.10.1`.
+
+## 2026-10-13 13:38 — WHY-first documentatie en uitsluitend AGENTS bij huidige levering
+
+**User prompt (summary):** review alle huidige documentatie en npm/scaffoldlevering met parallelle agents; behoud rationale en minimale praktische/veiligheidsinstructies, verwijder gekopieerde code-uitleg en maak AGENTS.md canoniek zonder historische inhoud of maatwerk te verliezen.
+
+**What I did:** vier geïsoleerde lijnen geïntegreerd voor runtimepakketten, overige pakketten, architectuur en levering/tooling. Rootguides, skills, opdrachten en actieve recordsjablonen opgeschoond. Generators/hooks leveren geen vendor-specifieke instructiebron meer; legacy consumer-instructies blijven behouden met handmatige voorstellen. Framework-identiteit, roadmap en bevindingenrollup reizen niet mee als consumentcontext. Oude README-prosabewerkingen uit nieuwe scaffolds verwijderd; legacy CLI-afhandeling behouden.
+
+**Notes / decisions:** onafhankelijke reviews vonden en verifieerden correcties voor e-mailveto/uitzonderingen, concrete 2FA-vereisten, consumerpaden en templates. De volledige suite ving daarnaast Docker-kopiepariteit en een achtergebleven README-tokenbewerking. ADR 0065 supersedeert 0049; ADR 0066 legt de canonieke instructiebron vast (bij integratie hernummerd van 0057/0058). Oude records en het externe handoffarchief zijn niet herschreven. De vooraf aanwezige `allowScripts`-wijziging van de ontwikkelaar bleef ongemoeid.
+
+**Verification:** root lint + package lint geslaagd; volledige build 17/17 geslaagd; finale unit-suite **2092/2092, 202 bestanden**. Echte lokale tarballs voor 17 pakketten geëxtraheerd en 6 no-install scaffoldvarianten vanuit de verpakte executable gecontroleerd op instructienamen, Markdown-links, gerenderde hashes en sjabloonpariteit. `ai:refresh`, record-id/backrefs (82 records/29 backrefs), invariants en changelogcheck geslaagd. Build niet waarschuwingvrij: bestaande DEP0190 en npm-installatiescriptbeleid-waarschuwing. Extra live suite **88 geslaagd, 24 gefaald, 23 overgeslagen** wegens ontbrekende lokale Mongo-replicaset/transacties en ontbrekende inputs voor enkele controles; geen stille databaseherinrichting gedaan. Geen installatie, browsercontrole, commit of publicatie.
+
+**Files touched:** `AGENTS.md`, rootguides, `docs/{ARCHITECTURE_*,*GUIDE*,*PROTOCOL*,AGENT_TEAM_PLAYBOOK,UPGRADING,HOSTING,PRODUCT,ROADMAP,AI_*OVERVIEW}.md`, alle actuele pakketguides/instructies/deep docs en manifests, unreleased-changelogs, scaffold/CLI-bron en regressietests, generators/templatekopieën, hooks/CI/ignores, skills/commands/wrappers, ADR 0057–0058 en de gedateerde findings-set.
+
+**Runtime / remaining:** hergebruikte hoofdbranchomgeving via `dev` blijft draaien en beschermd: `https://main-luckystack-v2.keetlerop.nl`, Vite 5191 (PID 3101653), tsx-backend 4117 (PID 3101856), Mongo 27106 en Redis 6420. Frontend en Socket.io met browser-Origin geven HTTP 200; databankafhankelijke live business-tests blijven geblokkeerd. Test-/buildworkflows zijn beëindigd. Tijdelijke verificatieartefacten: `/tmp/ls-docs-{lint,build,test-unit,live-sweep}.log`, `/tmp/ls-docs-delivery-receipt.json` en de daarin genoemde tarball/scaffolddirectory. Werkbomen behouden; niets gepubliceerd.
+
+## 2026-10-13 17:14 — Lokale Mongo-inrichting en live verificatie hersteld
+
+**User prompt (summary):** herstel de lokale MongoDB-inrichting en ga door met de live verificatie, zonder bestaande data te verliezen.
+
+**What I did:** een offline datakopie gemaakt voordat Mongo werd gestart. De bestaande single-node replicaset wees naar de oude bronpoort, niet naar de werkelijke containerpoort. De lokale infrastructuur controleert nu ook bestaande basis-/branchcontainers, herstelt alleen een verouderd loopbackadres van een lokale single-node set, weigert onveilige herschrijving en wacht op een schrijfbare primary. Geen app-schema, afhankelijkheid of gedeelde/staging-/productiedatabase gewijzigd.
+
+**Verification:** onafhankelijke veiligheidsreview op de herstelgrens; Bash-syntax en **15 infrastructuurregressietests** geslaagd. Echte Mongo-transactie inclusief rollback geverifieerd zonder achterblijvende proefdata; herhaald starten laat de configuratieversie gelijk. Na tussentijds wegvallen van de omgeving opnieuw gestart en direct geverifieerd: live-suite **112 geslaagd, 0 gefaald, 23 overgeslagen**, inclusief **64/64 business-tests**. Resetboekenden zonder token en de CSRF-laag zijn niet uitgevoerd; overige skips betreffen auth/inputvoorbeelden en de bestaande rate-limit-testgrens. Frontend en Socket.io met publieke browser-Origin geven HTTP 200.
+
+**Files touched:** machine-eigen `/var/www/_infra/branch-env.sh` en `/var/www/_infra/tests/mongo-readiness.test.mjs`; deze log/index en de follow-up in de eerdere findings-set. Back-up: `/var/www/_infra/backups/luckystack-v2-mongo-20261013-152456/` (310 MB, afgeschermde map). Geen machinehostingkeuze in frameworkregels/ADRs toegevoegd.
+
+**Runtime / remaining:** via `dev` opnieuw gestart en beschermd; blijft draaien op `https://main-luckystack-v2.keetlerop.nl`, frontend 5181 (PID 349256), backend 4107 (PID 349334), Mongo 27106 en Redis 6420. Oude app-poorten 5191/4117 en de tussentijdse 5186/4112 zijn niet meer de actieve omgeving. Finale testontvangst: `/tmp/ls-mongo-repair-live-sweep-final.log`; infrastructuurtests: `/tmp/ls-mongo-readiness-tests.log`. Data-back-up blijft beschikbaar; niets gepubliceerd.
+
+**Integratie (2026-10-13, latere sessie):** dit werk stond ongecommit op v0.9.1 in de hoofdcheckout. Gecommit op `chore/docs-integration` en gerebased op GitHub-`main` (v0.10.2). De twee ADR's van dit werk kregen de nummers 0065 en 0066, omdat 0057–0064 al op `main` gepubliceerd waren. Docs-conflicten opgelost door de WHY-first-vorm te houden en de nieuwe afspraken uit 0.9.2–0.10.2 (ADR 0057–0064) erin te verwerken.

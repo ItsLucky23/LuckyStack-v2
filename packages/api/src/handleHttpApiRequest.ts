@@ -114,7 +114,7 @@ async function handleHttpApiRequestScoped(params: HttpApiRequestParams): Promise
 
   //? `transformApiResponse` fires AFTER preApiRespond and BEFORE the wire
   //? response is finalized. Mirrors the socket handler (handleApiRequest)
-  //? so BOTH transports run the same hook sequence per CLAUDE.md. Handlers
+  //? so BOTH transports preserve the same policy/hook ordering. Handlers
   //? mutate `payload.response` in place (header injection, body transform,
   //? response signing).
   const transformPayload = { routeName: routeNameForHook, user, response: finalResponse };

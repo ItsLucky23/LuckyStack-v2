@@ -2,9 +2,9 @@
 //
 // Report-only staleness check for HAND-WRITTEN docs (npm run ai:doc-staleness).
 //
-// The auto-generated indexes can never drift — the pre-commit hook regenerates
-// them from code every commit. But a hand-written deep-dive (ARCHITECTURE_*.md,
-// a per-package CLAUDE.md) can silently rot: the code it describes moves on and
+// The auto-generated indexes are local caches derived from code, while a
+// hand-written deep-dive (ARCHITECTURE_*.md,
+// a per-package AGENTS.md) can silently rot: the code it describes moves on and
 // nothing signals it. graph_status already does mtime-staleness, but ONLY for
 // docs/ai-graph.json vs src/. This generalises that idea to any prose doc.
 //
@@ -81,7 +81,7 @@ const commitsSince = (sinceHash, paths) => {
 const COVERS_RE = /<!--\s*@covers\s+([^>]+?)\s*-->/;
 
 // Candidate hand-written docs: docs/**/*.md (excluding the AI_* generated ones
-// and decisions/, which are governed separately) + packages/*/CLAUDE.md.
+// and decisions/, which are governed separately) + packages/*/AGENTS.md.
 const collectDocs = async () => {
   const out = [];
   const walk = async (dir) => {
@@ -98,10 +98,10 @@ const collectDocs = async () => {
     }
   };
   await walk(path.join(REPO_ROOT, "docs"));
-  // per-package CLAUDE.md
+  // per-package AGENTS.md
   const [, pkgs] = await safe(fs.readdir(path.join(REPO_ROOT, "packages"), { withFileTypes: true }));
   for (const p of pkgs ?? []) {
-    if (p.isDirectory()) out.push(path.join(REPO_ROOT, "packages", p.name, "CLAUDE.md"));
+    if (p.isDirectory()) out.push(path.join(REPO_ROOT, "packages", p.name, "AGENTS.md"));
   }
   return out;
 };

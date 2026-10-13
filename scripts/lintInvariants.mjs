@@ -1,6 +1,6 @@
 // scripts/lintInvariants.mjs
 //
-// Diff-time enforcement of the machine-checkable subset of the CLAUDE.md
+// Diff-time enforcement of the machine-checkable subset of the AGENTS.md
 // contract. Where the three indexes describe the project and the decision log
 // records the why, this turns a handful of always-on RULES from prose into an
 // actual check, so an AI session (or a human) can't silently ship an `as any`,
@@ -464,7 +464,7 @@ export const checkTransportParity = async () => {
 // ---------------------------------------------------------------------------
 // Doc-coverage gate (DD-doc-coverage)
 //
-// Asserts that a NEWLY-ADDED route/page carries the docs its CLAUDE.md rule
+// Asserts that a NEWLY-ADDED route/page carries the docs its AGENTS.md rule
 // mandates, so documentation can't silently drift to optional:
 //   - _api/<name>_v<N>.ts / _sync/<name>_(server|client)_v<N>.ts
 //       → a top-of-file summary line (Rule 12)

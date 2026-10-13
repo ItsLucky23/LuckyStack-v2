@@ -6,8 +6,7 @@
 //? `broadcastStream` / `streamTo` flow on the `sync` event channel to
 //? room members other than the request originator's socket.
 //?
-//? Spec: see `docs/contract-tests.md` §watchStream and CLAUDE Rule 21
-//? (no `as unknown as X` / `as any` — typed generics throughout).
+//? Keep typed generics at this test seam; do not erase stream payload types.
 //?
 //? Wire shape, sourced from `@luckystack/sync` `_shared/streamEmitters.ts`:
 //?   io.to(receiver).emit('sync', { ...payload, cb, fullName, status: 'stream' })

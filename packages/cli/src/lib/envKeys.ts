@@ -1,5 +1,5 @@
 //? Reads which env KEY NAMES are declared in a project's env files — NEVER their
-//? values (CLAUDE.md Rule 16 + ADR 0014 D1: `.env.local` may be inspected for key
+//? values (AGENTS.md safety rule + ADR 0014 D1: `.env.local` may be inspected for key
 //? PRESENCE only). Used to detect which OAuth / email / monitoring providers a
 //? project has configured, since that intent lives in env, not in package.json.
 //?

@@ -1,0 +1,7 @@
+# @luckystack/test-runner — agent guidance
+
+Use this package to test a running LuckyStack server against generated route contracts and security guards. It cannot substitute for project-specific business, role or tenant-isolation tests. See `README.md` for a minimal invocation and `docs/` for each layer's intent.
+
+Never expose the test-reset endpoint in production or without its token; reset affects session/rate-limit state and is not an application-database reset. Load environment files and resolve configured secret pointers in the test process before importing modules that construct clients: resolution in the server process does not propagate to the test runner. An auth guard rejection must be established before interpreting a rate-limit probe. Fuzz tests establish a shaped error response, not an absence of server errors; run expensive fuzz sweeps outside the fast PR gate.
+
+The runner must never test a route over a different path than real clients use, nor change server state its own run depends on (ADR 0064). Probes follow the project's `transport.invocation` (CSRF probes stay on HTTP, since CSRF is an HTTP-only guard); GET payloads use the same query-string encoding as the real client (ADR 0062). The runner's own resets are always scoped to rate limits, so an authenticated sweep keeps its session; sockets it opens on the caller's session close as an intentional disconnect so presence does not log that session out. Reset targets live in one list in `@luckystack/core` shared with the server.

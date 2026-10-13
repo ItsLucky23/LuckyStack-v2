@@ -1,7 +1,7 @@
 ---
 name: hand-written-deep-docs-over-jsdoc-extraction
 title: Deep docs and the per-package function INDEX stay hand-written, not JSDoc-extracted
-status: accepted
+status: superseded
 date: 2026-08-18
 deciders: [ItsLucky23]
 tags: [docs, tooling, ai-context]

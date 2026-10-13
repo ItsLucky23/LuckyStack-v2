@@ -11,6 +11,8 @@ dist
 .gitlab
 .claude
 .agents
+AGENTS.local.md
+CLAUDE.local.md
 .codex
 .agent-browser
 .playwright-mcp

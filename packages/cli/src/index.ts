@@ -55,7 +55,7 @@ remove <feature>  Drop one optional package (reverses add; login removal is guar
 docker check      Validate Docker assets, selected preset summary, and transport wiring.
 
 update            Refresh the framework-owned files the scaffold copied into this
-                  project (docs/luckystack, CLAUDE.md, skills, .claude/commands,
+                  project (docs/luckystack, AGENTS.md, skills, .claude/commands,
                   generator scripts, shared eslint configs, route templates) from
                   the current framework version. Pristine files (hash matches the
                   .luckystack/scaffold.json baseline) are replaced; files YOU edited

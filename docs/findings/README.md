@@ -1,14 +1,15 @@
 # Findings index
 
-> Every AI scan / findings-set / analysis lives in a date-led subfolder here
-> (`<YYYY-MM-DD>-<slug>/`), each with its own `README.md` status ledger. See
+> Requested scans with tracked findings live in date-led subfolders here
+> (`<YYYY-MM-DD>-<slug>/`), each with its own `README.md` status ledger. Exploration is not automatically a record. See
 > `docs/FINDINGS_PROTOCOL.md` for the rules. This index lists them all so open
 > items are never lost during a cleanup.
 
-Last updated: 2026-08-21
+Last updated: 2026-10-13
 
 | Date | Folder | Topic | Items | Rollup status |
 | --- | --- | --- | --- | --- |
+| 2026-10-13 | [2026-10-13-why-first-agents-delivery/](./2026-10-13-why-first-agents-delivery/) | WHY-first documentation and AGENTS npm/scaffold delivery | 10 | 10 fixed · live environment limitation noted |
 | 2026-08-17 | [2026-08-17-v084-release-security-audit/](./2026-08-17-v084-release-security-audit/) | v0.8.4 release dependency security audit | 8 | 8 fixed |
 | 2026-08-16 | [2026-08-16-documentation-work-verification/](./2026-08-16-documentation-work-verification/) | Independent verification of documentation/runtime/consumer work | 8 | 7 fixed · 1 wontfix |
 | 2026-08-16 | [2026-08-16-full-docs-disagreement-audit/](./2026-08-16-full-docs-disagreement-audit/) | Full active-documentation disagreement audit | 9 | 8 fixed · 1 false-positive |
@@ -40,7 +41,7 @@ Last updated: 2026-08-21
 | 2026-07-02 | [2026-07-02-security/](./2026-07-02-security/) | Security & correctness scan (10 agents, full codebase) | 13 | 0 open · 10 fixed · 3 wontfix |
 
 > All release, runtime, audit, and CI publication findings currently listed here are terminal or
-> explicitly tracked as open in their own ledger. The current published package line is 0.8.4.
+> explicitly tracked as open in their own ledger. Release identity belongs in package metadata and release history, not this findings rollup.
 
 <!--
 Add a row per findings-folder, e.g.:

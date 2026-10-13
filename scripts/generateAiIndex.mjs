@@ -1,9 +1,9 @@
 // scripts/generateAiIndex.mjs
 //
 // Regenerates docs/AI_QUICK_INDEX.md by scanning a curated set of sources:
-//   - CLAUDE.md (root)
+//   - AGENTS.md (root)
 //   - docs/ARCHITECTURE_*.md
-//   - packages/*/CLAUDE.md
+//   - packages/*/AGENTS.md
 //   - packages/*/docs/*.md
 //   - .claude/commands/*.md
 //   - skills/custom/*/SKILL.md
@@ -134,24 +134,6 @@ const extractH2Sections = (content) => {
   return sections;
 };
 
-const extractFunctionIndex = (content) => {
-  // Slice from "## Function Index" header to the next H2 heading.
-  const lines = splitLines(content);
-  const startIdx = lines.findIndex((l) => /^##\s+Function Index\b/i.test(l));
-  if (startIdx === -1) return null;
-  const slice = [];
-  for (let i = startIdx + 1; i < lines.length; i++) {
-    const line = lines[i];
-    if (/^##\s+/.test(line)) break;
-    slice.push(line);
-  }
-  // Keep non-empty trimmed lines, prefer bullet/table entries.
-  const entries = slice
-    .map((l) => l.trim())
-    .filter((l) => l.length > 0);
-  return entries;
-};
-
 const extractFrontmatter = (content) => {
   const lines = splitLines(content);
   if (lines[0] !== "---") return {};
@@ -170,12 +152,12 @@ const hasTodoBanner = (content) => content.includes(TODO_BANNER);
 // Source scanners — each returns a structured object the renderer can use.
 // ---------------------------------------------------------------------------
 
-const scanRootClaudeMd = async () => {
-  const filePath = path.join(REPO_ROOT, "CLAUDE.md");
+const scanRootAgentsMd = async () => {
+  const filePath = path.join(REPO_ROOT, "AGENTS.md");
   const content = await readTextFile(filePath);
   if (!content) return null;
   return {
-    title: extractTitle(content) ?? "CLAUDE.md",
+    title: extractTitle(content) ?? "AGENTS.md",
     sections: extractH2Sections(content),
     relPath: path.relative(REPO_ROOT, filePath).replace(/\\/g, "/"),
   };
@@ -209,7 +191,7 @@ const scanPackages = async () => {
   for (const entry of entries) {
     if (!entry.isDirectory()) continue;
     const pkgDir = path.join(pkgRoot, entry.name);
-    const aiIndexPath = path.join(pkgDir, "CLAUDE.md");
+    const aiIndexPath = path.join(pkgDir, "AGENTS.md");
     const docsDir = path.join(pkgDir, "docs");
 
     let aiIndexData = null;
@@ -218,11 +200,10 @@ const scanPackages = async () => {
       if (content) {
         aiIndexData = {
           title: extractTitle(content) ?? entry.name,
-          functionIndex: extractFunctionIndex(content) ?? [],
         };
       }
     } else {
-      console.warn(`[ai:index] note: packages/${entry.name}/CLAUDE.md not present (skipped)`);
+      console.warn(`[ai:index] note: packages/${entry.name}/AGENTS.md not present (skipped)`);
     }
 
     const subDocs = [];
@@ -316,11 +297,11 @@ const renderTable = (header, rows) => {
   return out.join("\n");
 };
 
-const renderRootClaude = (rootClaude) => {
-  if (!rootClaude) return "_(CLAUDE.md root not found)_";
-  const rows = rootClaude.sections.map((s) => [s.heading, s.firstLine ?? "(no body)"]);
+const renderRootAgents = (rootAgents) => {
+  if (!rootAgents) return "_(AGENTS.md root not found)_";
+  const rows = rootAgents.sections.map((s) => [s.heading, s.firstLine ?? "(no body)"]);
   return [
-    `**${rootClaude.title}** — ${rootClaude.relPath}`,
+    `**${rootAgents.title}** — ${rootAgents.relPath}`,
     "",
     renderTable(["H2 section", "First line"], rows),
   ].join("\n");
@@ -331,31 +312,9 @@ const renderArchitectureDocs = (docs) => {
   return renderTable(["Doc file", "Summary", "Location"], rows);
 };
 
-const renderFunctionInventory = (packages) => {
-  const blocks = [];
-  for (const pkg of packages) {
-    blocks.push(`### \`${pkg.name}\``);
-    if (!pkg.aiIndex) {
-      blocks.push("- _(no `CLAUDE.md` yet)_");
-      blocks.push("");
-      continue;
-    }
-    if (pkg.aiIndex.functionIndex.length === 0) {
-      blocks.push("- _(no `## Function Index` section yet)_");
-      blocks.push("");
-      continue;
-    }
-    for (const entry of pkg.aiIndex.functionIndex) {
-      // Preserve existing bullet/table formatting if present; otherwise bullet-ify.
-      if (entry.startsWith("-") || entry.startsWith("|") || entry.startsWith("*")) {
-        blocks.push(entry);
-      } else {
-        blocks.push(`- ${entry}`);
-      }
-    }
-    blocks.push("");
-  }
-  return blocks.join("\n");
+const renderPackageGuides = (packages) => {
+  const rows = packages.map((pkg) => [pkg.name, pkg.aiIndex ? `packages/${pkg.name}/AGENTS.md` : "—"]);
+  return renderTable(["Package", "Design guidance"], rows);
 };
 
 const renderCompletionStatus = (packages) => {
@@ -391,15 +350,15 @@ const buildDocument = (data) => {
   parts.push("");
   parts.push("### Root behaviour contract");
   parts.push("");
-  parts.push(renderRootClaude(data.rootClaude));
+  parts.push(renderRootAgents(data.rootAgents));
   parts.push("");
   parts.push("### Architecture docs");
   parts.push("");
   parts.push(renderArchitectureDocs(data.architectureDocs));
   parts.push("");
-  parts.push("## Function inventory across packages");
+  parts.push("## Package design guidance");
   parts.push("");
-  parts.push(renderFunctionInventory(data.packages));
+  parts.push(renderPackageGuides(data.packages));
   parts.push("## Documentation completion status");
   parts.push("");
   parts.push(renderCompletionStatus(data.packages));
@@ -424,14 +383,14 @@ const buildDocument = (data) => {
 // ---------------------------------------------------------------------------
 
 const main = async () => {
-  const rootClaude = await scanRootClaudeMd();
+  const rootAgents = await scanRootAgentsMd();
   const architectureDocs = await scanArchitectureDocs();
   const packages = await scanPackages();
   const slashCommands = await scanSlashCommands();
   const skills = await scanSkills();
 
   const document = buildDocument({
-    rootClaude,
+    rootAgents,
     architectureDocs,
     packages,
     slashCommands,

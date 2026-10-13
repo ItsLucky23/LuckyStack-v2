@@ -1,88 +1,33 @@
 # @luckystack/test-runner
 
-> Generated-type-driven test layers for [LuckyStack](https://github.com/ItsLucky23/LuckyStack-v2). Walks every endpoint in your `apiMethodMap.generated.ts` and runs four progressive test layers: contract smoke (Zod-valid input), auth enforcement, rate-limit, and crash-resistance fuzz.
+Generated-route contract, auth, rate-limit, CSRF and crash-resistance checks for a running LuckyStack server, over both API and sync routes. The checks probe each route over the transport real clients use, so a green sweep says something about the path users actually hit (ADR 0064).
 
-## Install
+## Install and run
 
 ```bash
-npm install --save-dev @luckystack/test-runner zod
+npm install --save-dev @luckystack/test-runner zod socket.io-client
 ```
 
-## Quickstart
-
-Run all four layers against a running server:
+Start from the scaffolded project's `scripts/testAll.ts` and its test command; consult the installed types for a custom harness. A minimal entry passes the generated maps for **both** route kinds and the lazy config loader:
 
 ```ts
-import {
-  runAllTests,
-  resolveTestBaseUrl,
-  logRunAllSummary,
-} from '@luckystack/test-runner';
-import { apiInputSchemas, syncInputSchemas } from './src/_sockets/apiInputSchemas.generated';
-import { apiMetaMap, apiMethodMap, syncMetaMap } from './src/_sockets/apiTypes.generated';
-import { ports } from './config.ports';
-
-const baseUrl = resolveTestBaseUrl({ fallbackUrl: `http://localhost:${ports.backend}` });
 const summary = await runAllTests({
-  apiMethodMap,
-  apiMetaMap,
-  apiInputSchemas,
-  syncMetaMap,      // omit and sync routes are not swept (a warning says so)
-  syncInputSchemas,
-  baseUrl,
-  // Loaded only after .env/.env.local. If config.secretManager.url is set,
-  // pointers are resolved in THIS process before Layer-5 tests touch Prisma.
+  apiMethodMap, apiMetaMap, apiInputSchemas,
+  syncMetaMap, syncInputSchemas, // omit and sync routes are not swept (a warning says so)
+  baseUrl: resolveTestBaseUrl({ fallbackUrl: `http://localhost:${ports.backend}` }),
   loadProjectConfig: async () => (await import('./config')).default,
 });
 logRunAllSummary(summary);
 ```
 
-Each layer is independently runnable — you can skip the ones that don't apply or rearrange them.
+`runAllTests` writes the results file itself; an entry script should not write its own copy. A route filter is applied before any request is sent, so filtered-out routes are never called — not merely left out of the report.
 
-`runAllTests` always loads the normal env-file layers and requires `loadProjectConfig` as above, even in projects that currently use only local env values. A configured resolver is loaded dynamically and runs in fail-fast remote mode before custom test modules are imported. Direct `runCustomTests` callers must pass the same callback. Both public paths reject a missing loader so a later secret-manager rollout cannot silently expose pointer values. This matters because the live server resolving its own `DATABASE_URL` does not mutate the separate test process.
+**Upgrading an existing entry script to 0.10.2:** import `syncMetaMap` / `syncInputSchemas` from the generated files and pass them, and remove any manual write of the summary file. In a socket-mode project, Layer-5 `ctx.callSync` now runs over Socket.io; a test that depended on HTTP-only behaviour must request HTTP for that call. See the package changelog for the full list.
 
-## Layers
+## Safety
 
-| Layer | What it asserts |
-| --- | --- |
-| **Contract** | A Zod-valid input payload reaches `main` and returns `{ status: 'success' }` (or a typed failure status). Catches schema/route mismatches. |
-| **Auth enforcement** | Endpoints flagged `auth.login: true` reject unauthenticated requests with the framework's standard 401 shape. |
-| **Rate limit** | Endpoints with `rateLimit: <N>` reject the `(N + 1)`th request inside the window. |
-| **Fuzz** | Bad/random inputs never crash the server (still returns a typed error response, never 500 with a stack). |
+A test process must load local environment layers and resolve configured secret pointers **before** importing database-backed tests. The server resolving its own secrets does not resolve the separate runner process. Never run against production or expose the test reset route there. The reset route requires a non-empty token in development/test and affects framework state, not your application database or custom session storage. The runner's own resets clear rate limits only, so an authenticated sweep keeps its session; see [rate-limit tests](./docs/rate-limit-tests.md).
 
-The fuzz layer is intentionally exhaustive and slow — wire it into nightly CI rather than every PR.
+An authenticated sweep calls every route with its own session, including routes that destroy it (logout, account deletion, session revoke); skip those routes or every later layer runs logged out.
 
-## Server hooks it depends on
-
-- `/_test/reset` endpoint — served by `@luckystack/server` only when `NODE_ENV` is exactly `development` or `test`, and always gated by a non-empty `TEST_RESET_TOKEN`. `resetServerState` clears framework rate-limit state plus the default Redis session/active-user namespaces, or only the targets passed as `only` (the runner's own resets clear rate limits only, so an authenticated sweep keeps its session); it does not clear application database rows or custom `SessionAdapter` stores.
-- `apiMethodMap.generated.ts` — produced by `@luckystack/devkit` from your `_api/*` files. Defaults are read via `getApiMethodMapPath()` from `@luckystack/core`.
-
-## Public API
-
-| Export | Purpose |
-| --- | --- |
-| `walkEndpoints(apiMethodMap)` | Returns `EndpointDescriptor[]` from the generated map. |
-| `runContractCheck(input)` / `runContractTests(input)` | Single endpoint / full sweep. |
-| `runAuthEnforcementCheck(input)` / `runAuthEnforcementTests(input)` | Auth layer. |
-| `runRateLimitCheck(input)` / `runRateLimitTests(input)` | Rate-limit layer. |
-| `runFuzzCheck(input)` / `runFuzzTests(input)` | Fuzz layer. |
-| `resetServerState(input)` | POST to `/_test/reset`. |
-| `resolveTestEnvironment({ loadProjectConfig? })` | Load env layers and optional secret-manager pointers for the test process; `runAllTests` calls it automatically. |
-| `sampleSchemaInput(schema)` | Generate a Zod-valid sample payload. |
-| `logContractResult` / `logContractSummary` | Pretty-printers. |
-
-Types: `EndpointDescriptor`, `HttpMethod`, `ContractCheckResult`, `RunContractSummary`, plus per-layer input types.
-
-## Related architecture docs
-
-- [`docs/ARCHITECTURE_API.md`](../../docs/ARCHITECTURE_API.md) — the contract this runner asserts against.
-- [`docs/ARCHITECTURE_PACKAGING.md`](../../docs/ARCHITECTURE_PACKAGING.md) — how generated maps are emitted per preset.
-
-## Dependencies
-
-- Required peers: `zod@^4.0.0`, `socket.io-client@^4.8.0`.
-- Optional peers: `@luckystack/login`, `@luckystack/secret-manager` (loaded only for their corresponding features).
-
-## License
-
-MIT — see [LICENSE](../../LICENSE).
+The built-in checks are not a substitute for project-specific role, tenant or business assertions. Run the slower fuzz layer separately from fast PR checks. A fuzz pass means responses keep the framework envelope, **not** that no HTTP 5xx occurred; see [fuzz tests](./docs/fuzz-tests.md).

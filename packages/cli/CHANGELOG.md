@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Package and consumer instructions use `AGENTS.md`. Updates preserve customized legacy `CLAUDE.md` and propose its manual retirement instead of deleting it. Handwritten docs emphasize rationale, ownership and operational safety.
+
 ## [0.9.0] - 2026-08-28
 
 ### Changed

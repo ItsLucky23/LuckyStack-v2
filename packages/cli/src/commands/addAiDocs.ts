@@ -3,7 +3,7 @@
 //? dependency graph. Adds @luckystack/mcp as a devDep + a `luckystack` entry in
 //? `.mcp.json`. Remove drops both.
 //?
-//? NOTE: the AI DOC TREE (root CLAUDE.md, docs/luckystack/, skills/, .claude/
+//? NOTE: the AI DOC TREE (root AGENTS.md, docs/luckystack/, skills/, .claude/
 //? commands/) is copied by `create-luckystack-app` from the framework repo at
 //? scaffold time and is NOT bundled in this CLI's tarball — so `add mcp` wires
 //? the runnable MCP layer but does not re-copy those docs. Re-scaffold (or copy
@@ -77,7 +77,7 @@ export const addAiDocs = (project: ConsumerProject, options: AddOptions): Result
     console.log('• skipped npm install (--no-install) — run `npm install` to finish.');
   }
   console.log('\n✓ ai-docs (graph MCP) added. AI agents can now query the dependency graph via @luckystack/mcp.');
-  console.log('  The doc tree (CLAUDE.md / docs/luckystack / skills) is NOT re-copied — re-scaffold if you need it.');
+  console.log('  The doc tree (AGENTS.md / docs/luckystack / skills) is NOT re-copied — re-scaffold if you need it.');
   return ok();
 };
 

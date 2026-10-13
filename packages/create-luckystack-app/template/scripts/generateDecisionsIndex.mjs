@@ -9,7 +9,7 @@
 // It is the fourth member of the deterministic index family, alongside
 // AI_QUICK_INDEX.md (framework surfaces), AI_CAPABILITIES.md (installed
 // packages + flat exports) and AI_PROJECT_INDEX.md (routes/pages/helpers).
-// Distinct from branch-logs/ (per-prompt WHAT happened) and CLAUDE.md User
+// Distinct from branch-logs/ (per-prompt WHAT happened) and AGENTS.md User
 // Project Rules (always-on imperatives) — see docs/DECISION_MEMORY_PROTOCOL.md.
 //
 // Source of truth: docs/decisions/NNNN-slug.md (one ADR per file, frontmatter +
@@ -199,7 +199,7 @@ const buildDocument = (rows, refs) => {
   parts.push("> The committed, team-shareable record of **why** this project is the way it is (and why");
   parts.push("> rejected alternatives were rejected). Read this at session start; open a decision file for");
   parts.push("> the full Context / Decision / Rejected-alternatives / Consequences. Distinct from");
-  parts.push("> `branch-logs/` (what happened, per-prompt) and CLAUDE.md User Project Rules (always-on");
+  parts.push("> `branch-logs/` (what happened, per-prompt) and AGENTS.md User Project Rules (always-on");
   parts.push("> imperatives). The AI records these automatically during sessions — see `docs/DECISION_MEMORY_PROTOCOL.md`.");
   parts.push("");
   parts.push(`## Decisions (${rows.length})`);

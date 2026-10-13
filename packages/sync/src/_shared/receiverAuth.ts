@@ -8,8 +8,8 @@
 //? framework-level defaults; this pure helper resolves the decision so the
 //? socket + HTTP handlers stay single-source and the rule is unit-testable.
 //?
-//? Both flags default to today's permissive behavior (`allowClientReceiverAll:
-//? true`, `requireRoomMembership: false`) so a missing key changes nothing.
+//? Policy is supplied by the caller; this helper does not choose defaults.
+//? The authoritative project policy and its regression tests live in core.
 
 /** Decision returned by {@link authorizeSyncReceiver}. */
 export type ReceiverAuthDecision =

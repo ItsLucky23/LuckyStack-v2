@@ -37,7 +37,7 @@
     "dist",
     "assets",
     "README.md",
-    "CLAUDE.md",
+    "AGENTS.md",
     "LICENSE"
   ],
   "scripts": {

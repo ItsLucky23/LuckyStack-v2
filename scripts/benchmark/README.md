@@ -1,81 +1,15 @@
-# Benchmarks — the canonical harness
+# Runtime benchmarks
 
-The runtime/PM benchmarks for this repo live here. **Use these, not a hand-rolled
-load loop.** A naive node HTTP client caps at ~10k req/s and measures itself, not
-the server — that mistake is documented in
-`docs/findings/2026-07-16-npm-vs-bun-benchmark/` (the ~10k "ceiling" was the ruler,
-not the wall). All HTTP numbers must come from a real load generator.
+Use a real load generator rather than an ad-hoc Node HTTP loop: a client-side ceiling can masquerade as the server's limit. Historical evidence lives in `docs/findings/2026-07-16-npm-vs-bun-benchmark/`.
 
-## The load tool: `oha`
+Install `oha` from its official distribution, then run:
 
-[`oha`](https://github.com/hatoo/oha) — a native Rust HTTP load generator with
-keep-alive, real concurrency, latency percentiles, and JSON output. It pushes far
-past what a node client can, so it actually finds server ceilings.
-
-Install (Windows, matches how `bun` was installed here):
-
-```
-winget install hatoo.oha
-```
-
-macOS: `brew install oha` · Linux: `cargo install oha` or a release binary.
-
-After install, restart the shell so `oha` is on PATH, or pass `OHA_BIN=<path>`.
-
-## Scripts
-
-| Script | What it does | Runtime |
-|---|---|---|
-| `benchmarkRuntime.mjs` | Pure-compute (fib/sort/string/JSON round-trip), self-timed | `node` and `<bun>` — run under each, compare |
-| `benchmarkConcurrency.mjs` | Async scheduling: promise fan-out, timers, in-process HTTP | `node` and `<bun>` |
-| `httpServerNode.mjs` | `node:http` server (`/` trivial, `/work` shaped JSON) — the layer LuckyStack runs on | `node` and `<bun>` |
-| `httpServerBun.mjs` | `Bun.serve()` native server, same endpoints — bun's ceiling (framework can't use it) | `<bun>` only |
-| `runHttp.mjs` | Driver: starts each server config, drives it with `oha`, prints a req/s + latency table | `node` (spawns the rest) |
-
-## Running the HTTP benchmark
-
-```
-# oha + bun on PATH:
-node scripts/benchmark/runHttp.mjs
-
-# or point at the binaries explicitly (Windows winget paths shown):
-OHA_BIN="/c/…/hatoo.oha_*/oha.exe" \
-BUN_BIN="/c/…/Oven-sh.Bun_*/bun-windows-x64/bun.exe" \
-OHA_CONNECTIONS=200 OHA_DURATION=8s \
+```sh
 node scripts/benchmark/runHttp.mjs
 ```
 
-Tunables (env): `OHA_CONNECTIONS` (default 200), `OHA_DURATION` (default `8s`),
-`BENCH_PORT` (default 5091), `OHA_BIN`, `BUN_BIN`.
+Inspect the driver/source for binary overrides and measurement settings; do not copy defaults into documentation. Use an explicitly owned disposable environment, not shared application traffic.
 
-It benchmarks three server configs × two endpoints:
+Compare equivalent workloads and verify the actual runtime. Record tool versions, machine conditions (including free memory), exact commands, repeated-run medians and limitations. A native-runtime benchmark is not proof that the framework's adapter path achieves the same result.
 
-- **node + node:http** — the baseline the framework runs on today.
-- **bun + node:http** — the framework running on bun (what a runtime switch buys).
-- **bun + Bun.serve** — bun's native ceiling, measured only to show what the
-  socket.io/router architecture leaves unreachable.
-
-Each cell does one warm-up run then one measured run. Throughput varies run-to-run
-under memory pressure — take a median of 3 for anything you quote, and note the
-free-RAM figure (see the findings doc's methodology).
-
-## Running the compute + concurrency benchmarks
-
-```
-node  scripts/benchmarkRuntime.mjs      # then:
-<bun> scripts/benchmarkRuntime.mjs      # compare the two JSON lines
-node  scripts/benchmarkConcurrency.mjs
-<bun> scripts/benchmarkConcurrency.mjs
-```
-
-Both print one JSON line with self-timed workloads. The `out`/checksum fields
-match across runtimes — a built-in correctness check that both ran identical work.
-On Windows, invoke bun by absolute path: `bun run <script>` through an npm `.cmd`
-shim silently executes Node (ledger 2026-07-15 B6).
-
-## Recording results
-
-Benchmark results are analysis, not defects — write them under a dated
-`docs/findings/<date>-<slug>/README.md` with: the machine (cores + **free RAM**),
-tool versions, the exact commands, medians (not single runs), and every caveat.
-The existing `docs/findings/2026-07-16-npm-vs-bun-benchmark/` is the template.
+Benchmark findings belong in a dated requested-scan ledger only when the user asked for that analysis. They are measurements, not automatically defects.

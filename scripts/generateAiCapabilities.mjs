@@ -265,18 +265,18 @@ const buildPackagesSection = async () => {
     return `### Installed \`@luckystack/*\` packages\n\nNone detected in \`node_modules/@luckystack/\`. Either you are outside an installed project, or no framework packages are installed yet.\n`;
   }
   const lines = [`### Installed \`@luckystack/*\` packages`, ""];
-  lines.push("Each row links to that package's CLAUDE.md (the canonical function INDEX) if it ships one. Consult the INDEX **before** writing any helper that touches that package's surface area.");
+  lines.push("Each package's AGENTS.md explains its design; the export inventory below is derived from source, not maintained in prose.");
   lines.push("");
-  lines.push("| Package | Version | One-liner | INDEX |");
+  lines.push("| Package | Version | One-liner | Design guide |");
   lines.push("| --- | --- | --- | --- |");
   for (const name of names) {
     const packageDir = path.join(REPO_ROOT, "node_modules", "@luckystack", name);
     const pkg = await readJsonFile(path.join(packageDir, "package.json"));
     const version = pkg?.version ?? "?";
     const description = (pkg?.description ?? "").replaceAll("|", "\\|").trim() || "_(no description)_";
-    const aiIndexPath = path.join(packageDir, "CLAUDE.md");
+    const aiIndexPath = path.join(packageDir, "AGENTS.md");
     const indexLink = (await fileExists(aiIndexPath))
-      ? `[CLAUDE.md](../node_modules/@luckystack/${name}/CLAUDE.md)`
+      ? `[AGENTS.md](../node_modules/@luckystack/${name}/AGENTS.md)`
       : "—";
     lines.push(`| \`@luckystack/${name}\` | ${version} | ${description} | ${indexLink} |`);
   }

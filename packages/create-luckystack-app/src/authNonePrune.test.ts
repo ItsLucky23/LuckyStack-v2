@@ -16,7 +16,9 @@ describe('authMode none template prune', () => {
     created.push(target);
     fs.cpSync(path.resolve(import.meta.dirname, '../template'), target, { recursive: true });
 
+    const readme = fs.readFileSync(path.join(target, 'README.md'), 'utf8');
     expect(() => pruneAuthNone(target)).not.toThrow();
+    expect(fs.readFileSync(path.join(target, 'README.md'), 'utf8')).toBe(readme);
 
     const config = fs.readFileSync(path.join(target, 'config.ts'), 'utf8');
     expect(config).toContain("forgotPassword: 'disabled' as const");

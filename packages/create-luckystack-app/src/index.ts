@@ -297,7 +297,7 @@ interface ScaffoldChoices {
   /** Install @luckystack/cron (leader-elected recurring jobs). Dependency-only, self-wires at boot; register jobs in `luckystack/cron/*.ts`. Opt-in; off by default. */
   cron: boolean;
   /**
-   * Copy LuckyStack's AI dev-context into the project (root `CLAUDE.md`, the
+   * Copy LuckyStack's AI dev-context into the project (root `AGENTS.md`, the
    * `docs/luckystack/` deep-dives, `skills/`, `.claude/commands/`, the
    * `branch-logs/` protocol) AND install a pre-commit git hook that CHECKS the
    * record layers (it writes nothing — the generated artifacts are gitignored
@@ -465,7 +465,7 @@ const runPromptsFallback = async (
     if (need('aiInstructions')) {
       answers.aiInstructions = (await askYesNo(
         rl,
-        'Include LuckyStack AI dev instructions (CLAUDE.md, docs, branch-logs, record-check git hook)?',
+        'Include LuckyStack AI dev instructions (AGENTS.md, docs, branch-logs, record-check git hook)?',
         true,
       )) ? 'Yes' : 'No';
     }
@@ -1003,11 +1003,11 @@ const runPrompts = async (presets: Record<string, string | string[]> = {}): Prom
     },
     {
       key: 'aiInstructions', type: 'select', label: 'Include LuckyStack AI dev instructions?',
-      description: 'CLAUDE.md + docs + git hook + the @luckystack/mcp graph server for AI agents.',
+      description: 'AGENTS.md + docs + git hook + the @luckystack/mcp graph server for AI agents.',
       details: [
-        'Copies LuckyStack\'s AI dev-context into the project: the root CLAUDE.md,',
+        'Copies LuckyStack\'s AI dev-context into the project: the root AGENTS.md,',
         'the docs/luckystack deep-dives, skills, and a pre-commit hook that checks',
-        'ADR/lesson numbering + CLAUDE.md invariants (checks only, writes nothing).',
+        'ADR/lesson numbering + AGENTS.md invariants (checks only, writes nothing).',
         'The indexes + dependency graph are a gitignored local cache, rebuilt by',
         '`npm run ai:refresh` and by postinstall. Also registers @luckystack/mcp in',
         '.mcp.json so AI agents can query the graph (blast_radius / who_imports).',
@@ -1408,7 +1408,7 @@ export const replacePlaceholders = (
   });
 };
 
-//? Docs the CONSUMER owns and regenerates at `docs/` — a CLAUDE.md reference to
+//? Docs the CONSUMER owns and regenerates at `docs/` — an AGENTS.md reference to
 //? one of these means the project's own copy, never the bundled framework copy,
 //? so they must NOT be rewritten to `docs/luckystack/`. Everything else that
 //? exists in the framework docs bundle is framework documentation and lands
@@ -1427,7 +1427,7 @@ const CONSUMER_OWNED_DOCS = new Set([
   'ai-graph.json',
 ]);
 
-//? The framework's CLAUDE.md is written against the framework repo layout, where
+//? The framework's AGENTS.md is written against the framework repo layout, where
 //? its docs live at `docs/`. `copyAiDocs` puts those same docs under
 //? `docs/luckystack/` in a scaffolded project, so every in-body `docs/<X>`
 //? reference would otherwise point at a path that does not exist there (the
@@ -1438,11 +1438,11 @@ const CONSUMER_OWNED_DOCS = new Set([
 //? A line that already mentions `docs/luckystack/` is left alone — those are the
 //? spots that deliberately spell out BOTH paths (the Quick Links table, the
 //? "consumer copy: …" parentheticals) and are correct as written.
-//? Blocks of CLAUDE.md that only mean anything INSIDE the framework repo, fenced
+//? Blocks of AGENTS.md that only mean anything INSIDE the framework repo, fenced
 //? in the source so the list lives next to the content instead of in a
 //? hand-kept array here (which would silently drift the moment a section moves).
 //?
-//? WHY strip at all: the scaffolded CLAUDE.md is read on every prompt, so every
+//? WHY strip at all: the scaffolded AGENTS.md is read on every prompt, so every
 //? line costs tokens forever. A consumer has no `packages/*` to write framework
 //? code in, no `ai:changelog-check`, no cross-repo quick index — and the Project
 //? Snapshot actively describes the WRONG project, telling a consumer's AI that
@@ -1456,14 +1456,18 @@ export const stripFrameworkOnlyBlocks = (content: string): string => {
   for (const line of content.split('\n')) {
     const trimmed = line.trim();
     if (trimmed === FRAMEWORK_ONLY_OPEN) { depth++; continue; }
-    if (trimmed === FRAMEWORK_ONLY_CLOSE) { depth = Math.max(0, depth - 1); continue; }
+    if (trimmed === FRAMEWORK_ONLY_CLOSE) {
+      if (depth === 0) throw new Error('[create-luckystack-app] unexpected framework-only closing fence in AGENTS.md');
+      depth--;
+      continue;
+    }
     if (depth === 0) out.push(line);
   }
   //? An unbalanced fence would silently swallow the rest of the file, so say so
   //? loudly rather than shipping a truncated contract.
   if (depth !== 0) {
     throw new Error(
-      `[create-luckystack-app] unbalanced ${FRAMEWORK_ONLY_OPEN} fence in CLAUDE.md — `
+      `[create-luckystack-app] unbalanced ${FRAMEWORK_ONLY_OPEN} fence in AGENTS.md — `
       + 'every opener needs a matching closer, otherwise the rest of the file is dropped.',
     );
   }
@@ -1631,8 +1635,7 @@ const runPrismaGenerate = (cwd: string): void => {
 //? .gitignore) and rebuilt by `npm run ai:refresh` / `postinstall`, so there is
 //? nothing left to keep in sync and this hook never writes to the tree.
 //?
-//? Mirrors the framework repo's own .githooks/pre-commit, minus its AGENTS.md
-//? refresh (`ai:agents-md` is framework-only) — extend both together.
+//? Mirrors the framework repo's own .githooks/pre-commit checks — extend both together.
 //? Wired via a `prepare` script setting `core.hooksPath` at install time (no-op
 //? when the project isn't a git repo yet — the hook activates after `git init`).
 const AI_INDEX_HOOK = `#!/bin/sh
@@ -1654,7 +1657,7 @@ set -e
 echo "[pre-commit] Checking record-id identity (ADRs + lessons)..."
 node scripts/checkRecordIds.mjs
 #? Report-only by default; rules opt into blocking via luckystack.invariants.json.
-echo "[pre-commit] Checking CLAUDE.md invariants on staged changes..."
+echo "[pre-commit] Checking AGENTS.md invariants on staged changes..."
 node scripts/lintInvariants.mjs
 echo "[pre-commit] Checking hand-written doc staleness (report-only)..."
 node scripts/checkDocStaleness.mjs || true
@@ -1780,7 +1783,7 @@ description: Interactive AI browser verification with agent-browser (navigate/cl
 
 Use the **agent-browser** CLI to verify a frontend flow against the LOCAL dev server.
 Always announce the action and get explicit user approval first (see the "AI Browser
-Testing" section of CLAUDE.md + docs/luckystack/AI_BROWSER_TESTING.md).
+Testing" section of AGENTS.md + docs/luckystack/AI_BROWSER_TESTING.md).
 
 ## Setup (once, developer action)
 - Install: \`npm i -g agent-browser && agent-browser install\` (fetches Chrome-for-Testing), OR
@@ -1856,7 +1859,7 @@ const wireAiBrowserTooling = (targetDir: string, choices: ScaffoldChoices): void
   fs.writeFileSync(path.join(skillDir, 'SKILL.md'), AGENT_BROWSER_SKILL_STUB);
 
   //? Layer 2 — deny-by-default permission gate so the harness prompts even if
-  //? the AI forgets the CLAUDE.md rule.
+  //? the AI forgets the AGENTS.md rule.
   const askEntries = ['Bash(agent-browser:*)', ...(wantAll ? ['mcp__playwright', 'mcp__chrome-devtools'] : [])];
   mergeJsonFile(path.join(targetDir, '.claude', 'settings.json'), (data) => { addAskPermissions(data, askEntries); });
 
@@ -1963,41 +1966,6 @@ const prunePresence = (targetDir: string): void => {
   ]);
 };
 
-//? The four README paragraphs that describe login as an INSTALLED feature of the
-//? project. Each is removed (the OAuth/handlers/LoginForm ones) or replaced with a
-//? neutral "add it later" pointer (the auth-pages one) when login is absent. Kept
-//? as a shared constant so the prune is identical whether triggered at scaffold
-//? time (authMode 'none') or — mirrored in @luckystack/cli — on `luckystack remove login`.
-const LOGIN_DOC_EDITS: [string, string][] = [
-  //? Pages section: keep ONE neutral discovery pointer (the package still exists).
-  [
-    "If you selected an **auth** mode (`credentials` / `credentials+oauth`), you'll also find the auth UI under `src/`: `login/page.tsx`, `register/page.tsx`, `reset-password/page.tsx`, and an account-management `settings/page.tsx`. Scaffolded with `auth: 'none'`? Add them later with `npx luckystack add login`.",
-    "Want auth (login / register / account pages)? This project has none yet — add it anytime with `npx luckystack add login`.",
-  ],
-  //? API-routes section: remove the auth-handlers paragraph entirely (+ trailing blank).
-  [
-    "Selecting an **auth** mode also adds the auth-related API handlers — e.g. `logout_v1`, the `reset-password/_api/*` reset flow, and the `settings/_api/*` session / password / profile / account handlers. These ship alongside the auth pages above (and arrive together via `npx luckystack add login`).\n\n",
-    '',
-  ],
-  //? Components section: remove the LoginForm paragraph entirely (+ trailing blank).
-  [
-    "If you selected an **auth** mode, `LoginForm.tsx` (the credentials + OAuth form used by `/login` and `/register`) is here too.\n\n",
-    '',
-  ],
-  //? Configure section: remove the OAuth/adapter/notifications paragraph (+ trailing blank).
-  [
-    "With an **auth** mode selected, OAuth providers auto-wire from env at boot (set the vars in `.env.local`; no file needed), the user adapter self-wires via `defaultPrismaUserAdapter` (override with `registerUserAdapter()` in `luckystack/server/index.ts`), and `server/hooks/notifications.ts` wires the transactional new-sign-in / password-change emails.\n\n",
-    '',
-  ],
-];
-
-//? Strip login-as-installed prose from the scaffolded README (see LOGIN_DOC_EDITS).
-//? editScaffoldFile throws on a token miss — desirable here: the template README is
-//? controlled, so a miss means the doc drifted from this list and must be re-synced.
-const pruneLoginDocs = (targetDir: string): void => {
-  editScaffoldFile(targetDir, 'README.md', LOGIN_DOC_EDITS);
-};
-
 //? Remove all built-in auth UI/flows for the authMode:'none' scaffold.
 export const pruneAuthNone = (targetDir: string): void => {
   //? The framework's (anonymous) session plumbing stays — `session_v1` returns a
@@ -2028,13 +1996,6 @@ export const pruneAuthNone = (targetDir: string): void => {
   ]) {
     removeScaffoldPath(targetDir, target);
   }
-
-  //? Strip every README paragraph that describes login as an INSTALLED feature of
-  //? this project (auth pages, auth API handlers, LoginForm, OAuth auto-wiring).
-  //? A `auth: 'none'` scaffold has none of these — leaving the prose would be a
-  //? doc lie. The ONLY surviving mention is a neutral "add it later" pointer (the
-  //? @luckystack/login package still EXISTS as an option; that reference stays).
-  pruneLoginDocs(targetDir);
 
   //? Server overlay registered the notification hooks + an example postLogin
   //? logger. Both reference login-only hook payloads; strip them so the
@@ -2332,8 +2293,7 @@ export {};
 };
 
 //? Adapt an auth-enabled scaffold to a non-Prisma data layer: prune ONLY the
-//? Prisma-bound settings surface, fix the docs/links that referenced it, and
-//? write the starter UserAdapter. login/register/reset-password stay.
+//? Prisma-bound settings surface and write the starter UserAdapter. login/register/reset-password stay.
 const adaptAuthNonPrisma = (targetDir: string, orm: OrmProvider): void => {
   //? 1. Settings page + its 6 Prisma-bound `_api` routes, and the notification
   //?    hooks (they read the user via getPrismaClient() — on this layer they'd
@@ -2372,25 +2332,9 @@ registerNotificationHooks();
     ],
   ]);
 
-  //? 3. README: rewrite the three login-as-installed paragraphs that mention
-  //?    the settings surface / the Prisma self-wiring adapter (exact-token
-  //?    edits — a miss means the template README drifted; editScaffoldFile throws).
-  editScaffoldFile(targetDir, 'README.md', [
-    [
-      "If you selected an **auth** mode (`credentials` / `credentials+oauth`), you'll also find the auth UI under `src/`: `login/page.tsx`, `register/page.tsx`, `reset-password/page.tsx`, and an account-management `settings/page.tsx`. Scaffolded with `auth: 'none'`? Add them later with `npx luckystack add login`.",
-      "If you selected an **auth** mode (`credentials` / `credentials+oauth`), you'll also find the auth UI under `src/`: `login/page.tsx`, `register/page.tsx`, and `reset-password/page.tsx`. The account-management settings page is NOT scaffolded on this data layer — its API routes are Prisma-bound; build your own against your UserAdapter.",
-    ],
-    [
-      "Selecting an **auth** mode also adds the auth-related API handlers — e.g. `logout_v1`, the `reset-password/_api/*` reset flow, and the `settings/_api/*` session / password / profile / account handlers. These ship alongside the auth pages above (and arrive together via `npx luckystack add login`).",
-      "Selecting an **auth** mode also adds the auth-related API handlers — e.g. `logout_v1` and the `reset-password/_api/*` reset flow. The Prisma-bound `settings/_api/*` handlers are not scaffolded on this data layer.",
-    ],
-    [
-      "With an **auth** mode selected, OAuth providers auto-wire from env at boot (set the vars in `.env.local`; no file needed), the user adapter self-wires via `defaultPrismaUserAdapter` (override with `registerUserAdapter()` in `luckystack/server/index.ts`), and `server/hooks/notifications.ts` wires the transactional new-sign-in / password-change emails.",
-      "With an **auth** mode selected, OAuth providers auto-wire from env at boot (set the vars in `.env.local`; no file needed). On this data layer the user adapter does NOT self-wire — finish `luckystack/login/userAdapter.ts` (starter included) to register yours. The transactional notification hooks (`server/hooks/notifications.ts`) are Prisma-bound and not scaffolded here — add your own `postLogin` hook against your UserAdapter if you want them.",
-    ],
-  ]);
-
-  //? 4. The starter UserAdapter (auto-imported at boot via the login overlay slot).
+  //? The README is choice-neutral; only code is pruned. Keep the adapter
+  //? prerequisite visible in the starter and operator guidance.
+  //? 3. The starter UserAdapter (auto-imported at boot via the login overlay slot).
   const starter = orm === 'drizzle' || orm === 'mikro-orm' ? USER_ADAPTER_STARTERS[orm] : null;
   if (starter) {
     fs.mkdirSync(path.join(targetDir, 'luckystack', 'login'), { recursive: true });
@@ -3409,7 +3353,8 @@ const buildTemplateVars = (
 //? FRAMEWORK repo, so in a consumer project they are a second, authoritative-
 //? looking answer next to the project's own identically-named files — and every
 //? number in them (`ADR 0007`) resolves to a decision the project never made.
-//? The CONVENTIONS ship (protocols, ARCHITECTURE_*, findings/README.md); the
+//? The framework's PRODUCT and ROADMAP also describe the wrong app.
+//? The CONVENTIONS ship (protocols, ARCHITECTURE_*); the
 //? framework's instances of them do not.
 const FRAMEWORK_OWN_RECORDS = [
   'AI_QUICK_INDEX.md',
@@ -3420,8 +3365,11 @@ const FRAMEWORK_OWN_RECORDS = [
   'AI_PRODUCT_OVERVIEW.md',
   'ai-graph.json',
   'ai-product',
+  'PRODUCT.md',
+  'ROADMAP.md',
   'decisions',
   'lessons',
+  'findings',
 ];
 
 const stripFrameworkOwnRecords = (docsDir: string): void => {
@@ -3431,11 +3379,11 @@ const stripFrameworkOwnRecords = (docsDir: string): void => {
   }
 };
 
-//? Copy the framework AI docs (CLAUDE.md, docs/, skills/, .claude/commands/,
+//? Copy the framework AI docs (AGENTS.md, docs/, skills/, .claude/commands/,
 //? branch-logs/README.md) into the scaffold, install the pre-commit AI-index hook,
 //? and wire the @luckystack/mcp server into .mcp.json. No-op when `aiInstructions`
 //? is off — callers gate on that before invoking.
-const copyAiDocs = (
+export const copyAiDocs = (
   targetDir: string,
   vars: Record<string, string>,
   luckystackVersion: string,
@@ -3450,8 +3398,11 @@ const copyAiDocs = (
   const bundledDir = path.resolve(__dirname, '..', 'framework-docs');
   const fromBundle = fs.existsSync(bundledDir);
   const base = fromBundle ? bundledDir : path.resolve(__dirname, '..', '..', '..');
+  if (!fs.existsSync(path.join(base, 'AGENTS.md'))) {
+    throw new Error('[create-luckystack-app] AI instructions requested but AGENTS.md is missing from framework docs');
+  }
 
-  //? What the framework docs bundle actually contains — drives the CLAUDE.md
+  //? What the framework docs bundle actually contains — drives the AGENTS.md
   //? path rewrite below so it can never drift from the real doc set.
   const frameworkDocsDir = path.join(base, 'docs');
   const frameworkDocEntries = fs.existsSync(frameworkDocsDir) ? fs.readdirSync(frameworkDocsDir) : [];
@@ -3460,7 +3411,7 @@ const copyAiDocs = (
   //? entries) — the consumer's first session initializes their own log file.
   const docsCopies: [string, string, boolean][] = [
     // [source, dest, isDirectory]
-    [path.join(base, 'CLAUDE.md'),                                                 path.join(targetDir, 'CLAUDE.md'),               false],
+    [path.join(base, 'AGENTS.md'),                                                 path.join(targetDir, 'AGENTS.md'),               false],
     [path.join(base, 'docs'),                                                      path.join(targetDir, 'docs', 'luckystack'),      true],
     [path.join(base, 'skills'),                                                    path.join(targetDir, 'skills'),                  true],
     [fromBundle ? path.join(base, 'claude-commands') : path.join(base, '.claude', 'commands'), path.join(targetDir, '.claude', 'commands'), true],
@@ -3485,10 +3436,10 @@ const copyAiDocs = (
       //? byte copy.
       if (isTextFile(src)) {
         let rendered = replacePlaceholders(fs.readFileSync(src, 'utf8'), vars);
-        //? Only the root CLAUDE.md needs the framework-docs path rewrite — the
+        //? Only the root AGENTS.md needs the framework-docs path rewrite — the
         //? docs themselves are copied verbatim into docs/luckystack/, so their
         //? own relative cross-references stay valid inside that tree.
-        if (path.basename(dst) === 'CLAUDE.md') {
+        if (path.basename(dst) === 'AGENTS.md') {
           rendered = stripFrameworkOnlyBlocks(rewriteFrameworkDocPaths(rendered, frameworkDocEntries));
         }
         fs.writeFileSync(dst, rendered);
@@ -3505,19 +3456,6 @@ const copyAiDocs = (
   //? fallback path (`scaffold:test`), which copies the repo-root docs/ directly.
   for (const dir of ['_archive', 'plans']) {
     fs.rmSync(path.join(targetDir, 'docs', 'luckystack', dir), { recursive: true, force: true });
-  }
-
-  //? The framework's OWN dated finding-sets (docs/findings/<YYYY-MM-DD>-*/) are
-  //? scan output, not convention — a consumer keeps its own. Strip the dated
-  //? subfolders from the copy but keep the convention (findings/README.md +
-  //? FINDINGS_PROTOCOL.md). See docs/FINDINGS_PROTOCOL.md.
-  const consumerFindings = path.join(targetDir, 'docs', 'luckystack', 'findings');
-  if (fs.existsSync(consumerFindings)) {
-    for (const entry of fs.readdirSync(consumerFindings, { withFileTypes: true })) {
-      if (entry.isDirectory()) {
-        fs.rmSync(path.join(consumerFindings, entry.name), { recursive: true, force: true });
-      }
-    }
   }
 
   //? Same reasoning, one level up: the framework's own GENERATED artifacts and
@@ -3699,7 +3637,7 @@ const main = async (): Promise<void> => {
     //? AI dev-context is opt-in (the `aiInstructions` choice). When enabled we copy
     //? the framework's AI docs so the consumer's AI agents inherit full context,
     //? and install a pre-commit hook that CHECKS the record layers (never writes).
-    //? When disabled the project ships clean — no CLAUDE.md, no docs/luckystack, no hook.
+    //? When disabled the project ships clean — no AGENTS.md, no docs/luckystack, no hook.
     if (choices.aiInstructions) {
       copyAiDocs(targetDir, vars, luckystackVersion);
       //? Register the @luckystack/mcp graph server in .mcp.json so AI agents can

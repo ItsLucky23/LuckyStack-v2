@@ -1,38 +1,15 @@
 ---
 name: agent-browser-verify
-description: Interactively verify a LuckyStack flow (esp. the login matrix) with agent-browser against the running dev server — propose the tool + get user approval first.
+description: Interactively verify an approved LuckyStack flow against an authorized running app.
 category: automation
 ---
 
-# Skill: /agent-browser-verify
+# Interactive browser verification
 
-INTERACTIVE verification of a running LuckyStack app with [`agent-browser`](https://github.com/vercel-labs/agent-browser) (and, on escalation, the Playwright / Chrome DevTools MCP servers). This is the *interactive dev-verify* counterpart to the `/agent-browser` skill (which GENERATES committed E2E tests). Use it to confirm a flow works before writing the committed spec.
+1. Propose the assertion and smallest adequate browser tool; wait for approval. Escalate only for a missing required capability under `docs/AI_BROWSER_TESTING.md` (consumer copy under `docs/luckystack/`).
+2. Reuse/start the runtime under applicable local authority. Report the actual URL and use a dedicated test account; never read `.env.local` for credentials.
+3. Inspect current tool configuration/help for domain/action restrictions. Preserve supported `.claude/settings.json` permissions; do not assume changing instructions to `AGENTS.md` changes a settings parser.
+4. Verify the requested flow, including console/network evidence and denial/failure cases. For auth, test the actual configured token/cookie mode, CSRF policy, account switching and applicable provider flows; source/types are authoritative for transport details.
+5. Report pass/fail/skipped cases separately. Offer a deterministic test after the flow is verified, not as proof that exploration already passed.
 
-> **Always propose the tool + reason and wait for explicit user approval before driving a browser.** Follow the cheapest-first ladder + protocol in `docs/AI_BROWSER_TESTING.md` and the "AI Browser Testing" section of `CLAUDE.md`. The harness also gates these tools via `.claude/settings.json` `permissions.ask`.
-
-## When to use
-
-- Manually verifying the **login matrix** (the recurring "left for the user" item): credentials login in BOTH cookie and sessionStorage modes, OAuth per configured provider, re-login while already signed in, register-while-logged-in.
-- Confirming a page/flow works end-to-end before capturing it as a `@playwright/test` spec.
-- Reading console/network/errors after an action.
-
-## Prerequisites (developer actions — ask the user)
-
-- Dev server running: `npm run server` + `npm run client` (server-start is always the user's action).
-- `agent-browser` available: `npm i -g agent-browser && agent-browser install`.
-- A **dedicated test account** (never read `.env.local`).
-
-## Workflow
-
-1. **Announce + get approval**: "I want to verify `<flow>` → cheapest fit = `agent-browser` → approve?". For an escalation (cross-browser/vision → Playwright MCP; Lighthouse/perf → Chrome DevTools MCP) name the exclusive capability that forces the higher rung.
-2. **Drive agent-browser** fenced to `localhost`/`127.0.0.1` (per `agent-browser.json`): navigate → fill → click → `console`/`errors` → `screenshot`.
-3. **Login matrix specifics**:
-   - Cookie mode (`sessionBasedToken: false`): assert the HttpOnly session cookie is set + CSRF on writes.
-   - sessionStorage mode (`sessionBasedToken: true`): assert the token lands in `sessionStorage`; OAuth `?token=` is consumed from the URL.
-   - Re-login while signed in: log in as account B while A is active → session becomes B, no bounce.
-4. **Report** what passed/failed with the console/network evidence.
-5. **Offer the committed complement**: once green, propose writing a deterministic `@playwright/test` spec under `tests/e2e/` so CI covers it without an LLM in the loop.
-
-## Output
-
-A short pass/fail report per checked case + (on request) a generated `@playwright/test` spec. No state-changing action runs without the per-action confirmation from `agent-browser.json`.
+Do not broaden authority, print token values or create a second copied login-flow specification in this skill.

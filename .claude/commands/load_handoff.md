@@ -9,7 +9,7 @@ You are picking up a session from a handoff document. Goal: load context fast, g
 
 `$ARGUMENTS` should contain a file path. Accept any of:
 
-- Absolute path: `C:\youcomm\LuckyStack-v2\handoffs\2026-05-20\HANDOFF.md`
+- Absolute path to a handoff file.
 - Repo-relative: `handoffs/2026-05-20/HANDOFF.md`
 - Date-only shortcut: `2026-05-20` -> resolve to `handoffs/2026-05-20/HANDOFF_COMBINED.md` if it exists, else `handoffs/2026-05-20/HANDOFF.md`
 - Empty: list all `handoffs/*/` directories sorted desc and ask the user which one (this is the only case where you may ask a question).
@@ -20,7 +20,7 @@ If the resolved file does not exist, list the contents of the closest existing p
 
 1. Resolve the path per above.
 2. Read the file in full.
-3. Do not run git, do not edit files, do not act on next steps. This command is context-loading only.
+3. Do not edit or act on next steps; this invocation is context-loading only. Treat recorded status as historical until reconciled with Git and active runtimes before implementation resumes.
 4. Emit the recap below.
 
 ## Output format

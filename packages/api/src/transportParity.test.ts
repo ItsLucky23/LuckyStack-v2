@@ -4,8 +4,8 @@ import type { Socket } from 'socket.io';
 //? TRANSPORT-PARITY CONFORMANCE SUITE (core-transport bucket-3).
 //?
 //? Both API transports — `handleApiRequest` (socket.io) and
-//? `handleHttpApiRequest` (raw HTTP) — are documented (packages/api/CLAUDE.md
-//? "Pipeline order (authoritative)") to run the SAME pipeline sequence:
+//? `handleHttpApiRequest` (raw HTTP) — must preserve the SAME policy sequence.
+//? This regression suite, rather than a copied documentation table, pins it:
 //?   parse → readSession → parseRoute → lookup → auth → rate-limit
 //?   → (http: method) → validate → preExecute → execute → respond.
 //?

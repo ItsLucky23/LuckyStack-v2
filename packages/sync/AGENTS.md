@@ -1,0 +1,9 @@
+# @luckystack/sync — design context
+
+Sync exists for server-authoritative mutations followed by realtime delivery. The server handler runs for the request; the optional client handler is for recipient-specific filtering or presentation, not for authorizing the originator. A successful originator acknowledgement does not prove that every recipient accepted the event. Source: `src/handleSyncRequest.ts`, `src/handleHttpSyncRequest.ts`, `src/_shared/clientFanout.ts`.
+
+A client-chosen receiver is an authorization boundary, not merely a room name. Keep the built-in all-room and membership restrictions and the `preSyncAuthorize` policy aligned across socket and HTTP/SSE. HTTP membership uses persisted session rooms. That source differs from the socket's on purpose, so do not unify the two checks (ADR 0059). Per-recipient filters must not replace sender-side authorization. Preserve server-side receiver validation before fanout and avoid leaking private data into shared `serverOutput`. Source: `src/_shared/receiverAuth.ts`, `src/_shared/receiverAuth.test.ts`, `src/handleSyncTransport.test.ts`.
+
+Both transports must answer the same thing at the same point. Recipients resolve across instances before the server handler commits, so a delivery failure is never reported on a saved mutation (ADR 0063). An empty room is `sync.noReceiversFound` on every transport (ADR 0058). Fanout code never enumerates the per-instance socket maps (ADR 0061). Every `sync.*` code a transport can emit belongs in `src/_shared/errorCodes.ts`, which consumers' locale parity tests rely on.
+
+Stream audiences differ; do not turn originator-only progress into broadcast or treat a client callback as a security filter. Use the browser-safe `/client` entry and generated types; never cast around a broken map. See `docs/server-vs-client-handlers.md`, `docs/room-fanout.md`, `docs/error-states.md`, `docs/streaming.md`, `docs/version-policy.md` and `../core/AGENTS.md`.

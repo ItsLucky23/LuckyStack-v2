@@ -21,7 +21,8 @@ import {
 import { isTextFile as scaffolderIsTextFile, VALID_FLAGS, DEFAULT_CHOICES } from '../../../create-luckystack-app/src/index';
 
 const SAMPLE_PATHS = [
-  'CLAUDE.md',
+  'AGENTS.md',
+  'CLAUDE.md', // Historical consumers still need safe hash parity until manually retired.
   'docs/luckystack/ARCHITECTURE_API.md',
   'scripts/generateGraph.mjs',
   'scripts/generateTypeMaps.ts',

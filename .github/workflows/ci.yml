@@ -31,7 +31,7 @@ jobs:
       - name: Record-id identity (ADRs + lessons, incl. @adr backrefs)
         run: node scripts/checkRecordIds.mjs --backrefs
 
-      - name: CLAUDE.md invariants (report-only)
+      - name: AGENTS.md invariants (report-only)
         run: node scripts/lintInvariants.mjs || true
 
       - name: Hand-written doc staleness (report-only)

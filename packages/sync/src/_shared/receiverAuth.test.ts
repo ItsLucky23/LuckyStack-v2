@@ -2,8 +2,8 @@ import { describe, it, expect } from "vitest";
 import { authorizeSyncReceiver } from "./receiverAuth";
 
 //? SYNC-07 — pure receiver-authorization policy resolver shared by both sync
-//? transports. These cases lock in that the framework defaults stay permissive
-//? (a missing/default config key changes nothing) while the opt-in flags reject
+//? transports. These cases exercise explicit permissive and restrictive inputs,
+//? not core's project defaults. Restrictive policy must reject
 //? as specified — including FAILING CLOSED when `requireRoomMembership` is on
 //? but membership is undeterminable (no silent HTTP bypass).
 
@@ -13,13 +13,13 @@ describe("authorizeSyncReceiver", () => {
     requireRoomMembership: false,
   };
 
-  it("allows any room code under the default permissive policy", () => {
+  it("allows any room code under an explicit permissive policy", () => {
     expect(
       authorizeSyncReceiver({ receiver: "room-A", ...permissive, isMember: null }),
     ).toEqual({ allowed: true });
   });
 
-  it("allows 'all' under the default permissive policy", () => {
+  it("allows 'all' under an explicit permissive policy", () => {
     expect(
       authorizeSyncReceiver({ receiver: "all", ...permissive, isMember: null }),
     ).toEqual({ allowed: true });
@@ -85,7 +85,7 @@ describe("authorizeSyncReceiver", () => {
   });
 
   it("allows an undeterminable membership when requireRoomMembership is OFF", () => {
-    //? With the default permissive policy a null `isMember` is irrelevant.
+    //? With an explicit permissive policy a null `isMember` is irrelevant.
     expect(
       authorizeSyncReceiver({
         receiver: "room-A",

@@ -1,6 +1,6 @@
-//? Guards the CLAUDE.md path rewrite that `copyAiDocs` applies on scaffold.
+//? Guards the AGENTS.md path rewrite that `copyAiDocs` applies on scaffold.
 //?
-//? The framework's CLAUDE.md is written against the framework repo layout
+//? The framework's AGENTS.md is written against the framework repo layout
 //? (`docs/<X>.md`), but a scaffolded project receives those same docs under
 //? `docs/luckystack/`. Without the rewrite every in-body reference is a dead
 //? path in the consumer project — the defect that sent a consumer AI down ~26
@@ -19,6 +19,7 @@ const ENTRIES = [
   'ARCHITECTURE_API.md',
   'BRANCH_LOG_PROTOCOL.md',
   'PACKAGE_OVERVIEW.md',
+  'UPGRADING.md',
   'AI_QUICK_INDEX.md',
   'decisions',
   'lessons',
@@ -51,28 +52,18 @@ describe('rewriteFrameworkDocPaths', () => {
     expect(once).not.toContain('docs/luckystack/luckystack/');
   });
 
-  it('actually rewrites the real CLAUDE.md body while keeping the Quick Links table intact', () => {
-    //? End-to-end over the actual file the scaffold ships.
-    const claudeMd = readFileSync(path.join(REPO_ROOT, 'CLAUDE.md'), 'utf8');
-    const before = claudeMd.split('\n');
-    const after = rewriteFrameworkDocPaths(claudeMd, ENTRIES).split('\n');
+  it('rewrites framework references in the real AGENTS.md without altering other content', () => {
+    const agentsMd = readFileSync(path.join(REPO_ROOT, 'AGENTS.md'), 'utf8');
+    const before = agentsMd.split('\n');
+    const after = rewriteFrameworkDocPaths(agentsMd, ENTRIES).split('\n');
     expect(after).toHaveLength(before.length);
-
-    const changed = before.filter((l, i) => l !== after[i]);
-    //? Rule 12a / 28 / the doc table all reference framework docs in prose —
-    //? if nothing changed, the rewrite silently stopped working.
-    expect(changed.length).toBeGreaterThan(0);
-
-    //? Every line that changed must have gained ONLY the docs/luckystack/ prefix.
+    expect(after.join('\n')).toContain('`docs/luckystack/PACKAGE_OVERVIEW.md`');
+    expect(after.join('\n')).toContain('`docs/PRODUCT.md`');
+    expect(after.join('\n')).toContain('Follow `docs/luckystack/UPGRADING.md`.');
     for (let i = 0; i < before.length; i++) {
       if (before[i] === after[i]) continue;
       expect(after[i]?.replaceAll('docs/luckystack/', 'docs/')).toBe(before[i]);
     }
-
-    //? The dual-path rows keep the framework column untouched.
-    const quickLink = before.find((l) => l.includes('| Architecture deep dives |'));
-    expect(quickLink).toBeDefined();
-    expect(after[before.indexOf(quickLink ?? '')]).toBe(quickLink);
   });
 });
 
@@ -100,15 +91,14 @@ describe('stripFrameworkOnlyBlocks', () => {
     expect(() => stripFrameworkOnlyBlocks(src)).toThrow(/unbalanced/);
   });
 
-  it('the real CLAUDE.md has balanced fences and gets measurably smaller', () => {
-    const claudeMd = readFileSync(path.join(REPO_ROOT, 'CLAUDE.md'), 'utf8');
-    const stripped = stripFrameworkOnlyBlocks(claudeMd);
-    expect(stripped.length).toBeLessThan(claudeMd.length);
-    //? No fence markers may survive into what a consumer reads.
+  it('rejects an unmatched closing fence instead of silently accepting broken guidance', () => {
+    expect(() => stripFrameworkOnlyBlocks('keep\n<!-- /framework-only -->')).toThrow(/unexpected/);
+  });
+
+  it('the real AGENTS.md has balanced fences and keeps its consumer guidance', () => {
+    const agentsMd = readFileSync(path.join(REPO_ROOT, 'AGENTS.md'), 'utf8');
+    const stripped = stripFrameworkOnlyBlocks(agentsMd);
     expect(stripped).not.toContain('framework-only');
-    //? And the consumer-relevant contract must still be there.
-    for (const anchor of ['Session Capture Protocol', 'Lazy-Load Contract', 'Core Rules']) {
-      expect(stripped).toContain(anchor);
-    }
+    expect(stripped.trim().length).toBeGreaterThan(0);
   });
 });

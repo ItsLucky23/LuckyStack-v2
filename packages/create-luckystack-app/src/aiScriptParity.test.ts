@@ -59,7 +59,7 @@ describe('AI-context script/doc parity (root ↔ scaffold template)', () => {
 
   it('template package.json does not advertise retired or framework-only ai:* scripts', () => {
     //? `ai:index` regenerates the FRAMEWORK's cross-repo index — a consumer has
-    //? no such script, so CLAUDE.md must not tell a consumer AI to run it.
+    //? no such script, so AGENTS.md must not tell a consumer AI to run it.
     //? examples / runbooks / context-budget were retired outright.
     const pkg: unknown = JSON.parse(readT('package.json'));
     const scripts = (pkg as { scripts?: Record<string, string> }).scripts ?? {};

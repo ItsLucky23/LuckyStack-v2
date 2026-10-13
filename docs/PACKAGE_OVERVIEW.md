@@ -1,102 +1,27 @@
-# LuckyStack Package Overview
+# LuckyStack Package Purposes
 
 <!-- @covers packages -->
 
-> Quick reference voor AI agents en developers: welk `@luckystack/*` package los je waarmee op?
-> Voor diepe details per package: zie `packages/<name>/CLAUDE.md`. Exacte versies, exports en dependency-ranges staan in `packages/<name>/package.json`; de tabellen hieronder zijn een use-case- en installatiematrix, geen tweede manifest.
+Choose an existing boundary before building the same capability in application code. This is a purpose map, not an export, version or dependency inventory. Exact requirements belong to each installed `package.json`; design constraints belong to package `AGENTS.md` and types/source are authoritative for usage.
 
-## Core Packages
+| Need | Package | Why this boundary exists |
+| --- | --- | --- |
+| Shared framework contracts | `@luckystack/core` | Keep cross-package policy independent of application-owned implementations. |
+| Host an application backend | `@luckystack/server` | Centralize the admission/security boundary rather than duplicating it per feature. |
+| Typed request/response work | `@luckystack/api` | Keep business invocation independent of its transport. |
+| Deliver realtime room events | `@luckystack/sync` | Separate authoritative execution from recipient-specific delivery. |
+| Authentication and sessions | `@luckystack/login` | Reuse security policy while leaving user/session storage choices to the app. |
+| Collaborative presence | `@luckystack/presence` | Treat transient connectivity as awareness, not durable user truth. |
+| Transactional mail | `@luckystack/email` | Keep provider choice outside business workflows. |
+| Error tracking | `@luckystack/error-tracking` | Separate observability adapters from application failure semantics. |
+| Recurring background work | `@luckystack/cron` | Coordinate best-effort scheduling; jobs must tolerate repeat execution. It is not a durable retry queue. |
+| Multi-service ingress | `@luckystack/router` | Separate service ownership and health from backend implementation. |
+| Development discovery/generation | `@luckystack/devkit` | Derive types and maps from source instead of maintaining them twice. |
+| Contract and business-flow testing | `@luckystack/test-runner` | Combine broad mechanical checks with app-owned postcondition assertions. |
+| Development API exploration | `@luckystack/docs-ui` | Discover generated contracts without turning an explorer into production access policy. |
+| External secret resolution | `@luckystack/secret-manager` | Keep committed references separate from real credentials and rotation ownership. |
+| AI context queries | `@luckystack/mcp` | Retrieve relevant generated context rather than loading or hand-maintaining code inventories. |
+| Evolve an existing app | `@luckystack/cli` | Preserve consumer ownership while adopting/refeshing framework-authored files. |
+| Start a new app | `create-luckystack-app` | Resolve initial choices coherently rather than assembling a partial skeleton by hand. |
 
-| Package | Use case | Required peers | Optional peers |
-|---|---|---|---|
-| `@luckystack/core` | Foundation: socket-first transport contracts, DI registries (config, database, Redis, notifier, email, error-tracker, logger, runtime maps), hooks bus, cross-cutting primitives (`tryCatch`, rate limiter, CORS, validateRequest, offline queue, CSRF), and the LuckyStack ESLint contract via the `/eslint` subpath. | `ioredis`, `socket.io`, `socket.io-client`, `zod` | `@prisma/client` (only for the Prisma database path), React packages, `sonner`, `eslint` (only `/eslint`) |
-| `@luckystack/server` | One-call server bootstrap that wires raw Node HTTP, Socket.io (+ Redis adapter), framework routes (`/api/*`, `/sync/*`, `/_health`, `/livez`, `/readyz`, `/_test/reset`, `/auth/*`), CSRF, CORS, security headers, and dev hot reload. | `socket.io` | `@prisma/client`, `@luckystack/login`, `@luckystack/presence`, `@luckystack/sync`, `@luckystack/email`, `@luckystack/error-tracking`, `@luckystack/cron`, `@luckystack/docs-ui`, `@luckystack/devkit` (dev-only) |
-| `@luckystack/api` | Transport-agnostic API request layer for file-based `_api/` routes — handles auth, rate limit, Zod validation, hook dispatch, and response normalization for both Socket.io and HTTP transports. | `socket.io` | `@prisma/client` only when the consumer uses Prisma through core |
-| `@luckystack/sync` | Real-time room-based fanout over Socket.io (+ HTTP/SSE fallback) for file-based `_sync/` routes with streaming primitives and an offline-replay queue. | `socket.io`, `socket.io-client` | `@prisma/client`, React (only `/client` subpath) |
-
-## Auth & Sessions
-
-| Package | Use case | Required peers | Optional peers |
-|---|---|---|---|
-| `@luckystack/login` | Credentials + OAuth (Google, GitHub, Discord, Facebook, Microsoft, custom) auth, Redis-backed sessions, single-session enforcement, password-reset and 2FA primitives, pluggable `UserAdapter` / `SessionAdapter`. | `socket.io` | `@prisma/client` (default adapter only), `@luckystack/email` (framework password reset only) |
-
-## Communication
-
-| Package | Use case | Required peers | Optional peers |
-|---|---|---|---|
-| `@luckystack/email` | Pluggable transactional email with Console / Resend / SMTP adapters, named template registry, `preEmailSend` / `postEmailSend` hooks, multi-sender slots. | none | `resend` (for `ResendSender`), `nodemailer` (for `SmtpSender`) |
-| `@luckystack/presence` | Presence + activity awareness: AFK detection, disconnect grace windows, room-peer `userAfk` / `userBack` notifications, reconnect hooks, pluggable activity events. | none | `socket.io` (server lifecycle), `@luckystack/login` (session integration), React + `react-router-dom` (`/client`) |
-
-## Observability
-
-| Package | Use case | Required peers | Optional peers |
-|---|---|---|---|
-| `@luckystack/error-tracking` | Pluggable server error-tracking with built-in Sentry / Datadog / PostHog adapters and multi-tracker fan-out (per-adapter throws are swallowed). | none | `@sentry/node@^10.66.0`, `dd-trace@^5.0.0`, `hot-shots@^10.0.0`, `posthog-node@^4.0.0` |
-
-## Infrastructure & Deployment
-
-| Package | Use case | Required peers | Optional peers |
-|---|---|---|---|
-| `@luckystack/router` | Optional standalone HTTP + WebSocket load-balancer for multi-instance / preset-bundle deploys with boot-UUID handshake, Redis-backed health state, and dev-to-staging fallback proxy. The router's topology config files (`services.config.ts` + `deploy.config.ts`, plus the build-time `server/config/presetLoader.ts`) are **NOT** in a default install — they ship via `npx luckystack add router` (which also wires their two `server.ts` side-effect imports) and are removed again by `npx luckystack remove router`. | `ioredis@^5.10.0` | none |
-| `@luckystack/cron` | Leader-elected, Redis-backed cron scheduler: declarative recurring jobs (`registerCronJob`, cron expressions via croner or `{ everyMs }` intervals) with one active leader under a healthy lease, per-run dedup leases, overlap guards, jitter, per-tenant fan-out, run stats, and `preCronRun`/`postCronRun` hooks. Auto-wired at boot; register jobs in `luckystack/cron/*.ts`. The lease is best-effort, so jobs must be idempotent. NOT a queue — for retries/priorities use bullmq. | none (Redis via core) | none |
-
-## Dev Tools
-
-| Package | Use case | Required peers | Optional peers |
-|---|---|---|---|
-| `@luckystack/devkit` | Dev-time file-based route discovery, hot reload, TypeScript-program-backed type-map + Zod schema emission (including the multi-directory function-injection map — spec: `docs/ARCHITECTURE_FUNCTION_INJECTION.md`), supervisor process restart, and `luckystack-validate-deploy` CLI. | `typescript@>=5.7.3 <7.0.0`, `zod` | `@prisma/client` only when Prisma route types are present |
-| `@luckystack/test-runner` | Generated-type-driven sweep that walks every API endpoint and runs five progressive layers: contract smoke, auth enforcement, rate-limit, crash-resistance fuzz, and per-route custom tests. | `zod`, `socket.io-client` | `@luckystack/login`, `@luckystack/secret-manager` |
-| `@luckystack/docs-ui` | Dev-only Swagger-style browser at `/_docs` that renders `apiDocs.generated.json` with method, auth, rate limit, input/output shape, and optional inline try-it-out. | none | `@luckystack/server` |
-| `@luckystack/mcp` | Read-only MCP server that makes the project's generated AI context (decisions, lessons, dependency graph, routes, capabilities) **queryable** by Claude Code instead of read whole — the artifacts are a gitignored local cache, so the tools are the intended access path. The tool list lives in `packages/mcp/CLAUDE.md`. Runs via `npx` (no app dependency); add a `luckystack` entry to `.mcp.json`. | none (uses `@modelcontextprotocol/sdk` + `zod`, bundled via `npx`) | none |
-| `@luckystack/cli` | The `luckystack` command for an EXISTING project: `add` / `remove` an optional package (installs the dep AND injects the `src/` assets a plain `npm i` cannot), `manage` for the interactive reconfiguration wizard, `update` to refresh framework-owned files from the installed version, `upgrade` to write a deterministic upgrade plan, plus `check-env` / `check-i18n` / `docker` helpers. | none (Node built-ins only) | none |
-
-## Utilities
-
-| Package | Use case | Required peers | Optional peers |
-|---|---|---|---|
-| `@luckystack/secret-manager` | Rotation-aware secret resolver client. Commit `.env` pointers (e.g. `OPENAI_KEY=OPENAI_AUTHORIZATION_KEY_V5`) instead of real secrets; at boot it resolves them against an external append-only secret-manager server and writes the real values into `process.env`. Supports `local` / `remote` / `hybrid` modes + opt-in dev hot reload. The companion server lives in a separate, project-independent git repo (`luckystack-secret-manager`). | none (uses global `fetch`, requires Node >= 20) | any `fetch` polyfill (e.g. `undici`) for non-Node-20 hosts |
-
-## Scaffolding
-
-| Package | Use case | Required peers | Optional peers |
-|---|---|---|---|
-| `create-luckystack-app` | Interactive scaffold CLI for new LuckyStack projects (`npx create-luckystack-app <name>`); supports the selected ORM and npm/Bun package manager, copies the template and runs the relevant install/generation steps. | none (Node >= 20) | none |
-
-## "I want to..." cheatsheet
-
-Quick lookup: feature -> which package(s) to suggest.
-
-| I want to... | Suggest installing |
-|---|---|
-| Add OAuth login | `@luckystack/login` (+ `@luckystack/email` voor framework-mode password reset) |
-| Add real-time updates / multiplayer | `@luckystack/sync` |
-| Track user presence (online / AFK) | `@luckystack/presence` |
-| Send transactional emails | `@luckystack/email` |
-| Add error tracking | `@luckystack/error-tracking` |
-| Run recurring background jobs (leader-elected, best-effort once-per-cluster scheduling) | `@luckystack/cron` |
-| Run multi-instance load-balanced | `@luckystack/router` |
-| Add API endpoints | `@luckystack/api` (auto-wired via `@luckystack/server`; create `src/{page}/_api/{name}_v{N}.ts`) |
-| Bootstrap a new project | `npx create-luckystack-app` |
-| Run integration tests | `@luckystack/test-runner` |
-| Browse generated docs in dev | `@luckystack/docs-ui` |
-| Resolve secrets from a central server (committed pointers) | `@luckystack/secret-manager` |
-| Hot-reload + type-map gen in dev | `@luckystack/devkit` |
-| Let Claude Code query the repo's AI context (blast-radius, decisions, routes) | `@luckystack/mcp` (add a `.mcp.json` entry; runs via `npx`) |
-| Add a package to an existing project, reconfigure it, or upgrade the framework | `@luckystack/cli` (`npx luckystack add <feature>` / `manage` / `update` / `upgrade`) |
-
-## Decision Matrix
-
-| Scenario | Required packages | Optional add-ons |
-|---|---|---|
-| Minimal API server | `core` + `server` + `api` | `error-tracking` |
-| Full social app | `core` + `server` + `api` + `sync` + `login` + `presence` | `email`, `error-tracking` |
-| Public REST API | `core` + `server` + `api` | `error-tracking`, `docs-ui` |
-| Multi-tenant SaaS | `core` + `server` + `api` + `sync` + `login` + `email` | `error-tracking`, `presence`, `router` |
-
----
-
-> **Reserved slot:** `packages/` also contains an `env-resolver` directory — an intentionally-reserved, **not-yet-implemented** placeholder (no `package.json`, no `src/`, excluded from `buildPackages.mjs` / `publishPackages.mjs`). It is NOT published, so it's deliberately absent from the tables above. The published count is 16 `@luckystack/*` packages (+ `create-luckystack-app`).
-
----
-
-> Voor consumers — exacte packageversies en peer-dependencies staan in de geïnstalleerde package manifests. Voor framework-owned docs gebruikt een bestaand project `npx luckystack update`; `npm run ai:refresh` herbouwt alleen de lokale, gitignorede AI-context-cache.
+For a new project use `npx create-luckystack-app`; for an existing project inspect `npx luckystack list` and use [the adoption guide](LUCKYSTACK_ADD_GUIDE.md). Ask before installing a package. Do not infer prerequisites from this map or propose an unpublished placeholder as an available capability.
