@@ -9,7 +9,7 @@ import { pathToFileURL } from 'node:url';
 import { tryCatch, getSrcDir, ROOT_DIR, isTestFile } from '@luckystack/core';
 import { collectFunctionModules, functionModuleFileName } from './functionRegistry';
 import { getInputTypeFromFile, getSyncClientDataType } from './typeMap/extractors';
-import { invalidateProgramCache } from './typeMap/tsProgram';
+import { invalidateProgramCache } from './typeMap/tsApi';
 import { clearRuntimeTypeResolverCache } from './runtimeTypeResolver';
 import { getRoutingRules, isNonRouteDirectory, apiMarkerSegment, syncMarkerSegment } from './routingRules';
 import { assertValidRouteNaming, collectDuplicatePageRoutes, formatDuplicatePageRouteIssues, isRouteSurfaceFile } from './routeNamingValidation';
@@ -214,8 +214,8 @@ const resolveFunctionModule = (loadedModule: unknown, fileName: string) => {
 
 export const initializeApis = async () => {
   for (const key of Object.keys(devApis)) delete devApis[key];
-  //? No invalidateProgramCache() here — cachedProgram starts as null on
-  //? module-load (tsProgram.ts), so the first getServerProgram() call
+  //? No invalidateProgramCache() here — the cached Program starts as null on
+  //? module-load (tsApi.ts), so the first getServerProgram() call
   //? builds it from scratch. With initializeApis + initializeSyncs running
   //? in parallel via Promise.all, invalidating here forced a redundant
   //? double-build (~3-4s waste). Hot-reload paths (upsertApiFromFile,

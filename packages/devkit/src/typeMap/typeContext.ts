@@ -1,8 +1,19 @@
-import * as ts from 'typescript';
 import path from 'node:path';
+import { SyntaxKind } from 'typescript-7-api/ast';
+import {
+  isClassDeclaration,
+  isEnumDeclaration,
+  isImportDeclaration,
+  isInterfaceDeclaration,
+  isNamedImports,
+  isNamespaceImport,
+  isStringLiteral,
+  isTypeAliasDeclaration,
+} from 'typescript-7-api/ast/is';
 import { getGeneratedSocketTypesPath } from '@luckystack/core';
 
 import { getOrInit } from '../internal/mapUtils';
+import { parseSourceText } from './tsApi';
 
 export interface FileImport {
   source: string;
@@ -27,7 +38,7 @@ const toGeneratedImportPath = (source: string, filePath: string): string => {
 };
 
 // Parses a source file's AST to collect exported type names and import bindings.
-// Uses ts.createSourceFile (no TypeChecker needed) for fast structural discovery.
+// Syntax-only parse (no TypeChecker needed) for fast structural discovery.
 export const parseFileTypeContext = (content: string): {
   availableExports: Set<string>;
   fileImports: Map<string, FileImport>;
@@ -35,32 +46,27 @@ export const parseFileTypeContext = (content: string): {
   const availableExports = new Set<string>();
   const fileImports = new Map<string, FileImport>();
 
-  const sourceFile = ts.createSourceFile(
-    '__temp__.ts',
-    content,
-    ts.ScriptTarget.Latest,
-    true,
-  );
+  const sourceFile = parseSourceText('__temp__.ts', content);
 
   for (const statement of sourceFile.statements) {
     // Collect exported type/interface/class/enum declarations
     if (
-      ts.isInterfaceDeclaration(statement)
-      || ts.isTypeAliasDeclaration(statement)
-      || ts.isClassDeclaration(statement)
-      || ts.isEnumDeclaration(statement)
+      isInterfaceDeclaration(statement)
+      || isTypeAliasDeclaration(statement)
+      || isClassDeclaration(statement)
+      || isEnumDeclaration(statement)
     ) {
-      const hasExport = statement.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword);
+      const hasExport = statement.modifiers?.some(m => m.kind === SyntaxKind.ExportKeyword);
       if (hasExport && statement.name) {
         availableExports.add(statement.name.text);
       }
       continue;
     }
 
-    if (!ts.isImportDeclaration(statement)) continue;
+    if (!isImportDeclaration(statement)) continue;
 
     const moduleSpecifier = statement.moduleSpecifier;
-    if (!ts.isStringLiteral(moduleSpecifier)) continue;
+    if (!isStringLiteral(moduleSpecifier)) continue;
     const source = moduleSpecifier.text;
 
     const importClause = statement.importClause;
@@ -75,13 +81,13 @@ export const parseFileTypeContext = (content: string): {
     if (!namedBindings) continue;
 
     // Namespace import: import * as Foo from './foo'
-    if (ts.isNamespaceImport(namedBindings)) {
+    if (isNamespaceImport(namedBindings)) {
       fileImports.set(namedBindings.name.text, { source, isDefault: true });
       continue;
     }
 
     // Named imports: import { Foo, Bar as Baz } from './foo'
-    if (ts.isNamedImports(namedBindings)) {
+    if (isNamedImports(namedBindings)) {
       for (const specifier of namedBindings.elements) {
         const localName = specifier.name.text;
         const originalName = specifier.propertyName?.text ?? localName;

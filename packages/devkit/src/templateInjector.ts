@@ -1,7 +1,13 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import * as ts from 'typescript';
+import { ScriptKind, type InterfaceDeclaration, type PropertySignatureDeclaration } from 'typescript-7-api/ast';
+import {
+  isIdentifier,
+  isInterfaceDeclaration,
+  isPropertySignatureDeclaration,
+  isTypeLiteralNode,
+} from 'typescript-7-api/ast/is';
 import { ROOT_DIR, getGeneratedSocketTypesPath, getSrcDir } from '@luckystack/core';
 import {
   ROUTE_NAMING_EXAMPLES,
@@ -20,6 +26,7 @@ import {
   type TemplateKind,
   type TemplateMatchContext,
 } from './templateRegistry';
+import { parseSourceText, transpileSourceText } from './typeMap/tsApi';
 
 /**
  * Template Injector
@@ -783,21 +790,12 @@ const rewriteClientInputType = (content: string): string => {
  */
 const rewriteClientInputTypeAst = (content: string, sourceFileName: string): string | null => {
   // Parse to an AST (syntactic only — no type-checker needed).
-  const parseSource = (src: string) =>
-    ts.createSourceFile(
-      sourceFileName,
-      src,
-      ts.ScriptTarget.Latest,
-      /* setParentNodes */ true,
-      ts.ScriptKind.TS,
-    );
-
-  const sourceFile = parseSource(content);
+  const sourceFile = parseSourceText(sourceFileName, content, ScriptKind.TS);
 
   // Locate `SyncParams` interface.
-  let syncParamsInterface: ts.InterfaceDeclaration | undefined;
+  let syncParamsInterface: InterfaceDeclaration | undefined;
   for (const stmt of sourceFile.statements) {
-    if (ts.isInterfaceDeclaration(stmt) && stmt.name.text === 'SyncParams') {
+    if (isInterfaceDeclaration(stmt) && stmt.name.text === 'SyncParams') {
       syncParamsInterface = stmt;
       break;
     }
@@ -806,11 +804,11 @@ const rewriteClientInputTypeAst = (content: string, sourceFileName: string): str
   if (!syncParamsInterface) return null;
 
   // Locate `clientInput` property signature.
-  let clientInputMember: ts.PropertySignature | undefined;
+  let clientInputMember: PropertySignatureDeclaration | undefined;
   for (const member of syncParamsInterface.members) {
     if (
-      ts.isPropertySignature(member)
-      && ts.isIdentifier(member.name)
+      isPropertySignatureDeclaration(member)
+      && isIdentifier(member.name)
       && member.name.text === 'clientInput'
     ) {
       clientInputMember = member;
@@ -822,7 +820,7 @@ const rewriteClientInputTypeAst = (content: string, sourceFileName: string): str
 
   //? Only replace object-literal type nodes ( `{ ... }` ) — already-migrated
   //? files that carry `SyncClientInput<PagePath, SyncName>` are left untouched.
-  if (!ts.isTypeLiteralNode(clientInputMember.type)) return null;
+  if (!isTypeLiteralNode(clientInputMember.type)) return null;
 
   // Use the type node's AST span for a targeted position replacement so the
   // rest of the file's whitespace and comments are preserved verbatim.
@@ -833,22 +831,10 @@ const rewriteClientInputTypeAst = (content: string, sourceFileName: string): str
   const rewritten = `${content.slice(0, start)}SyncClientInput<PagePath, SyncName>${content.slice(end)}`;
 
   // Re-parse the rewritten source to verify it is syntactically valid before
-  // handing it back to the caller (who will write it to disk).
-  // Use a throw-away single-file program so we can call the public
-  // `getSyntacticDiagnostics` API (instead of the private `parseDiagnostics`).
-  const reparsedFile = parseSource(rewritten);
-  const verifyProgram = ts.createProgram({
-    rootNames: [sourceFileName],
-    options: { noResolve: true, skipLibCheck: true },
-    // Supply the in-memory source so `ts.createProgram` never touches the disk.
-    host: {
-      ...ts.createCompilerHost({}),
-      getSourceFile: (name) => (name === sourceFileName ? reparsedFile : undefined),
-      fileExists: (name) => name === sourceFileName,
-      readFile: (name) => (name === sourceFileName ? rewritten : undefined),
-    },
-  });
-  const syntaxErrors = verifyProgram.getSyntacticDiagnostics(reparsedFile);
+  // handing it back to the caller (who will write it to disk). A parsed tree
+  // does not expose its parse errors, but a single-file transpile reports
+  // exactly those — from memory, without resolving imports or touching disk.
+  const syntaxErrors = transpileSourceText(sourceFileName, rewritten).diagnostics ?? [];
   if (syntaxErrors.length > 0) {
     console.log(
       `[TemplateInjector] AST rewrite produced invalid TypeScript for ${sourceFileName} — leaving untouched`,

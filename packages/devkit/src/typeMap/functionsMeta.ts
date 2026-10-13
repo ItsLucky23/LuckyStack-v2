@@ -1,9 +1,38 @@
-import * as ts from 'typescript';
 import fs from 'node:fs';
 import path from 'node:path';
+import type { Checker } from 'typescript-7-api/sync';
+import {
+  createScanner,
+  LanguageVariant,
+  SyntaxKind,
+  type ClassDeclaration,
+  type EnumDeclaration,
+  type FunctionLikeDeclaration,
+  type InterfaceDeclaration,
+  type SourceFile,
+  type Statement,
+  type TypeAliasDeclaration,
+  type VariableDeclaration,
+} from 'typescript-7-api/ast';
+import {
+  isArrowFunction,
+  isClassDeclaration,
+  isEnumDeclaration,
+  isExportAssignment,
+  isExportDeclaration,
+  isFunctionDeclaration,
+  isFunctionExpression,
+  isIdentifier,
+  isInterfaceDeclaration,
+  isNamedExports,
+  isStringLiteral,
+  isTypeAliasDeclaration,
+  isVariableStatement,
+} from 'typescript-7-api/ast/is';
 import { FileImport, ImportCollectors, parseFileTypeContext, sanitizeTypeAndCollectImports } from './typeContext';
 import { getGeneratedSocketTypesPath, ROOT_DIR } from '@luckystack/core';
-import { expandType, getServerProgram } from './tsProgram';
+import { expandType } from './tsProgram';
+import { getServerProgram, parseSourceText } from './tsApi';
 import { collectFunctionModules, functionModuleFileName } from '../functionRegistry';
 
 // Strips default parameter values from argument lists so the generated interface
@@ -18,18 +47,17 @@ const stripDefaultValues = (params: string): string => {
 // type) intact. Uses the TS scanner so `'https://x'` is never mistaken for a
 // comment — a plain regex strip can't tell the two apart.
 export const stripLineComments = (value: string): string => {
-  const scanner = ts.createScanner(
-    ts.ScriptTarget.Latest,
+  const scanner = createScanner(
     /* skipTrivia */ false,
-    ts.LanguageVariant.Standard,
+    LanguageVariant.Standard,
     value,
   );
   let result = '';
   let token = scanner.scan();
-  while (token !== ts.SyntaxKind.EndOfFileToken) {
+  while (token !== SyntaxKind.EndOfFile) {
     // Replace `//` comments with a space so neighbouring tokens don't glue
     // together; keep everything else verbatim, including block comments.
-    result += token === ts.SyntaxKind.SingleLineCommentTrivia ? ' ' : scanner.getTokenText();
+    result += token === SyntaxKind.SingleLineCommentTrivia ? ' ' : scanner.getTokenText();
     token = scanner.scan();
   }
   return result;
@@ -93,14 +121,14 @@ const relativizeModuleSpecifier = (specifier: string, sourceFilePath: string): s
 };
 
 const findProgramVariableDeclaration = (
-  sourceFile: ts.SourceFile,
+  sourceFile: SourceFile,
   exportName: string,
-): ts.VariableDeclaration | null => {
+): VariableDeclaration | null => {
   for (const statement of sourceFile.statements) {
-    if (!ts.isVariableStatement(statement)) continue;
+    if (!isVariableStatement(statement)) continue;
 
     for (const declaration of statement.declarationList.declarations) {
-      if (ts.isIdentifier(declaration.name) && declaration.name.text === exportName) {
+      if (isIdentifier(declaration.name) && declaration.name.text === exportName) {
         return declaration;
       }
     }
@@ -110,14 +138,14 @@ const findProgramVariableDeclaration = (
 };
 
 const findProgramTypeDeclaration = (
-  sourceFile: ts.SourceFile,
+  sourceFile: SourceFile,
   typeName: string,
-): ts.InterfaceDeclaration | ts.TypeAliasDeclaration | ts.ClassDeclaration | ts.EnumDeclaration | null => {
+): InterfaceDeclaration | TypeAliasDeclaration | ClassDeclaration | EnumDeclaration | null => {
   for (const statement of sourceFile.statements) {
-    if (ts.isInterfaceDeclaration(statement) && statement.name.text === typeName) return statement;
-    if (ts.isTypeAliasDeclaration(statement) && statement.name.text === typeName) return statement;
-    if (ts.isClassDeclaration(statement) && statement.name?.text === typeName) return statement;
-    if (ts.isEnumDeclaration(statement) && statement.name.text === typeName) return statement;
+    if (isInterfaceDeclaration(statement) && statement.name.text === typeName) return statement;
+    if (isTypeAliasDeclaration(statement) && statement.name.text === typeName) return statement;
+    if (isClassDeclaration(statement) && statement.name?.text === typeName) return statement;
+    if (isEnumDeclaration(statement) && statement.name.text === typeName) return statement;
   }
 
   return null;
@@ -131,8 +159,8 @@ const resolveLocalExportedTypes = ({
 }: {
   type: string;
   availableExports: Set<string>;
-  checker: ts.TypeChecker;
-  programSource: ts.SourceFile;
+  checker: Checker;
+  programSource: SourceFile;
 }): string => {
   if (availableExports.size === 0) return type;
 
@@ -146,9 +174,9 @@ const resolveLocalExportedTypes = ({
     if (!declaration) continue;
 
     const declarationNode = (
-      ts.isClassDeclaration(declaration)
+      isClassDeclaration(declaration)
       ? (declaration.name ?? declaration)
-      : (ts.isTypeAliasDeclaration(declaration)
+      : (isTypeAliasDeclaration(declaration)
         ? declaration.type
         : declaration)
     );
@@ -163,14 +191,14 @@ const resolveLocalExportedTypes = ({
 };
 
 const findSourceVariableDeclaration = (
-  sourceFile: ts.SourceFile,
+  sourceFile: SourceFile,
   exportName: string,
-): ts.VariableDeclaration | null => {
+): VariableDeclaration | null => {
   for (const statement of sourceFile.statements) {
-    if (!ts.isVariableStatement(statement)) continue;
+    if (!isVariableStatement(statement)) continue;
 
     for (const declaration of statement.declarationList.declarations) {
-      if (ts.isIdentifier(declaration.name) && declaration.name.text === exportName) {
+      if (isIdentifier(declaration.name) && declaration.name.text === exportName) {
         return declaration;
       }
     }
@@ -191,17 +219,17 @@ const inferValueTypeForExport = ({
   programSource,
 }: {
   exportName: string;
-  declaration: ts.VariableDeclaration;
+  declaration: VariableDeclaration;
   rawContent: string;
   filePath: string;
   availableExports: Set<string>;
   fileImports: Map<string, FileImport>;
   collectors: ImportCollectors;
-  checker?: ts.TypeChecker;
-  programSource?: ts.SourceFile;
+  checker?: Checker;
+  programSource?: SourceFile;
 }): string => {
-  const resolvedChecker = checker ?? getServerProgram().getTypeChecker();
-  const resolvedSource = programSource ?? getServerProgram().getSourceFile(filePath);
+  const resolvedChecker = checker ?? getServerProgram().checker;
+  const resolvedSource = programSource ?? getServerProgram().program.getSourceFile(filePath);
 
   if (declaration.type) {
     const rawType = normalizeInlineType(rawContent.slice(declaration.type.pos, declaration.type.end).trim());
@@ -254,14 +282,14 @@ const inferValueTypeForExport = ({
 
 // Extracts a function signature string from an AST function-like node.
 const extractSignatureFromNode = (
-  node: ts.FunctionLikeDeclaration,
+  node: FunctionLikeDeclaration,
   rawContent: string,
   filePath: string,
   availableExports: Set<string>,
   fileImports: Map<string, FileImport>,
   collectors: ImportCollectors,
-  checker?: ts.TypeChecker,
-  programSource?: ts.SourceFile,
+  checker?: Checker,
+  programSource?: SourceFile,
 ): string => {
   // Collect generic type parameter names to avoid replacing them with 'any'
   const knownGenerics = new Set<string>();
@@ -271,7 +299,7 @@ const extractSignatureFromNode = (
     }
   }
 
-  const isAsync = node.modifiers?.some(m => m.kind === ts.SyntaxKind.AsyncKeyword) ?? false;
+  const isAsync = node.modifiers?.some(m => m.kind === SyntaxKind.AsyncKeyword) ?? false;
 
   // Generic clause text (<T, U extends string>)
   const genericsClause = node.typeParameters
@@ -334,26 +362,26 @@ const extractSignatureFromNode = (
 // Finds and returns the signature for a named export within a parsed source file.
 const findSignatureForExport = (
   name: string,
-  sourceFile: ts.SourceFile,
+  sourceFile: SourceFile,
   rawContent: string,
   filePath: string,
   availableExports: Set<string>,
   fileImports: Map<string, FileImport>,
   collectors: ImportCollectors,
-  checker?: ts.TypeChecker,
-  programSource?: ts.SourceFile,
+  checker?: Checker,
+  programSource?: SourceFile,
 ): string => {
   for (const statement of sourceFile.statements) {
-    if (ts.isVariableStatement(statement)) {
+    if (isVariableStatement(statement)) {
       for (const decl of statement.declarationList.declarations) {
-        if (!ts.isIdentifier(decl.name) || decl.name.text !== name || !decl.initializer) continue;
-        if (ts.isArrowFunction(decl.initializer) || ts.isFunctionExpression(decl.initializer)) {
+        if (!isIdentifier(decl.name) || decl.name.text !== name || !decl.initializer) continue;
+        if (isArrowFunction(decl.initializer) || isFunctionExpression(decl.initializer)) {
           return extractSignatureFromNode(decl.initializer, rawContent, filePath, availableExports, fileImports, collectors, checker, programSource);
         }
       }
     }
 
-    if (ts.isFunctionDeclaration(statement) && statement.name?.text === name) {
+    if (isFunctionDeclaration(statement) && statement.name?.text === name) {
       return extractSignatureFromNode(statement, rawContent, filePath, availableExports, fileImports, collectors, checker, programSource);
     }
   }
@@ -382,27 +410,32 @@ interface IRDirNode {
   sourcePath: string;
 }
 
+//? Only exported variables and function declarations are read through this
+//? check; the other statement kinds below carry their export in their syntax.
+const hasExportModifier = (statement: Statement): boolean =>
+  (isVariableStatement(statement) || isFunctionDeclaration(statement))
+  && (statement.modifiers?.some(m => m.kind === SyntaxKind.ExportKeyword) ?? false);
+
 const parseFunctionFile = (fullPath: string, collectors: ImportCollectors): IRFileNode | null => {
   try {
     const rawContent = fs.readFileSync(fullPath, 'utf8');
-    const sourceFile = ts.createSourceFile(fullPath, rawContent, ts.ScriptTarget.Latest, true);
+    const sourceFile = parseSourceText(fullPath, rawContent);
     const { availableExports, fileImports } = parseFileTypeContext(rawContent);
-    const program = getServerProgram();
-    const checker = program.getTypeChecker();
+    const { program, checker } = getServerProgram();
     const programSource = program.getSourceFile(fullPath);
     const exports = new Map<string, string>();
     let defaultExportName: string | null = null;
     let wildcardReExport: string | null = null;
 
     for (const statement of sourceFile.statements) {
-        const hasExport = (statement as ts.HasModifiers).modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword);
+        const hasExport = hasExportModifier(statement);
 
-        if (ts.isVariableStatement(statement) && hasExport) {
+        if (isVariableStatement(statement) && hasExport) {
           for (const decl of statement.declarationList.declarations) {
-            if (ts.isIdentifier(decl.name)) {
+            if (isIdentifier(decl.name)) {
               const exportName = decl.name.text;
 
-              if (decl.initializer && (ts.isArrowFunction(decl.initializer) || ts.isFunctionExpression(decl.initializer))) {
+              if (decl.initializer && (isArrowFunction(decl.initializer) || isFunctionExpression(decl.initializer))) {
                 exports.set(exportName, findSignatureForExport(exportName, sourceFile, rawContent, fullPath, availableExports, fileImports, collectors, checker, programSource ?? undefined));
                 continue;
               }
@@ -422,17 +455,17 @@ const parseFunctionFile = (fullPath: string, collectors: ImportCollectors): IRFi
           }
         }
 
-        if (ts.isFunctionDeclaration(statement) && hasExport && statement.name) {
+        if (isFunctionDeclaration(statement) && hasExport && statement.name) {
           exports.set(statement.name.text, findSignatureForExport(statement.name.text, sourceFile, rawContent, fullPath, availableExports, fileImports, collectors, checker, programSource ?? undefined));
         }
 
         // export { a, b as c } [from 'module']
-        if (ts.isExportDeclaration(statement) && statement.exportClause && ts.isNamedExports(statement.exportClause)) {
+        if (isExportDeclaration(statement) && statement.exportClause && isNamedExports(statement.exportClause)) {
           // `export { x } from 'module'` — extract the source module so we can
           // emit `typeof import('module')['x']` and let TypeScript resolve the
           // real type at compile time (instead of falling back to `any`).
           const moduleSpecifier =
-            statement.moduleSpecifier && ts.isStringLiteral(statement.moduleSpecifier)
+            statement.moduleSpecifier && isStringLiteral(statement.moduleSpecifier)
               ? statement.moduleSpecifier.text
               : null;
 
@@ -460,7 +493,7 @@ const parseFunctionFile = (fullPath: string, collectors: ImportCollectors): IRFi
             }
 
             const exportDeclaration = findSourceVariableDeclaration(sourceFile, originalName);
-            if (exportDeclaration && ts.isIdentifier(exportDeclaration.name)) {
+            if (exportDeclaration && isIdentifier(exportDeclaration.name)) {
               exports.set(exportName, inferValueTypeForExport({
                 exportName: originalName,
                 declaration: exportDeclaration,
@@ -480,17 +513,17 @@ const parseFunctionFile = (fullPath: string, collectors: ImportCollectors): IRFi
         }
 
         // export default someIdentifier
-        if (ts.isExportAssignment(statement) && !statement.isExportEquals && ts.isIdentifier(statement.expression)) {
+        if (isExportAssignment(statement) && !statement.isExportEquals && isIdentifier(statement.expression)) {
           defaultExportName = statement.expression.text;
         }
 
         // export * from 'module' — wildcard re-export. Stash the resolved
         // module specifier; serialization decides whether to emit it.
         if (
-          ts.isExportDeclaration(statement)
+          isExportDeclaration(statement)
           && !statement.exportClause
           && statement.moduleSpecifier
-          && ts.isStringLiteral(statement.moduleSpecifier)
+          && isStringLiteral(statement.moduleSpecifier)
         ) {
           wildcardReExport = relativizeModuleSpecifier(statement.moduleSpecifier.text, fullPath);
         }

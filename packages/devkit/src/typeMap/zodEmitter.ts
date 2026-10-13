@@ -1,4 +1,21 @@
-import * as ts from 'typescript';
+import { SyntaxKind, type TypeNode } from 'typescript-7-api/ast';
+import {
+  isArrayTypeNode,
+  isIdentifier,
+  isIndexSignatureDeclaration,
+  isIntersectionTypeNode,
+  isLiteralTypeNode,
+  isNumericLiteral,
+  isParenthesizedTypeNode,
+  isPropertySignatureDeclaration,
+  isStringLiteral,
+  isTypeAliasDeclaration,
+  isTypeLiteralNode,
+  isTypeReferenceNode,
+  isUnionTypeNode,
+} from 'typescript-7-api/ast/is';
+
+import { parseSourceText } from './tsApi';
 
 //? Converts a TypeScript type expression into Zod schema source text.
 //?
@@ -33,39 +50,39 @@ import * as ts from 'typescript';
 const wrapOptional = (inner: string): string => `${inner}.optional()`;
 const anyFallback = (reason: string): string => `z.any() /* ${reason} */`;
 
-const convertTypeNode = (node: ts.TypeNode): string => {
+const convertTypeNode = (node: TypeNode): string => {
   // Primitives
-  if (node.kind === ts.SyntaxKind.StringKeyword) return 'z.string()';
-  if (node.kind === ts.SyntaxKind.NumberKeyword) return 'z.number()';
-  if (node.kind === ts.SyntaxKind.BooleanKeyword) return 'z.boolean()';
-  if (node.kind === ts.SyntaxKind.NullKeyword) return 'z.null()';
-  if (node.kind === ts.SyntaxKind.UndefinedKeyword) return 'z.undefined()';
-  if (node.kind === ts.SyntaxKind.AnyKeyword) return 'z.any()';
-  if (node.kind === ts.SyntaxKind.UnknownKeyword) return 'z.unknown()';
-  if (node.kind === ts.SyntaxKind.NeverKeyword) return 'z.never()';
+  if (node.kind === SyntaxKind.StringKeyword) return 'z.string()';
+  if (node.kind === SyntaxKind.NumberKeyword) return 'z.number()';
+  if (node.kind === SyntaxKind.BooleanKeyword) return 'z.boolean()';
+  if (node.kind === SyntaxKind.NullKeyword) return 'z.null()';
+  if (node.kind === SyntaxKind.UndefinedKeyword) return 'z.undefined()';
+  if (node.kind === SyntaxKind.AnyKeyword) return 'z.any()';
+  if (node.kind === SyntaxKind.UnknownKeyword) return 'z.unknown()';
+  if (node.kind === SyntaxKind.NeverKeyword) return 'z.never()';
 
   // Literal types: 'foo', 42, true, false
-  if (ts.isLiteralTypeNode(node)) {
+  if (isLiteralTypeNode(node)) {
     const literal = node.literal;
-    if (ts.isStringLiteral(literal)) return `z.literal(${JSON.stringify(literal.text)})`;
-    if (ts.isNumericLiteral(literal)) return `z.literal(${literal.text})`;
-    if (literal.kind === ts.SyntaxKind.TrueKeyword) return 'z.literal(true)';
-    if (literal.kind === ts.SyntaxKind.FalseKeyword) return 'z.literal(false)';
-    if (literal.kind === ts.SyntaxKind.NullKeyword) return 'z.null()';
+    if (isStringLiteral(literal)) return `z.literal(${JSON.stringify(literal.text)})`;
+    if (isNumericLiteral(literal)) return `z.literal(${literal.text})`;
+    if (literal.kind === SyntaxKind.TrueKeyword) return 'z.literal(true)';
+    if (literal.kind === SyntaxKind.FalseKeyword) return 'z.literal(false)';
+    if (literal.kind === SyntaxKind.NullKeyword) return 'z.null()';
     return anyFallback('unknown literal');
   }
 
   // Array: T[]
-  if (ts.isArrayTypeNode(node)) {
+  if (isArrayTypeNode(node)) {
     return `z.array(${convertTypeNode(node.elementType)})`;
   }
 
   // Union: A | B | undefined
-  if (ts.isUnionTypeNode(node)) {
+  if (isUnionTypeNode(node)) {
     const members = node.types;
     //? If `undefined` appears, treat as `.optional()` on the remaining union.
-    const hasUndefined = members.some(m => m.kind === ts.SyntaxKind.UndefinedKeyword);
-    const nonUndef = members.filter(m => m.kind !== ts.SyntaxKind.UndefinedKeyword);
+    const hasUndefined = members.some(m => m.kind === SyntaxKind.UndefinedKeyword);
+    const nonUndef = members.filter(m => m.kind !== SyntaxKind.UndefinedKeyword);
 
     if (nonUndef.length === 0) return 'z.undefined()';
 
@@ -79,7 +96,7 @@ const convertTypeNode = (node: ts.TypeNode): string => {
   }
 
   // Type reference: Record<K, V>, Partial<T>, etc.
-  if (ts.isTypeReferenceNode(node)) {
+  if (isTypeReferenceNode(node)) {
     const name = node.typeName.getText();
     const args = node.typeArguments ?? [];
 
@@ -124,9 +141,9 @@ const convertTypeNode = (node: ts.TypeNode): string => {
   }
 
   // Object literal type: { key: T; key2?: T2; [k: string]: T3 }
-  if (ts.isTypeLiteralNode(node)) {
-    const indexSignatures = node.members.filter((m) => ts.isIndexSignatureDeclaration(m));
-    const propertySignatures = node.members.filter((m) => ts.isPropertySignature(m));
+  if (isTypeLiteralNode(node)) {
+    const indexSignatures = node.members.filter((m) => isIndexSignatureDeclaration(m));
+    const propertySignatures = node.members.filter((m) => isPropertySignatureDeclaration(m));
 
     //? LuckyStack's "no input" convention: `{ [key: string]: never }` → empty
     //? object schema. Zod's `.passthrough()` isn't right because we actually
@@ -134,7 +151,7 @@ const convertTypeNode = (node: ts.TypeNode): string => {
     if (
       indexSignatures.length === 1
       && propertySignatures.length === 0
-      && indexSignatures[0]?.type.kind === ts.SyntaxKind.NeverKeyword
+      && indexSignatures[0]?.type.kind === SyntaxKind.NeverKeyword
     ) {
       return 'z.object({}).strict()';
     }
@@ -151,7 +168,8 @@ const convertTypeNode = (node: ts.TypeNode): string => {
 
     //? Regular object with property signatures.
     const entries = propertySignatures.map((prop) => {
-      if (!ts.isIdentifier(prop.name)) return null;
+      if (!isIdentifier(prop.name)) return null;
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- TS 7.1 declares PropertySignature.type required, but it is undefined for `{ a; }`
       if (!prop.type) return null;
 
       const name = prop.name.text;
@@ -159,7 +177,7 @@ const convertTypeNode = (node: ts.TypeNode): string => {
 
       //? `?` on the property makes it optional, regardless of whether the
       //? type itself includes `| undefined`.
-      if (prop.questionToken && !schema.endsWith('.optional()')) {
+      if (prop.postfixToken?.kind === SyntaxKind.QuestionToken && !schema.endsWith('.optional()')) {
         schema = wrapOptional(schema);
       }
 
@@ -173,13 +191,13 @@ const convertTypeNode = (node: ts.TypeNode): string => {
   }
 
   // Parenthesized: (T)
-  if (ts.isParenthesizedTypeNode(node)) {
+  if (isParenthesizedTypeNode(node)) {
     return convertTypeNode(node.type);
   }
 
   // Intersection: A & B — best-effort merge via z.object().extend() isn't
   // possible without both sides being objects. Fall back for now.
-  if (ts.isIntersectionTypeNode(node)) {
+  if (isIntersectionTypeNode(node)) {
     return anyFallback('intersection not yet supported');
   }
 
@@ -197,14 +215,14 @@ export const typeTextToZodSource = (typeText: string): string | null => {
   const trimmed = typeText.trim();
   if (!trimmed) return null;
 
-  //? Parse as a top-level `type __ = <expr>;` so ts.createSourceFile gives us
+  //? Parse as a top-level `type __ = <expr>;` so the parser gives us
   //? back a TypeAliasDeclaration whose `type` property is the TypeNode we
   //? want. No module/file loader involved.
   const synthetic = `type __X = ${trimmed};`;
-  const source = ts.createSourceFile('__zod.ts', synthetic, ts.ScriptTarget.Latest, true);
+  const source = parseSourceText('__zod.ts', synthetic);
 
   const statement = source.statements[0];
-  if (!statement || !ts.isTypeAliasDeclaration(statement)) return null;
+  if (!statement || !isTypeAliasDeclaration(statement)) return null;
 
   return convertTypeNode(statement.type);
 };

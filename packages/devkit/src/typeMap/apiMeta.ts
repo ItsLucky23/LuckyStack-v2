@@ -1,18 +1,40 @@
-import * as ts from 'typescript';
 import fs from 'node:fs';
+import {
+  getJSDocTags,
+  SyntaxKind,
+  type Expression,
+  type JSDocTag,
+  type ObjectLiteralExpression,
+  type SourceFile,
+  type VariableDeclaration,
+} from 'typescript-7-api/ast';
+import {
+  isArrayLiteralExpression,
+  isAsExpression,
+  isIdentifier,
+  isNumericLiteral,
+  isObjectLiteralExpression,
+  isParenthesizedExpression,
+  isPropertyAssignment,
+  isSatisfiesExpression,
+  isStringLiteral,
+  isVariableStatement,
+} from 'typescript-7-api/ast/is';
 import { inferHttpMethod, tryCatchSync } from '@luckystack/core';
+
+import { parseSourceText } from './tsApi';
 
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'DELETE';
 
 // Finds an exported const declaration by name in a source file's top-level statements.
-const findExportedConst = (sourceFile: ts.SourceFile, name: string): ts.VariableDeclaration | null => {
+const findExportedConst = (sourceFile: SourceFile, name: string): VariableDeclaration | null => {
   for (const statement of sourceFile.statements) {
-    if (!ts.isVariableStatement(statement)) continue;
-    const hasExport = statement.modifiers?.some(m => m.kind === ts.SyntaxKind.ExportKeyword);
+    if (!isVariableStatement(statement)) continue;
+    const hasExport = statement.modifiers?.some(m => m.kind === SyntaxKind.ExportKeyword);
     if (!hasExport) continue;
 
     for (const decl of statement.declarationList.declarations) {
-      if (ts.isIdentifier(decl.name) && decl.name.text === name) return decl;
+      if (isIdentifier(decl.name) && decl.name.text === name) return decl;
     }
   }
   return null;
@@ -24,12 +46,12 @@ const findExportedConst = (sourceFile: ts.SourceFile, name: string): ts.Variable
 //? ParenthesizedExpression nodes that the literal-type guards below would
 //? otherwise skip — silently dropping the authored value and falling back to
 //? an inferred default. Solving the wrapper class once covers every extractor.
-const unwrapExpression = (node: ts.Expression): ts.Expression => {
+const unwrapExpression = (node: Expression): Expression => {
   let current = node;
   while (
-    ts.isAsExpression(current)
-    || ts.isSatisfiesExpression(current)
-    || ts.isParenthesizedExpression(current)
+    isAsExpression(current)
+    || isSatisfiesExpression(current)
+    || isParenthesizedExpression(current)
   ) {
     current = current.expression;
   }
@@ -39,11 +61,11 @@ const unwrapExpression = (node: ts.Expression): ts.Expression => {
 export const extractHttpMethod = (filePath: string, apiName: string): HttpMethod => {
   const [error, method] = tryCatchSync((): HttpMethod | undefined => {
     const content = fs.readFileSync(filePath, 'utf8');
-    const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
+    const sourceFile = parseSourceText(filePath, content);
     const decl = findExportedConst(sourceFile, 'httpMethod');
 
     const initializer = decl?.initializer ? unwrapExpression(decl.initializer) : undefined;
-    if (initializer && ts.isStringLiteral(initializer)) {
+    if (initializer && isStringLiteral(initializer)) {
       const candidate = initializer.text.toUpperCase() as HttpMethod;
       if (['GET', 'POST', 'PUT', 'DELETE'].includes(candidate)) return candidate;
     }
@@ -60,13 +82,13 @@ export const extractHttpMethod = (filePath: string, apiName: string): HttpMethod
 export const extractRateLimit = (filePath: string): number | false | undefined => {
   const [error, rateLimit] = tryCatchSync((): number | false | undefined => {
     const content = fs.readFileSync(filePath, 'utf8');
-    const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
+    const sourceFile = parseSourceText(filePath, content);
     const decl = findExportedConst(sourceFile, 'rateLimit');
 
     if (decl?.initializer) {
       const initializer = unwrapExpression(decl.initializer);
-      if (initializer.kind === ts.SyntaxKind.FalseKeyword) return false;
-      if (ts.isNumericLiteral(initializer)) return Number(initializer.text);
+      if (initializer.kind === SyntaxKind.FalseKeyword) return false;
+      if (isNumericLiteral(initializer)) return Number(initializer.text);
     }
     return undefined;
   });
@@ -88,23 +110,23 @@ export type ApiValidationMode = 'strict' | 'relaxed' | { input: 'skip' | 'strict
 export const extractValidation = (filePath: string): ApiValidationMode | undefined => {
   const [error, validation] = tryCatchSync((): ApiValidationMode | undefined => {
     const content = fs.readFileSync(filePath, 'utf8');
-    const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
+    const sourceFile = parseSourceText(filePath, content);
     const decl = findExportedConst(sourceFile, 'validation');
 
     if (!decl?.initializer) return undefined;
     const initializer = unwrapExpression(decl.initializer);
 
-    if (ts.isStringLiteral(initializer)) {
+    if (isStringLiteral(initializer)) {
       const text = initializer.text;
       if (text === 'strict' || text === 'relaxed') return text;
     }
 
-    if (ts.isObjectLiteralExpression(initializer)) {
+    if (isObjectLiteralExpression(initializer)) {
       for (const prop of initializer.properties) {
-        if (!ts.isPropertyAssignment(prop) || !ts.isIdentifier(prop.name)) continue;
+        if (!isPropertyAssignment(prop) || !isIdentifier(prop.name)) continue;
         if (prop.name.text !== 'input') continue;
         const propInit = unwrapExpression(prop.initializer);
-        if (!ts.isStringLiteral(propInit)) continue;
+        if (!isStringLiteral(propInit)) continue;
         const input = propInit.text;
         if (input === 'skip' || input === 'strict') return { input };
       }
@@ -120,20 +142,20 @@ export const extractValidation = (filePath: string): ApiValidationMode | undefin
 };
 
 // Reads a primitive value from an AST expression node.
-const readPrimitive = (rawNode: ts.Expression): string | number | boolean | undefined => {
+const readPrimitive = (rawNode: Expression): string | number | boolean | undefined => {
   const node = unwrapExpression(rawNode);
-  if (ts.isStringLiteral(node)) return node.text;
-  if (ts.isNumericLiteral(node)) return Number(node.text);
-  if (node.kind === ts.SyntaxKind.TrueKeyword) return true;
-  if (node.kind === ts.SyntaxKind.FalseKeyword) return false;
+  if (isStringLiteral(node)) return node.text;
+  if (isNumericLiteral(node)) return Number(node.text);
+  if (node.kind === SyntaxKind.TrueKeyword) return true;
+  if (node.kind === SyntaxKind.FalseKeyword) return false;
   return undefined;
 };
 
-const parseAdditionalItem = (objectLiteral: ts.ObjectLiteralExpression): Record<string, unknown> | null => {
+const parseAdditionalItem = (objectLiteral: ObjectLiteralExpression): Record<string, unknown> | null => {
   const item: Record<string, unknown> = {};
 
   for (const prop of objectLiteral.properties) {
-    if (!ts.isPropertyAssignment(prop) || !ts.isIdentifier(prop.name)) continue;
+    if (!isPropertyAssignment(prop) || !isIdentifier(prop.name)) continue;
     const value = readPrimitive(prop.initializer);
     if (value !== undefined) item[prop.name.text] = value;
   }
@@ -166,7 +188,7 @@ export interface DocsMeta {
   deprecated?: string | true;
 }
 
-//? Flatten a JSDoc tag comment (string or `ts.NodeArray` of comment parts) to text.
+//? Flatten a JSDoc tag comment (string or `NodeArray` of comment parts) to text.
 const commentToString = (commentValue: unknown): string => {
   if (typeof commentValue === 'string') return commentValue;
   if (Array.isArray(commentValue)) {
@@ -185,11 +207,11 @@ const commentToString = (commentValue: unknown): string => {
 export const extractDocsMeta = (filePath: string): DocsMeta | undefined => {
   const [error, docsMeta] = tryCatchSync((): DocsMeta | undefined => {
     const content = fs.readFileSync(filePath, 'utf8');
-    const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
+    const sourceFile = parseSourceText(filePath, content);
 
     const result: DocsMeta = {};
 
-    const consumeTag = (tag: ts.JSDocTag): void => {
+    const consumeTag = (tag: JSDocTag): void => {
       if (tag.tagName.text !== 'docs') return;
       const commentText = commentToString(tag.comment).trim();
       if (commentText.length === 0) return;
@@ -213,7 +235,7 @@ export const extractDocsMeta = (filePath: string): DocsMeta | undefined => {
     //? JSDoc on the `main` export, on the `auth`/`rateLimit` consts, or on
     //? any other top-level declaration — wherever the author wrote it.
     for (const statement of sourceFile.statements) {
-      for (const tag of ts.getJSDocTags(statement)) {
+      for (const tag of getJSDocTags(statement)) {
         consumeTag(tag);
       }
     }
@@ -235,7 +257,7 @@ export const extractDocsMeta = (filePath: string): DocsMeta | undefined => {
 export const extractAuth = (filePath: string): { login: boolean; additional?: Record<string, unknown>[]; hasAdditional: boolean } => {
   const [, auth] = tryCatchSync((): { login: boolean; additional?: Record<string, unknown>[]; hasAdditional: boolean } => {
     const content = fs.readFileSync(filePath, 'utf8');
-    const sourceFile = ts.createSourceFile(filePath, content, ts.ScriptTarget.Latest, true);
+    const sourceFile = parseSourceText(filePath, content);
     const decl = findExportedConst(sourceFile, 'auth');
     const authInitializer = decl?.initializer ? unwrapExpression(decl.initializer) : undefined;
     //? DK-05 (public-by-default): a route that omits `export const auth` — OR
@@ -246,7 +268,7 @@ export const extractAuth = (filePath: string): { login: boolean; additional?: Re
     //? public while this extractor defaulted to protected, so the generated meta
     //? + auth sweep disagreed with what actually ran. A route that needs auth
     //? MUST declare a literal `auth: { login: true }`.
-    if (!authInitializer || !ts.isObjectLiteralExpression(authInitializer)) return { login: false, hasAdditional: false };
+    if (!authInitializer || !isObjectLiteralExpression(authInitializer)) return { login: false, hasAdditional: false };
 
     let login = false;
     let additional: Record<string, unknown>[] | undefined;
@@ -258,18 +280,18 @@ export const extractAuth = (filePath: string): { login: boolean; additional?: Re
     let hasAdditional = false;
 
     for (const prop of authInitializer.properties) {
-      if (!ts.isPropertyAssignment(prop) || !ts.isIdentifier(prop.name)) continue;
+      if (!isPropertyAssignment(prop) || !isIdentifier(prop.name)) continue;
       const propInit = unwrapExpression(prop.initializer);
 
       if (prop.name.text === 'login') {
-        login = propInit.kind === ts.SyntaxKind.TrueKeyword;
+        login = propInit.kind === SyntaxKind.TrueKeyword;
       }
 
-      if (prop.name.text === 'additional' && ts.isArrayLiteralExpression(propInit)) {
+      if (prop.name.text === 'additional' && isArrayLiteralExpression(propInit)) {
         hasAdditional = propInit.elements.length > 0;
         additional = [];
         for (const element of propInit.elements) {
-          if (!ts.isObjectLiteralExpression(element)) continue;
+          if (!isObjectLiteralExpression(element)) continue;
           const item = parseAdditionalItem(element);
           if (item) additional.push(item);
         }

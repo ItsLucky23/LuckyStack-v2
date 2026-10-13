@@ -1,11 +1,33 @@
 ﻿import fs from 'node:fs';
 import path from 'node:path';
-import * as ts from 'typescript';
+import {
+	ScriptKind,
+	type Identifier,
+	type Node,
+	type NodeArray,
+	type TypeParameterDeclaration,
+} from 'typescript-7-api/ast';
+import {
+	isClassDeclaration,
+	isEnumDeclaration,
+	isFunctionDeclaration,
+	isIdentifier,
+	isImportDeclaration,
+	isInferTypeNode,
+	isInterfaceDeclaration,
+	isMappedTypeNode,
+	isNamedImports,
+	isNamespaceImport,
+	isQualifiedName,
+	isTypeAliasDeclaration,
+	isTypeReferenceNode,
+} from 'typescript-7-api/ast/is';
 import { getGeneratedApiDocsPath, getGeneratedApiSchemasPath, getGeneratedSocketTypesPath } from '@luckystack/core';
 
 import { getOrInit, mustGet } from '../internal/mapUtils';
 import { typeTextToZodSource } from './zodEmitter';
 import { findExtractionFailure } from './extractionDiagnostics';
+import { parseSourceText } from './tsApi';
 
 //? `auth` is consumer-defined opaque — each project exports its own
 //? `AuthProps` shape from `config.ts`. The emitter passes the parsed value
@@ -268,7 +290,7 @@ export const stripSymbolKeyedMembers = (text: string): string => {
 };
 
 const validateGeneratedTypeIdentifiers = (content: string): void => {
-	const sourceFile = ts.createSourceFile('apiTypes.generated.ts', content, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS);
+	const sourceFile = parseSourceText('apiTypes.generated.ts', content, ScriptKind.TS);
 	const knownSymbols = new Set<string>();
 	const referencedSymbols = new Set<string>();
 
@@ -279,58 +301,58 @@ const validateGeneratedTypeIdentifiers = (content: string): void => {
 		'True', 'False', 'JsonPrimitive', 'JsonValue', 'JsonObject', 'JsonArray',
 	]);
 
-	const addDeclaredName = (name?: ts.Identifier): void => {
+	const addDeclaredName = (name?: Identifier): void => {
 		if (!name?.text) return;
 		knownSymbols.add(name.text);
 	};
 
-	const collectTypeParams = (node: ts.Node): void => {
+	const collectTypeParams = (node: Node): void => {
 		if (!('typeParameters' in node)) return;
-		const maybeTypeParameters = (node as ts.Node & { typeParameters?: ts.NodeArray<ts.TypeParameterDeclaration> }).typeParameters;
+		const maybeTypeParameters = (node as Node & { typeParameters?: NodeArray<TypeParameterDeclaration> }).typeParameters;
 		if (!maybeTypeParameters) return;
 		for (const typeParameter of maybeTypeParameters) {
 			knownSymbols.add(typeParameter.name.text);
 		}
 	};
 
-	const collectKnownSymbols = (node: ts.Node): void => {
-		if (ts.isInferTypeNode(node)) {
+	const collectKnownSymbols = (node: Node): void => {
+		if (isInferTypeNode(node)) {
 			knownSymbols.add(node.typeParameter.name.text);
 		}
 
-		if (ts.isMappedTypeNode(node)) {
+		if (isMappedTypeNode(node)) {
 			knownSymbols.add(node.typeParameter.name.text);
 		}
 
-		if (ts.isImportDeclaration(node)) {
+		if (isImportDeclaration(node)) {
 			const importClause = node.importClause;
 			if (importClause?.name) knownSymbols.add(importClause.name.text);
-			if (importClause?.namedBindings && ts.isNamedImports(importClause.namedBindings)) {
+			if (importClause?.namedBindings && isNamedImports(importClause.namedBindings)) {
 				for (const importElement of importClause.namedBindings.elements) {
 					knownSymbols.add((importElement.propertyName ?? importElement.name).text);
 				}
 			}
-			if (importClause?.namedBindings && ts.isNamespaceImport(importClause.namedBindings)) {
+			if (importClause?.namedBindings && isNamespaceImport(importClause.namedBindings)) {
 				knownSymbols.add(importClause.namedBindings.name.text);
 			}
 		}
 
-		if (ts.isInterfaceDeclaration(node) || ts.isTypeAliasDeclaration(node) || ts.isClassDeclaration(node) || ts.isEnumDeclaration(node) || ts.isFunctionDeclaration(node)) {
+		if (isInterfaceDeclaration(node) || isTypeAliasDeclaration(node) || isClassDeclaration(node) || isEnumDeclaration(node) || isFunctionDeclaration(node)) {
 			addDeclaredName(node.name);
 			collectTypeParams(node);
 		}
 
-		if (ts.isTypeReferenceNode(node)) {
+		if (isTypeReferenceNode(node)) {
 			const typeName = node.typeName;
-			if (ts.isIdentifier(typeName)) {
+			if (isIdentifier(typeName)) {
 				referencedSymbols.add(typeName.text);
 			}
-			if (ts.isQualifiedName(typeName) && ts.isIdentifier(typeName.left)) {
+			if (isQualifiedName(typeName) && isIdentifier(typeName.left)) {
 				referencedSymbols.add(typeName.left.text);
 			}
 		}
 
-		ts.forEachChild(node, collectKnownSymbols);
+		node.forEachChild(collectKnownSymbols);
 	};
 
 	collectKnownSymbols(sourceFile);

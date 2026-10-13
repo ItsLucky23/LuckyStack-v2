@@ -1,5 +1,22 @@
-import * as ts from 'typescript';
-import { getServerProgram, expandType } from './typeMap/tsProgram';
+import { SymbolFlags } from 'typescript-7-api/sync';
+import { SyntaxKind, type TypeNode } from 'typescript-7-api/ast';
+import {
+  isEnumDeclaration,
+  isIdentifier,
+  isImportDeclaration,
+  isIndexSignatureDeclaration,
+  isInterfaceDeclaration,
+  isLiteralTypeNode,
+  isNamedImports,
+  isPropertySignatureDeclaration,
+  isStringLiteral,
+  isTypeAliasDeclaration,
+  isTypeLiteralNode,
+  isTypeReferenceNode,
+  isUnionTypeNode,
+} from 'typescript-7-api/ast/is';
+import { expandType } from './typeMap/tsProgram';
+import { getServerProgram, parseSourceText } from './typeMap/tsApi';
 
 type ResolveResult =
   | { status: 'success'; typeText: string }
@@ -100,14 +117,14 @@ const splitTopLevel = (value: string, splitter: '|' | '&' | ','): string[] => {
   return items;
 };
 
-// Parses a type-expression string into a `ts.TypeNode` by wrapping it in a
+// Parses a type-expression string into a `TypeNode` by wrapping it in a
 // synthetic `type __X = <expr>;` alias and inspecting the parsed declaration.
 // Returns `null` when the input does not parse as a type alias.
-const parseTypeNode = (typeText: string): ts.TypeNode | null => {
+const parseTypeNode = (typeText: string): TypeNode | null => {
   const synthetic = `type __RT = ${typeText};`;
-  const source = ts.createSourceFile('__runtime_type.ts', synthetic, ts.ScriptTarget.Latest, true);
+  const source = parseSourceText('__runtime_type.ts', synthetic);
   const statement = source.statements[0];
-  if (!statement || !ts.isTypeAliasDeclaration(statement)) return null;
+  if (!statement || !isTypeAliasDeclaration(statement)) return null;
   return statement.type;
 };
 
@@ -118,7 +135,7 @@ const parseObjectFields = (typeText: string): { fields: ObjectField[]; indexSign
   }
 
   const typeNode = parseTypeNode(clean);
-  if (!typeNode || !ts.isTypeLiteralNode(typeNode)) {
+  if (!typeNode || !isTypeLiteralNode(typeNode)) {
     return { fields: [], indexSignatures: [] };
   }
 
@@ -126,26 +143,27 @@ const parseObjectFields = (typeText: string): { fields: ObjectField[]; indexSign
   const indexSignatures: ObjectIndexSignature[] = [];
 
   for (const member of typeNode.members) {
-    if (ts.isPropertySignature(member) && member.type) {
+    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- TS 7.1 declares PropertySignature.type required, but it is undefined for `{ a; }`
+    if (isPropertySignatureDeclaration(member) && member.type) {
       let key: string | null = null;
-      if (ts.isIdentifier(member.name)) {
+      if (isIdentifier(member.name)) {
         key = member.name.text;
-      } else if (ts.isStringLiteral(member.name)) {
+      } else if (isStringLiteral(member.name)) {
         key = member.name.text;
       }
       if (key === null) continue;
 
       fields.push({
         key,
-        optional: Boolean(member.questionToken),
+        optional: member.postfixToken?.kind === SyntaxKind.QuestionToken,
         type: member.type.getText().trim(),
       });
       continue;
     }
 
-    if (ts.isIndexSignatureDeclaration(member)) {
+    if (isIndexSignatureDeclaration(member)) {
       const param = member.parameters[0];
-      if (!param || !ts.isIdentifier(param.name) || !param.type) continue;
+      if (!param || !isIdentifier(param.name) || !param.type) continue;
       indexSignatures.push({
         keyName: param.name.text,
         keyType: param.type.getText().trim(),
@@ -178,10 +196,10 @@ const serializeObjectFields = ({
   return `{ ${segments.join('; ')} }`;
 };
 
-const extractStringLiteralKey = (node: ts.TypeNode): string | null => {
-  if (!ts.isLiteralTypeNode(node)) return null;
+const extractStringLiteralKey = (node: TypeNode): string | null => {
+  if (!isLiteralTypeNode(node)) return null;
   const literal = node.literal;
-  if (!ts.isStringLiteral(literal)) return null;
+  if (!isStringLiteral(literal)) return null;
   return literal.text;
 };
 
@@ -192,7 +210,7 @@ const parseLiteralUnionKeys = (value: string): string[] | null => {
   const typeNode = parseTypeNode(trimmed);
   if (!typeNode) return null;
 
-  if (ts.isUnionTypeNode(typeNode)) {
+  if (isUnionTypeNode(typeNode)) {
     const keys: string[] = [];
     for (const member of typeNode.types) {
       const key = extractStringLiteralKey(member);
@@ -215,16 +233,14 @@ const resolveIdentifier = (identifier: string, filePath: string): string => {
   if (SKIP_EXPANSION.has(identifier)) return identifier;
 
   try {
-    const program = getServerProgram();
+    const { program, checker } = getServerProgram();
     const sourceFile = program.getSourceFile(filePath);
     if (!sourceFile) return toUnresolved(`unresolved type ${identifier}`);
-
-    const checker = program.getTypeChecker();
 
     for (const stmt of sourceFile.statements) {
       // Local interface / type alias / enum
       if (
-        (ts.isInterfaceDeclaration(stmt) || ts.isTypeAliasDeclaration(stmt) || ts.isEnumDeclaration(stmt))
+        (isInterfaceDeclaration(stmt) || isTypeAliasDeclaration(stmt) || isEnumDeclaration(stmt))
         && stmt.name.text === identifier
       ) {
         const symbol = checker.getSymbolAtLocation(stmt.name);
@@ -234,15 +250,15 @@ const resolveIdentifier = (identifier: string, filePath: string): string => {
       }
 
       // Import declarations — follow the alias to the original symbol
-      if (ts.isImportDeclaration(stmt) && stmt.importClause) {
+      if (isImportDeclaration(stmt) && stmt.importClause) {
         const { namedBindings, name: defaultName } = stmt.importClause;
 
-        if (namedBindings && ts.isNamedImports(namedBindings)) {
+        if (namedBindings && isNamedImports(namedBindings)) {
           for (const specifier of namedBindings.elements) {
             if (specifier.name.text === identifier) {
               const symbol = checker.getSymbolAtLocation(specifier.name);
               if (symbol) {
-                const target = symbol.flags & ts.SymbolFlags.Alias
+                const target = symbol.flags & SymbolFlags.Alias
                   ? checker.getAliasedSymbol(symbol)
                   : symbol;
                 return expandType(checker.getDeclaredTypeOfSymbol(target), checker);
@@ -254,7 +270,7 @@ const resolveIdentifier = (identifier: string, filePath: string): string => {
         if (defaultName?.text === identifier) {
           const symbol = checker.getSymbolAtLocation(defaultName);
           if (symbol) {
-            const target = symbol.flags & ts.SymbolFlags.Alias
+            const target = symbol.flags & SymbolFlags.Alias
               ? checker.getAliasedSymbol(symbol)
               : symbol;
             return expandType(checker.getDeclaredTypeOfSymbol(target), checker);
@@ -407,7 +423,7 @@ const resolveExpression = (typeText: string, filePath: string, depth: number, st
         });
       } else {
         const typeNode = parseTypeNode(type);
-        const referenceInfo = typeNode && ts.isTypeReferenceNode(typeNode) && ts.isIdentifier(typeNode.typeName)
+        const referenceInfo = typeNode && isTypeReferenceNode(typeNode) && isIdentifier(typeNode.typeName)
           ? { name: typeNode.typeName.text, args: typeNode.typeArguments }
           : null;
 
