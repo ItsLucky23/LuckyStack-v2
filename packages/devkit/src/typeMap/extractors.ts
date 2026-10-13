@@ -1,12 +1,33 @@
-import * as ts from 'typescript';
 import path from 'node:path';
+import { SymbolFlags, type Checker, type Type } from 'typescript-7-api/sync';
 import {
-  getServerProgram,
+  ScriptKind,
+  type FunctionLikeDeclaration,
+  type InterfaceDeclaration,
+  type Node,
+  type SourceFile,
+} from 'typescript-7-api/ast';
+import {
+  isArrowFunction,
+  isCallExpression,
+  isFunctionDeclaration,
+  isFunctionExpression,
+  isIdentifier,
+  isInterfaceDeclaration,
+  isObjectLiteralExpression,
+  isPropertySignatureDeclaration,
+  isReturnStatement,
+  isTypeReferenceNode,
+  isVariableStatement,
+} from 'typescript-7-api/ast/is';
+import {
   expandTypeDetailed,
   ExpandedTypeResult,
+  getDeclarationFileName,
   UnresolvedTypeSymbol,
   UnsupportedWireTypeError,
 } from './tsProgram';
+import { getServerProgram, parseSourceText } from './tsApi';
 import { recordExtractionOutcome } from './extractionDiagnostics';
 import { getGeneratedSocketTypesPath } from '@luckystack/core';
 
@@ -51,13 +72,13 @@ const mergeUnresolvedSymbols = (
 
 const collectFallbackSymbolsFromTypeText = (
   typeText: string,
-  scopeNode: ts.Node,
-  checker: ts.TypeChecker,
+  scopeNode: Node,
+  checker: Checker,
 ): UnresolvedTypeSymbol[] => {
   const names = new Set((typeText.match(TYPE_NAME_PATTERN) ?? []).filter((name) => !KNOWN_GLOBAL_TYPE_NAMES.has(name)));
   const symbolsInScope = checker.getSymbolsInScope(
     scopeNode,
-    ts.SymbolFlags.TypeAlias | ts.SymbolFlags.Interface | ts.SymbolFlags.Class | ts.SymbolFlags.Enum | ts.SymbolFlags.Alias,
+    SymbolFlags.TypeAlias | SymbolFlags.Interface | SymbolFlags.Class | SymbolFlags.Enum | SymbolFlags.Alias,
   );
 
   const unresolvedSymbols: UnresolvedTypeSymbol[] = [];
@@ -66,20 +87,17 @@ const collectFallbackSymbolsFromTypeText = (
     const localSymbol = symbolsInScope.find((symbol) => symbol.name === name);
     if (!localSymbol) continue;
 
-    const targetSymbol = (localSymbol.flags & ts.SymbolFlags.Alias) === 0
+    const targetSymbol = (localSymbol.flags & SymbolFlags.Alias) === 0
       ? localSymbol
       : checker.getAliasedSymbol(localSymbol);
-    const declaration = targetSymbol.declarations?.[0];
 
-    if (!declaration) {
+    if (targetSymbol.declarations.length === 0) {
       unresolvedSymbols.push({ name });
       continue;
     }
 
-    const sourceFile = declaration.getSourceFile().fileName;
-    if (!sourceFile || sourceFile.includes('/node_modules/') || sourceFile.includes('\\node_modules\\')) {
-      continue;
-    }
+    const sourceFile = getDeclarationFileName(targetSymbol);
+    if (!sourceFile) continue;
 
     unresolvedSymbols.push({
       name,
@@ -94,24 +112,25 @@ const collectFallbackSymbolsFromTypeText = (
 //  shared helpers
 
 // Finds a top-level interface declaration by name in a source file's statements.
-const findInterface = (sourceFile: ts.SourceFile, name: string): ts.InterfaceDeclaration | null => {
+const findInterface = (sourceFile: SourceFile, name: string): InterfaceDeclaration | null => {
   for (const stmt of sourceFile.statements) {
-    if (ts.isInterfaceDeclaration(stmt) && stmt.name.text === name) return stmt;
+    if (isInterfaceDeclaration(stmt) && stmt.name.text === name) return stmt;
   }
   return null;
 };
 
 // Reads the type of a named property inside an interface declaration.
 const getInterfacePropertyType = (
-  iface: ts.InterfaceDeclaration,
+  iface: InterfaceDeclaration,
   propertyName: string,
-  checker: ts.TypeChecker,
-): ts.Type | null => {
+  checker: Checker,
+): Type | null => {
   for (const member of iface.members) {
     if (
-      ts.isPropertySignature(member)
-      && ts.isIdentifier(member.name)
+      isPropertySignatureDeclaration(member)
+      && isIdentifier(member.name)
       && member.name.text === propertyName
+      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- TS 7.1 declares PropertySignature.type required, but it is undefined for `{ a; }`
       && member.type
     ) {
       return checker.getTypeFromTypeNode(member.type);
@@ -121,22 +140,22 @@ const getInterfacePropertyType = (
 };
 
 // Finds the function-like initializer of `const main = ...` in a source file.
-const findMainFunction = (sourceFile: ts.SourceFile): ts.FunctionLikeDeclaration | null => {
+const findMainFunction = (sourceFile: SourceFile): FunctionLikeDeclaration | null => {
   for (const stmt of sourceFile.statements) {
-    if (ts.isVariableStatement(stmt)) {
+    if (isVariableStatement(stmt)) {
       for (const decl of stmt.declarationList.declarations) {
         if (
-          ts.isIdentifier(decl.name)
+          isIdentifier(decl.name)
           && decl.name.text === 'main'
           && decl.initializer
-          && (ts.isArrowFunction(decl.initializer) || ts.isFunctionExpression(decl.initializer))
+          && (isArrowFunction(decl.initializer) || isFunctionExpression(decl.initializer))
         ) {
           return decl.initializer;
         }
       }
     }
 
-    if (ts.isFunctionDeclaration(stmt) && stmt.name?.text === 'main') {
+    if (isFunctionDeclaration(stmt) && stmt.name?.text === 'main') {
       return stmt;
     }
   }
@@ -146,14 +165,14 @@ const findMainFunction = (sourceFile: ts.SourceFile): ts.FunctionLikeDeclaration
 // Collects the expanded type strings of all object-literal return statements
 // in a function body, without descending into nested function definitions.
 const collectReturnObjectTypeDetails = (
-  funcNode: ts.FunctionLikeDeclaration,
-  checker: ts.TypeChecker,
+  funcNode: FunctionLikeDeclaration,
+  checker: Checker,
 ): TypeExtractionResult => {
   const types: string[] = [];
   let unresolvedSymbols: UnresolvedTypeSymbol[] = [];
 
-  const visit = (node: ts.Node) => {
-    if (ts.isReturnStatement(node) && node.expression && ts.isObjectLiteralExpression(node.expression)) {
+  const visit = (node: Node): void => {
+    if (isReturnStatement(node) && node.expression && isObjectLiteralExpression(node.expression)) {
       const type = checker.getTypeAtLocation(node.expression);
       //? OUTPUT — project to the wire shape. What a handler returns is not what
       //? the client gets: it crosses as JSON, so a Date arrives as an ISO string.
@@ -168,15 +187,15 @@ const collectReturnObjectTypeDetails = (
 
     // Recurse into control flow but not into nested function bodies
     if (
-      !ts.isArrowFunction(node)
-      && !ts.isFunctionExpression(node)
-      && !ts.isFunctionDeclaration(node)
+      !isArrowFunction(node)
+      && !isFunctionExpression(node)
+      && !isFunctionDeclaration(node)
     ) {
-      ts.forEachChild(node, visit);
+      node.forEachChild(visit);
     }
   };
 
-  ts.forEachChild(funcNode, visit);
+  funcNode.forEachChild(visit);
   return { text: unionTypes(types), unresolvedSymbols };
 };
 
@@ -189,16 +208,16 @@ const collectReturnObjectTypeDetails = (
 const STREAM_EMIT_NAMES = new Set(['stream', 'broadcastStream', 'streamTo']);
 
 const collectStreamCallPayloadTypeDetails = (
-  funcNode: ts.FunctionLikeDeclaration,
-  checker: ts.TypeChecker,
+  funcNode: FunctionLikeDeclaration,
+  checker: Checker,
 ): TypeExtractionResult => {
   const types: string[] = [];
   let unresolvedSymbols: UnresolvedTypeSymbol[] = [];
 
-  const visit = (node: ts.Node) => {
+  const visit = (node: Node): void => {
     if (
-      ts.isCallExpression(node)
-      && ts.isIdentifier(node.expression)
+      isCallExpression(node)
+      && isIdentifier(node.expression)
       && STREAM_EMIT_NAMES.has(node.expression.text)
     ) {
       const callName = node.expression.text;
@@ -227,15 +246,15 @@ const collectStreamCallPayloadTypeDetails = (
 
     // Recurse into control flow but not into nested function bodies
     if (
-      !ts.isArrowFunction(node)
-      && !ts.isFunctionExpression(node)
-      && !ts.isFunctionDeclaration(node)
+      !isArrowFunction(node)
+      && !isFunctionExpression(node)
+      && !isFunctionDeclaration(node)
     ) {
-      ts.forEachChild(node, visit);
+      node.forEachChild(visit);
     }
   };
 
-  ts.forEachChild(funcNode, visit);
+  funcNode.forEachChild(visit);
   return { text: unionTypes(types), unresolvedSymbols };
 };
 
@@ -257,17 +276,15 @@ class UnsupportedTransportInputError extends Error {
 }
 
 const assertTransportInputIsWireSafe = (typeText: string, filePath: string): void => {
-  const sourceFile = ts.createSourceFile(
+  const sourceFile = parseSourceText(
     '__luckystack_input_check.ts',
     `type __LuckyStackInput = ${typeText};`,
-    ts.ScriptTarget.Latest,
-    true,
-    ts.ScriptKind.TS,
+    ScriptKind.TS,
   );
-  const containsDate = (node: ts.Node): boolean => {
+  const containsDate = (node: Node): boolean => {
     if (
-      ts.isTypeReferenceNode(node)
-      && ts.isIdentifier(node.typeName)
+      isTypeReferenceNode(node)
+      && isIdentifier(node.typeName)
       && node.typeName.text === 'Date'
     ) {
       return true;
@@ -290,7 +307,7 @@ export const getInputTypeDetailsFromFile = (filePath: string): TypeExtractionRes
   recordExtractionOutcome({ filePath, kind: 'api', field: 'input', error: null });
 
   try {
-    const program = getServerProgram();
+    const { program, checker } = getServerProgram();
     const sourceFile = program.getSourceFile(filePath);
     if (!sourceFile) {
       //? Marker-contract (DD-DEVKIT-D1): a getSourceFile miss is always a loud
@@ -304,7 +321,6 @@ export const getInputTypeDetailsFromFile = (filePath: string): TypeExtractionRes
       return { text: DEFAULT, unresolvedSymbols: [] };
     }
 
-    const checker = program.getTypeChecker();
     const iface = findInterface(sourceFile, 'ApiParams');
     if (!iface) return { text: DEFAULT, unresolvedSymbols: [] };
 
@@ -347,24 +363,25 @@ const STREAM_EMITTER_TYPE_NAMES = new Set([
 ]);
 
 const extractDeclaredStreamTypeFromApiParams = (
-  sourceFile: ts.SourceFile,
-  checker: ts.TypeChecker,
+  sourceFile: SourceFile,
+  checker: Checker,
 ): TypeExtractionResult | null => {
   let result: TypeExtractionResult | null = null;
 
-  const visit = (node: ts.Node): void => {
+  const visit = (node: Node): void => {
     if (result) return;
     //? The route's params interface — `ApiParams` (API) / `SyncServerParams`
     //? etc. Convention names all end in `Params`.
-    if (ts.isInterfaceDeclaration(node) && node.name.text.endsWith('Params')) {
+    if (isInterfaceDeclaration(node) && node.name.text.endsWith('Params')) {
       for (const member of node.members) {
         if (
-          ts.isPropertySignature(member)
-          && ts.isIdentifier(member.name)
+          isPropertySignatureDeclaration(member)
+          && isIdentifier(member.name)
           && member.name.text === 'stream'
+          // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- TS 7.1 declares PropertySignature.type required, but it is undefined for `{ a; }`
           && member.type
-          && ts.isTypeReferenceNode(member.type)
-          && ts.isIdentifier(member.type.typeName)
+          && isTypeReferenceNode(member.type)
+          && isIdentifier(member.type.typeName)
           && STREAM_EMITTER_TYPE_NAMES.has(member.type.typeName.text)
         ) {
           const typeArg = member.type.typeArguments?.[0];
@@ -380,7 +397,7 @@ const extractDeclaredStreamTypeFromApiParams = (
         }
       }
     }
-    ts.forEachChild(node, visit);
+    node.forEachChild(visit);
   };
 
   visit(sourceFile);
@@ -392,11 +409,10 @@ export const getApiStreamPayloadTypeDetailsFromFile = (filePath: string): TypeEx
   recordExtractionOutcome({ filePath, kind: 'api', field: 'stream', error: null });
 
   try {
-    const program = getServerProgram();
+    const { program, checker } = getServerProgram();
     const sourceFile = program.getSourceFile(filePath);
     if (!sourceFile) return { text: DEFAULT, unresolvedSymbols: [] };
 
-    const checker = program.getTypeChecker();
     const mainFn = findMainFunction(sourceFile);
     if (!mainFn) return { text: DEFAULT, unresolvedSymbols: [] };
 
@@ -421,11 +437,10 @@ export const getOutputTypeDetailsFromFile = (filePath: string): TypeExtractionRe
   recordExtractionOutcome({ filePath, kind: 'api', field: 'output', error: null });
 
   try {
-    const program = getServerProgram();
+    const { program, checker } = getServerProgram();
     const sourceFile = program.getSourceFile(filePath);
     if (!sourceFile) return { text: DEFAULT, unresolvedSymbols: [] };
 
-    const checker = program.getTypeChecker();
     const mainFn = findMainFunction(sourceFile);
     if (!mainFn) return { text: DEFAULT, unresolvedSymbols: [] };
 
@@ -448,11 +463,10 @@ export const getSyncClientDataTypeDetailsFromFile = (filePath: string): TypeExtr
   recordExtractionOutcome({ filePath, kind: 'sync', field: 'clientInput', error: null });
 
   try {
-    const program = getServerProgram();
+    const { program, checker } = getServerProgram();
     const sourceFile = program.getSourceFile(filePath);
     if (!sourceFile) return { text: DEFAULT, unresolvedSymbols: [] };
 
-    const checker = program.getTypeChecker();
     const iface = findInterface(sourceFile, 'SyncParams');
     if (!iface) return { text: DEFAULT, unresolvedSymbols: [] };
 
@@ -486,11 +500,10 @@ export const getSyncServerStreamPayloadTypeDetailsFromFile = (filePath: string):
   recordExtractionOutcome({ filePath, kind: 'sync', field: 'serverStream', error: null });
 
   try {
-    const program = getServerProgram();
+    const { program, checker } = getServerProgram();
     const sourceFile = program.getSourceFile(filePath);
     if (!sourceFile) return { text: DEFAULT, unresolvedSymbols: [] };
 
-    const checker = program.getTypeChecker();
     const mainFn = findMainFunction(sourceFile);
     if (!mainFn) return { text: DEFAULT, unresolvedSymbols: [] };
 
@@ -509,11 +522,10 @@ export const getSyncServerOutputTypeDetailsFromFile = (filePath: string): TypeEx
   recordExtractionOutcome({ filePath, kind: 'sync', field: 'serverOutput', error: null });
 
   try {
-    const program = getServerProgram();
+    const { program, checker } = getServerProgram();
     const sourceFile = program.getSourceFile(filePath);
     if (!sourceFile) return { text: DEFAULT, unresolvedSymbols: [] };
 
-    const checker = program.getTypeChecker();
     const mainFn = findMainFunction(sourceFile);
     if (!mainFn) return { text: DEFAULT, unresolvedSymbols: [] };
 
@@ -540,11 +552,10 @@ export const getSyncClientStreamPayloadTypeDetailsFromFile = (filePath: string):
   recordExtractionOutcome({ filePath, kind: 'sync', field: 'clientStream', error: null });
 
   try {
-    const program = getServerProgram();
+    const { program, checker } = getServerProgram();
     const sourceFile = program.getSourceFile(filePath);
     if (!sourceFile) return { text: DEFAULT, unresolvedSymbols: [] };
 
-    const checker = program.getTypeChecker();
     const mainFn = findMainFunction(sourceFile);
     if (!mainFn) return { text: DEFAULT, unresolvedSymbols: [] };
 
@@ -563,11 +574,10 @@ export const getSyncClientOutputTypeDetailsFromFile = (filePath: string): TypeEx
   recordExtractionOutcome({ filePath, kind: 'sync', field: 'clientOutput', error: null });
 
   try {
-    const program = getServerProgram();
+    const { program, checker } = getServerProgram();
     const sourceFile = program.getSourceFile(filePath);
     if (!sourceFile) return { text: DEFAULT, unresolvedSymbols: [] };
 
-    const checker = program.getTypeChecker();
     const mainFn = findMainFunction(sourceFile);
     if (!mainFn) return { text: DEFAULT, unresolvedSymbols: [] };
 

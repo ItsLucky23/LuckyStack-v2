@@ -13,7 +13,7 @@ import {
   getSyncServerStreamPayloadTypeDetailsFromFile,
 } from './typeMap/extractors';
 import { generateServerFunctions } from './typeMap/functionsMeta';
-import { invalidateProgramCache } from './typeMap/tsProgram';
+import { disposeTsApi, invalidateProgramCache } from './typeMap/tsApi';
 import { getSrcDir } from '@luckystack/core';
 import { assertNoDuplicateNormalizedRouteKeys, assertNoDuplicatePageRoutes, assertValidRouteNaming } from './routeNamingValidation';
 import { getOrInit } from './internal/mapUtils';
@@ -213,7 +213,7 @@ const collectSyncTypes = (
   return syncTypesByPage;
 };
 
-export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void => {
+const runTypeMapGeneration = (options: GenerateTypeMapOptions): void => {
   const { quiet = false } = options;
   assertValidRouteNaming({
     srcDir: getSrcDir(),
@@ -272,4 +272,14 @@ export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void 
   });
 
   writeTypeMapArtifacts({ content, docsData, schemasContent, diagnosticsData });
+};
+
+export const generateTypeMapFile = (options: GenerateTypeMapOptions = {}): void => {
+  //? One compiler process per generation run: stop it when the run ends, also
+  //? on a thrown generation error, so no TypeScript process outlives the work.
+  try {
+    runTypeMapGeneration(options);
+  } finally {
+    disposeTsApi();
+  }
 };

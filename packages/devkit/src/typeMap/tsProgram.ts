@@ -1,30 +1,26 @@
-import * as ts from 'typescript';
 import path from 'node:path';
-import { ROOT_DIR, getGeneratedSocketTypesPath } from '@luckystack/core';
-
-let cachedProgram: ts.Program | null = null;
-
-export const getServerProgram = (): ts.Program => {
-  if (cachedProgram) return cachedProgram;
-
-  const tsconfigPath = ts.findConfigFile(ROOT_DIR, ts.sys.fileExists.bind(ts.sys), 'tsconfig.server.json');
-  if (!tsconfigPath) throw new Error('[TypeProgram] tsconfig.server.json not found');
-
-  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment -- ts.readConfigFile returns { config: any }
-  const { config } = ts.readConfigFile(tsconfigPath, ts.sys.readFile.bind(ts.sys));
-  const { options, fileNames } = ts.parseJsonConfigFileContent(
-    config,
-    ts.sys,
-    path.dirname(tsconfigPath),
-  );
-
-  cachedProgram = ts.createProgram(fileNames, options);
-  return cachedProgram;
-};
-
-export const invalidateProgramCache = (): void => {
-  cachedProgram = null;
-};
+import {
+  ObjectFlags,
+  SymbolFlags,
+  TypeFlags,
+  type Checker,
+  type Symbol as TsSymbol,
+  type Type,
+} from 'typescript-7-api/sync';
+import { SyntaxKind, type Expression } from 'typescript-7-api/ast';
+import {
+  isAsExpression,
+  isIdentifier,
+  isNoSubstitutionTemplateLiteral,
+  isNumericLiteral,
+  isParenthesizedExpression,
+  isPrefixUnaryExpression,
+  isPropertyAssignment,
+  isShorthandPropertyAssignment,
+  isStringLiteral,
+  isTypeAssertion,
+} from 'typescript-7-api/ast/is';
+import { getGeneratedSocketTypesPath } from '@luckystack/core';
 
 //? Max nesting the inliner will expand before falling back to
 //? `checker.typeToString`. 14 is MEASURED, not guessed: the decorator-based
@@ -84,10 +80,9 @@ export class UnsupportedWireTypeError extends Error {
   }
 }
 
-const isJsonLikeType = (type: ts.Type, checker: ts.TypeChecker): boolean => {
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- ts.Type.symbol is typed non-nullable but absent at runtime for primitive types
-  const symbolName = type.symbol?.name ?? '';
-  const aliasName = type.aliasSymbol?.name ?? '';
+const isJsonLikeType = (type: Type, checker: Checker): boolean => {
+  const symbolName = type.getSymbol()?.name ?? '';
+  const aliasName = type.getAliasSymbol()?.name ?? '';
 
   if (JSON_TYPE_NAMES.has(symbolName) || JSON_TYPE_NAMES.has(aliasName)) return true;
 
@@ -100,49 +95,49 @@ const isJsonLikeType = (type: ts.Type, checker: ts.TypeChecker): boolean => {
 };
 
 const getLiteralTypeFromExpression = (
-  expression: ts.Expression,
-  checker: ts.TypeChecker,
+  expression: Expression,
+  checker: Checker,
   depth: number,
 ): string | null => {
-  if (ts.isParenthesizedExpression(expression)) {
+  if (isParenthesizedExpression(expression)) {
     return getLiteralTypeFromExpression(expression.expression, checker, depth);
   }
 
-  if (ts.isAsExpression(expression) || ts.isTypeAssertionExpression(expression)) {
+  if (isAsExpression(expression) || isTypeAssertion(expression)) {
     return getLiteralTypeFromExpression(expression.expression, checker, depth);
   }
 
-  if (expression.kind === ts.SyntaxKind.TrueKeyword) return 'true';
-  if (expression.kind === ts.SyntaxKind.FalseKeyword) return 'false';
-  if (expression.kind === ts.SyntaxKind.NullKeyword) return 'null';
+  if (expression.kind === SyntaxKind.TrueKeyword) return 'true';
+  if (expression.kind === SyntaxKind.FalseKeyword) return 'false';
+  if (expression.kind === SyntaxKind.NullKeyword) return 'null';
 
-  if (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression)) {
+  if (isStringLiteral(expression) || isNoSubstitutionTemplateLiteral(expression)) {
     return `'${expression.text.replaceAll('\\', '\\\\').replaceAll('\'', String.raw`\'`)}'`;
   }
 
-  if (ts.isNumericLiteral(expression)) {
+  if (isNumericLiteral(expression)) {
     return expression.text;
   }
 
   if (
-    ts.isPrefixUnaryExpression(expression)
-    && expression.operator === ts.SyntaxKind.MinusToken
-    && ts.isNumericLiteral(expression.operand)
+    isPrefixUnaryExpression(expression)
+    && expression.operator === SyntaxKind.MinusToken
+    && isNumericLiteral(expression.operand)
   ) {
     return `-${expression.operand.text}`;
   }
 
-  if (ts.isIdentifier(expression)) {
+  if (isIdentifier(expression)) {
     const identifierType = checker.getTypeAtLocation(expression);
     const isLiteralType = (identifierType.flags & (
-      ts.TypeFlags.StringLiteral
-      | ts.TypeFlags.NumberLiteral
-      | ts.TypeFlags.BooleanLiteral
-      | ts.TypeFlags.Null
-      | ts.TypeFlags.Undefined
+      TypeFlags.StringLiteral
+      | TypeFlags.NumberLiteral
+      | TypeFlags.BooleanLiteral
+      | TypeFlags.Null
+      | TypeFlags.Undefined
     )) !== 0;
 
-    if (isLiteralType || identifierType.isUnion()) {
+    if (isLiteralType || identifierType.isUnionType()) {
       const expanded = expandTypeDetailed(identifierType, checker, depth).text;
       if (expanded.includes("'") || /\btrue\b|\bfalse\b|\bnull\b|\bundefined\b/.test(expanded)) {
         return expanded;
@@ -154,19 +149,23 @@ const getLiteralTypeFromExpression = (
 };
 
 const getLiteralTypeFromPropertySymbol = (
-  symbol: ts.Symbol,
-  checker: ts.TypeChecker,
+  symbol: TsSymbol,
+  checker: Checker,
   depth: number,
 ): string | null => {
-  const declarations = symbol.declarations ?? [];
+  for (const handle of symbol.declarations) {
+    //? Declarations arrive as handles; resolving one fetches its file from the
+    //? compiler, so only resolve the two kinds that can carry a literal.
+    if (handle.kind !== SyntaxKind.PropertyAssignment && handle.kind !== SyntaxKind.ShorthandPropertyAssignment) continue;
+    const declaration = handle.resolve();
+    if (!declaration) continue;
 
-  for (const declaration of declarations) {
-    if (ts.isPropertyAssignment(declaration)) {
+    if (isPropertyAssignment(declaration)) {
       const literal = getLiteralTypeFromExpression(declaration.initializer, checker, depth);
       if (literal) return literal;
     }
 
-    if (ts.isShorthandPropertyAssignment(declaration)) {
+    if (isShorthandPropertyAssignment(declaration) && isIdentifier(declaration.name)) {
       const literal = getLiteralTypeFromExpression(declaration.name, checker, depth);
       if (literal) return literal;
     }
@@ -204,20 +203,30 @@ const mergeUnresolvedSymbols = (
   return merged;
 };
 
-const collectTypeSymbolFallback = (type: ts.Type): UnresolvedTypeSymbol[] => {
-  const symbol = type.aliasSymbol ?? type.getSymbol();
+const isNodeModulesPath = (filePath: string): boolean =>
+  filePath.includes('/node_modules/') || filePath.includes('\\node_modules\\');
+
+//? The real file name of a symbol's first declaration, or undefined for one in
+//? node_modules (which includes TypeScript's own lib files). The handle's path is
+//? the compiler's canonical key — enough to rule out node_modules without
+//? fetching a large .d.ts — while only the resolved node carries the file name
+//? exactly as written, which the generated import path is built from.
+export const getDeclarationFileName = (symbol: TsSymbol): string | undefined => {
+  const handle = symbol.declarations[0];
+  if (!handle || isNodeModulesPath(handle.path)) return undefined;
+  const fileName = handle.resolve()?.getSourceFile().fileName;
+  return fileName && !isNodeModulesPath(fileName) ? fileName : undefined;
+};
+
+const collectTypeSymbolFallback = (type: Type): UnresolvedTypeSymbol[] => {
+  const symbol = type.getAliasSymbol() ?? type.getSymbol();
   if (!symbol) return [];
 
-  const name = symbol.getName();
+  const name = symbol.name;
   if (!name || name.startsWith('__')) return [];
 
-  const declaration = symbol.declarations?.[0];
-  if (!declaration) return [{ name }];
-
-  const sourceFile = declaration.getSourceFile().fileName;
-  if (!sourceFile || sourceFile.includes('/node_modules/') || sourceFile.includes('\\node_modules\\')) {
-    return [{ name }];
-  }
+  const sourceFile = getDeclarationFileName(symbol);
+  if (!sourceFile) return [{ name }];
 
   return [{
     name,
@@ -321,12 +330,13 @@ const WIRE_PROJECTED_TYPES = new Map<string, string>([['Date', 'string']]);
 //?
 //? (Rule 1 is right for `Date`: `createdAt` is verified to come back as an ISO
 //? string on the same measured payload, both standalone and through the entity.)
-const resolveToJsonReturnType = (type: ts.Type, checker: ts.TypeChecker): ts.Type | null => {
+const resolveToJsonReturnType = (type: Type, checker: Checker): Type | null => {
   const toJson = type.getProperty('toJSON');
   if (!toJson) return null;
-  const declaration = toJson.valueDeclaration ?? toJson.declarations?.[0];
-  if (!declaration) return null;
-  const signature = checker.getTypeOfSymbolAtLocation(toJson, declaration).getCallSignatures()[0];
+  if (!toJson.valueDeclaration && toJson.declarations.length === 0) return null;
+  //? The type of a symbol AT its own declaration is its non-missing type; asking
+  //? for that directly avoids fetching the declaring file (often a lib .d.ts).
+  const signature = checker.getNonMissingTypeOfSymbol(toJson).getCallSignatures()[0];
   return signature ? signature.getReturnType() : null;
 };
 
@@ -334,46 +344,45 @@ const resolveToJsonReturnType = (type: ts.Type, checker: ts.TypeChecker): ts.Typ
 //? callable object with attached enumerable data. Arrays turn the same value into
 //? `null`. The old zero-properties condition was false: JSON never serializes a
 //? function object's attached properties when the VALUE itself is callable.
-const isFunctionValueType = (type: ts.Type): boolean => type.getCallSignatures().length > 0;
+const isFunctionValueType = (type: Type): boolean => type.getCallSignatures().length > 0;
 
-const typeNameOf = (type: ts.Type, checker: ts.TypeChecker): string => {
-  const objectType = type as ts.ObjectType;
-  if ((type.flags & ts.TypeFlags.Object) && (objectType.objectFlags & ts.ObjectFlags.Reference)) {
-    const targetName = (objectType as ts.TypeReference).target.getSymbol()?.name;
+const typeNameOf = (type: Type, checker: Checker): string => {
+  if (type.isTypeReference()) {
+    const targetName = type.getTarget().getSymbol()?.name;
     if (targetName) return targetName;
   }
   return type.getSymbol()?.name ?? checker.typeToString(type);
 };
 
-const assertSupportedWireType = (type: ts.Type, checker: ts.TypeChecker): void => {
+const assertSupportedWireType = (type: Type, checker: Checker): void => {
   const typeName = typeNameOf(type, checker);
   if (TRANSPORT_DEPENDENT_BINARY_TYPES.has(typeName)) {
     throw new UnsupportedWireTypeError(typeName);
   }
-  if ((type.flags & (ts.TypeFlags.BigInt | ts.TypeFlags.BigIntLiteral)) !== 0) {
+  if ((type.flags & (TypeFlags.BigInt | TypeFlags.BigIntLiteral)) !== 0) {
     throw new UnsupportedWireTypeError('bigint');
   }
 };
 
-const isJsonOmittedValueType = (type: ts.Type): boolean =>
+const isJsonOmittedValueType = (type: Type): boolean =>
   (type.flags & (
-    ts.TypeFlags.Undefined
-    | ts.TypeFlags.Void
-    | ts.TypeFlags.ESSymbol
-    | ts.TypeFlags.UniqueESSymbol
+    TypeFlags.Undefined
+    | TypeFlags.Void
+    | TypeFlags.ESSymbol
+    | TypeFlags.UniqueESSymbol
   )) !== 0 || isFunctionValueType(type);
 
 interface WireConstituents {
-  serializable: ts.Type[];
+  serializable: Type[];
   omitted: boolean;
 }
 
 //? Resolve one property/array-element type to the values JSON can actually
 //? carry. `undefined`/symbol/function constituents disappear from objects and
 //? become null in arrays; toJSON return types replace their declared type.
-const resolveWireConstituents = (type: ts.Type, checker: ts.TypeChecker): WireConstituents => {
-  const queue = type.isUnion() ? [...type.types] : [type];
-  const serializable: ts.Type[] = [];
+const resolveWireConstituents = (type: Type, checker: Checker): WireConstituents => {
+  const queue = type.isUnionType() ? [...type.getTypes()] : [type];
+  const serializable: Type[] = [];
   let omitted = false;
   let changed = false;
 
@@ -386,9 +395,9 @@ const resolveWireConstituents = (type: ts.Type, checker: ts.TypeChecker): WireCo
     }
 
     const jsonType = resolveToJsonReturnType(candidate, checker);
-    const effective = jsonType && jsonType !== candidate ? jsonType : candidate;
+    const effective = jsonType && jsonType.id !== candidate.id ? jsonType : candidate;
     if (effective !== candidate) changed = true;
-    const effectiveTypes = effective.isUnion() ? effective.types : [effective];
+    const effectiveTypes = effective.isUnionType() ? effective.getTypes() : [effective];
     for (const effectiveType of effectiveTypes) {
       assertSupportedWireType(effectiveType, checker);
       if (isJsonOmittedValueType(effectiveType)) {
@@ -418,8 +427,8 @@ export interface ExpandOptions {
 // Recursively expand a TypeScript type to an inline type string with no named references.
 // The result is self-contained and requires no imports.
 export const expandTypeDetailed = (
-  type: ts.Type,
-  checker: ts.TypeChecker,
+  type: Type,
+  checker: Checker,
   depth = 0,
   state?: ExpandState,
   options?: ExpandOptions,
@@ -428,17 +437,15 @@ export const expandTypeDetailed = (
   //? returned object is projected too — not just a top-level one.
   const expandState: ExpandState =
     state ?? { stackTypeIds: new Set<number>(), wireProjection: options?.wireProjection ?? false };
-  const typeId = (type as ts.Type & { id?: number }).id;
+  const typeId = type.id;
 
-  if (typeId !== undefined) {
-    if (expandState.stackTypeIds.has(typeId)) {
-      return {
-        text: checker.typeToString(type),
-        unresolvedSymbols: collectTypeSymbolFallback(type),
-      };
-    }
-    expandState.stackTypeIds.add(typeId);
+  if (expandState.stackTypeIds.has(typeId)) {
+    return {
+      text: checker.typeToString(type),
+      unresolvedSymbols: collectTypeSymbolFallback(type),
+    };
   }
+  expandState.stackTypeIds.add(typeId);
 
   try {
     if (expandState.wireProjection) {
@@ -461,34 +468,34 @@ export const expandTypeDetailed = (
     if (isJsonLikeType(type, checker)) return { text: 'JsonValue', unresolvedSymbols: [] };
 
     // String literals ('hello')  use single quotes for consistency with the codebase
-    if (type.isStringLiteral()) return { text: `'${type.value.replaceAll('\\', '\\\\').replaceAll('\'', String.raw`\'`)}'`, unresolvedSymbols: [] };
+    if (type.isStringLiteralType()) return { text: `'${type.value.replaceAll('\\', '\\\\').replaceAll('\'', String.raw`\'`)}'`, unresolvedSymbols: [] };
 
     // Number literals (42, 3.14)
-    if (type.isNumberLiteral()) return { text: String(type.value), unresolvedSymbols: [] };
+    if (type.isNumberLiteralType()) return { text: String(type.value), unresolvedSymbols: [] };
 
   // Primitives and special types (string, number, boolean, true, false, null, undefined, any, unknown, never, void)
     if (
       type.flags
       & (
-        ts.TypeFlags.String
-        | ts.TypeFlags.Number
-        | ts.TypeFlags.Boolean
-        | ts.TypeFlags.BooleanLiteral
-        | ts.TypeFlags.Undefined
-        | ts.TypeFlags.Null
-        | ts.TypeFlags.Any
-        | ts.TypeFlags.Unknown
-        | ts.TypeFlags.Never
-        | ts.TypeFlags.Void
+        TypeFlags.String
+        | TypeFlags.Number
+        | TypeFlags.Boolean
+        | TypeFlags.BooleanLiteral
+        | TypeFlags.Undefined
+        | TypeFlags.Null
+        | TypeFlags.Any
+        | TypeFlags.Unknown
+        | TypeFlags.Never
+        | TypeFlags.Void
       )
     ) {
       return { text: checker.typeToString(type), unresolvedSymbols: [] };
     }
 
   // Union types (A | B | C)
-    if (type.isUnion()) {
+    if (type.isUnionType()) {
     let unresolvedSymbols: UnresolvedTypeSymbol[] = [];
-    const expandedTypes = type.types.map((innerType) => {
+    const expandedTypes = type.getTypes().map((innerType) => {
       const expanded = expandTypeDetailed(innerType, checker, depth + 1, expandState);
       unresolvedSymbols = mergeUnresolvedSymbols(unresolvedSymbols, expanded.unresolvedSymbols);
       return expanded.text;
@@ -502,9 +509,9 @@ export const expandTypeDetailed = (
     }
 
   // Intersection types (A & B)
-    if (type.isIntersection()) {
+    if (type.isIntersectionType()) {
     let unresolvedSymbols: UnresolvedTypeSymbol[] = [];
-    const expandedTypes = type.types.map((innerType) => {
+    const expandedTypes = type.getTypes().map((innerType) => {
       const expanded = expandTypeDetailed(innerType, checker, depth + 1, expandState);
       unresolvedSymbols = mergeUnresolvedSymbols(unresolvedSymbols, expanded.unresolvedSymbols);
       return expanded.text;
@@ -513,9 +520,7 @@ export const expandTypeDetailed = (
     }
 
   // Object types (interfaces, type literals, generic instances)
-    if (type.flags & ts.TypeFlags.Object) {
-    const objectType = type as ts.ObjectType;
-
+    if (type.isObjectType()) {
     // Tuple types [A, B, C]
     //? A tuple VALUE is a TypeReference whose *target* carries ObjectFlags.Tuple
     //? — the instance does not. (The sole exception is the empty tuple `[]`,
@@ -527,12 +532,10 @@ export const expandTypeDetailed = (
     //? which threw, because a tuple reference has no symbol either. That crash
     //? is DEVKIT-1: MikroORM's `EntityProperty.embedded?: [string, string]` made
     //? every route returning an entity degrade to `{ status: string }`.
-    const tupleTarget = (objectType.objectFlags & ts.ObjectFlags.Reference)
-      ? ((objectType as ts.TypeReference).target as ts.ObjectType)
-      : objectType;
+    const tupleTarget = type.isTypeReference() ? type.getTarget() : type;
 
-    if (tupleTarget.objectFlags & ts.ObjectFlags.Tuple) {
-      const typeArgs = checker.getTypeArguments(objectType as ts.TypeReference);
+    if (tupleTarget.objectFlags & ObjectFlags.Tuple) {
+      const typeArgs = type.isTypeReference() ? checker.getTypeArguments(type) : [];
       let unresolvedSymbols: UnresolvedTypeSymbol[] = [];
       const tupleTypes = typeArgs.map((innerType) => {
         const wire = expandState.wireProjection
@@ -563,19 +566,17 @@ export const expandTypeDetailed = (
       //? Identity check: a type whose toJSON returns itself (or a self-referential
       //? DTO) would recurse forever. The stack guard would catch it, but bailing
       //? here keeps the output structural instead of a typeToString fallback.
-      if (jsonType && jsonType !== type) {
+      if (jsonType && jsonType.id !== type.id) {
         return expandTypeDetailed(jsonType, checker, depth + 1, expandState);
       }
     }
 
-    if (objectType.objectFlags & ts.ObjectFlags.Reference) {
-      const refType = objectType as ts.TypeReference;
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- ts.Type.symbol is typed non-nullable but absent at runtime for anonymous reference targets
-      const targetName = refType.target.symbol?.name ?? '';
+    if (type.isTypeReference()) {
+      const targetName = type.getTarget().getSymbol()?.name ?? '';
 
       // Array<T> / ReadonlyArray<T>  T[]
       if (targetName === 'Array' || targetName === 'ReadonlyArray') {
-        const typeArgs = checker.getTypeArguments(refType);
+        const typeArgs = checker.getTypeArguments(type);
         const firstArg = typeArgs[0];
         if (firstArg) {
           const wire = expandState.wireProjection
@@ -606,8 +607,7 @@ export const expandTypeDetailed = (
     }
 
     // Known non-generic opaque containers (Date, Error, Buffer, etc.)
-    // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- ts.Type.symbol is typed non-nullable but absent at runtime for synthesized object types (tuple references); same guard as the reads above
-    const symbolName = type.symbol?.name || (type.aliasSymbol?.name ?? '');
+    const symbolName = (type.getSymbol()?.name ?? '') || (type.getAliasSymbol()?.name ?? '');
     if (SKIP_EXPANSION.has(symbolName)) {
       const projected = expandState.wireProjection ? WIRE_PROJECTED_TYPES.get(symbolName) : undefined;
       return { text: projected ?? checker.typeToString(type), unresolvedSymbols: [] };
@@ -627,7 +627,7 @@ export const expandTypeDetailed = (
         //? which `checker.typeToString` would emit verbatim — an invalid TS
         //? identifier that corrupts the generated file. These markers carry no
         //? API-payload meaning, so drop them from the inlined type text.
-        if (prop.getName().startsWith('__@')) continue;
+        if (prop.name.startsWith('__@')) continue;
         const propType = checker.getTypeOfSymbol(prop);
         const wire = expandState.wireProjection
           ? resolveWireConstituents(propType, checker)
@@ -637,7 +637,7 @@ export const expandTypeDetailed = (
         if (wire.serializable.length === 0) continue;
 
         const literalType = getLiteralTypeFromPropertySymbol(prop, checker, depth + 1);
-        const isOptional = (prop.flags & ts.SymbolFlags.Optional) !== 0 || wire.omitted;
+        const isOptional = (prop.flags & SymbolFlags.Optional) !== 0 || wire.omitted;
 
         //? Literal preservation is valid when projection did not remove a
         //? constituent (e.g. `string | undefined` must become optional). The
@@ -660,8 +660,8 @@ export const expandTypeDetailed = (
       for (const indexInfo of indexInfos) {
         const keyType = expandTypeDetailed(indexInfo.keyType, checker, depth + 1, expandState);
         const wire = expandState.wireProjection
-          ? resolveWireConstituents(indexInfo.type, checker)
-          : { serializable: [indexInfo.type], omitted: false };
+          ? resolveWireConstituents(indexInfo.valueType, checker)
+          : { serializable: [indexInfo.valueType], omitted: false };
         //? An index whose values are always omitted serializes as an empty object.
         if (wire.serializable.length === 0) continue;
         const valueTexts: string[] = [];
@@ -690,13 +690,11 @@ export const expandTypeDetailed = (
       unresolvedSymbols: collectTypeSymbolFallback(type),
     };
   } finally {
-    if (typeId !== undefined) {
-      expandState.stackTypeIds.delete(typeId);
-    }
+    expandState.stackTypeIds.delete(typeId);
   }
 };
 
-export const expandType = (type: ts.Type, checker: ts.TypeChecker, depth = 0): string => {
+export const expandType = (type: Type, checker: Checker, depth = 0): string => {
   return expandTypeDetailed(type, checker, depth).text;
 };
 

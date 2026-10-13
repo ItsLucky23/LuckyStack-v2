@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import path from 'node:path';
 import fs from 'node:fs';
 import { ROOT_DIR } from '@luckystack/core';
-import { getServerProgram } from './tsProgram';
+import { disposeTsApi, getServerProgram } from './tsApi';
 import { findAllApiFiles, findAllSyncServerFiles, findAllSyncClientFiles } from './discovery';
 import {
   getInputTypeDetailsFromFile,
@@ -52,6 +52,9 @@ beforeAll(() => {
   syncClientFiles = findAllSyncClientFiles(SRC_DIR).sort();
   getServerProgram();
 }, 180_000);
+afterAll(() => {
+  disposeTsApi();
+});
 
 const EXTRACTION_TIMEOUT_MS = 120_000;
 

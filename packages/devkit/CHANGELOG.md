@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Devkit now analyses routes with the TypeScript 7 compiler API instead of the TypeScript 5/6 JavaScript compiler. It depends on an exact-pinned TypeScript 7.1 dev build through the `typescript-7-api` alias, so it no longer needs a `typescript` peer dependency. Your project's own `typescript` version no longer affects devkit. The compiler runs as a separate native process: one per generation run, stopped when the run ends. Type generation is faster and uses about a third of the memory: in this repository the generator's peak memory fell from about 780 MB to about 270 MB.
+- Generated route types (`apiTypes.generated.ts`, the input schemas and the docs JSON) now list union members and object properties in TypeScript 7's stable order. The types themselves are unchanged, but expect a one-time reordering diff in generated files after upgrading.
 - Package design guidance now ships as `AGENTS.md`, not `CLAUDE.md`. Handwritten docs focus on rationale and safety; exact API contracts remain in installed declarations/source.
 
 ## [0.10.2] - 2026-10-09
