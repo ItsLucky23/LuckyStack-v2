@@ -1,8 +1,11 @@
-import { describe, it, expect, beforeAll } from 'vitest';
-import * as ts from 'typescript';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ObjectFlags, TypeFlags, TypeFormatFlags, type Checker, type Program, type Type } from 'typescript-7-api/sync';
+import type { Node, ObjectLiteralExpression } from 'typescript-7-api/ast';
+import { isObjectLiteralExpression, isReturnStatement, isTypeAliasDeclaration } from 'typescript-7-api/ast/is';
 import { expandTypeDetailed } from './tsProgram';
+import { disposeTsApi, openTsconfigProject } from './tsApi';
 
 //? DEVKIT-1 suite. `tsProgram.ts` shipped with NO test file at all; this pins
 //? what `expandTypeDetailed` does to a real, decorator-based MikroORM entity.
@@ -26,39 +29,34 @@ const SKIP_EXPANSION_MIRROR = new Set([
   'Error', 'Date', 'RegExp', 'Buffer', 'ArrayBuffer', 'ReadonlyArray',
 ]);
 
-let program: ts.Program;
-let checker: ts.TypeChecker;
+let program: Program;
+let checker: Checker;
 
-const buildFixtureProgram = (): ts.Program => {
-  const cfgPath = path.join(FIXTURE_DIR, 'tsconfig.json');
-  const { config } = ts.readConfigFile(cfgPath, ts.sys.readFile.bind(ts.sys));
-  const { options, fileNames } = ts.parseJsonConfigFileContent(config, ts.sys, FIXTURE_DIR);
-  return ts.createProgram(fileNames, options);
-};
+const objectFlagsOf = (type: Type): number => (type.isObjectType() ? type.objectFlags : 0);
 
 // Returns the type of the object literal that `main` returns in the fixture
 // route — the exact node `extractors.ts#collectReturnObjectTypeDetails` reads.
-const getRouteReturnType = (): ts.Type => {
+const getRouteReturnType = (): Type => {
   const sourceFile = program.getSourceFile(path.join(FIXTURE_DIR, 'mikroRoute_v1.ts'));
   if (!sourceFile) throw new Error('fixture route not in program');
 
-  let objectLiteral: ts.ObjectLiteralExpression | undefined;
-  const visit = (node: ts.Node): void => {
-    if (ts.isReturnStatement(node) && node.expression && ts.isObjectLiteralExpression(node.expression)) {
+  let objectLiteral: ObjectLiteralExpression | undefined;
+  const visit = (node: Node): void => {
+    if (isReturnStatement(node) && node.expression && isObjectLiteralExpression(node.expression)) {
       objectLiteral = node.expression;
     }
-    ts.forEachChild(node, visit);
+    node.forEachChild(visit);
   };
   visit(sourceFile);
   if (!objectLiteral) throw new Error('no return object literal in fixture route');
   return checker.getTypeAtLocation(objectLiteral);
 };
 
-const getTypeAliasType = (name: string): ts.Type => {
+const getTypeAliasType = (name: string): Type => {
   const sourceFile = program.getSourceFile(path.join(FIXTURE_DIR, 'markerProbe.ts'));
   if (!sourceFile) throw new Error('markerProbe fixture not in program');
   for (const stmt of sourceFile.statements) {
-    if (ts.isTypeAliasDeclaration(stmt) && stmt.name.text === name) {
+    if (isTypeAliasDeclaration(stmt) && stmt.name.text === name) {
       return checker.getTypeFromTypeNode(stmt.type);
     }
   }
@@ -66,25 +64,22 @@ const getTypeAliasType = (name: string): ts.Type => {
 };
 
 // Finds a reachable type by its rendered name, breadth-limited.
-const findTypeByRendering = (root: ts.Type, want: string): ts.Type | undefined => {
+const findTypeByRendering = (root: Type, want: string): Type | undefined => {
   const seen = new Set<number>();
-  const walk = (type: ts.Type, depth: number): ts.Type | undefined => {
+  const walk = (type: Type, depth: number): Type | undefined => {
     if (depth > 8) return undefined;
-    const id = (type as ts.Type & { id?: number }).id;
-    if (id !== undefined) {
-      if (seen.has(id)) return undefined;
-      seen.add(id);
-    }
+    if (seen.has(type.id)) return undefined;
+    seen.add(type.id);
     try {
       if (checker.typeToString(type) === want) return type;
-      if (type.isUnion() || type.isIntersection()) {
-        for (const inner of (type as ts.UnionOrIntersectionType).types) {
+      if (type.isUnionType() || type.isIntersectionType()) {
+        for (const inner of type.getTypes()) {
           const hit = walk(inner, depth + 1);
           if (hit) return hit;
         }
         return undefined;
       }
-      if (type.flags & ts.TypeFlags.Object && (type as ts.Type & { symbol?: ts.Symbol }).symbol !== undefined) {
+      if (type.flags & TypeFlags.Object && type.getSymbol() !== undefined) {
         for (const prop of checker.getPropertiesOfType(type)) {
           const hit = walk(checker.getTypeOfSymbol(prop), depth + 1);
           if (hit) return hit;
@@ -92,7 +87,7 @@ const findTypeByRendering = (root: ts.Type, want: string): ts.Type | undefined =
       }
       return undefined;
     } finally {
-      if (id !== undefined) seen.delete(id);
+      seen.delete(type.id);
     }
   };
   return walk(root, 0);
@@ -107,60 +102,54 @@ const findTypeByRendering = (root: ts.Type, want: string): ts.Type | undefined =
 interface Bailout { kind: 'cycle' | 'depth' | 'crash'; depth: number; path: string; rendered: string }
 interface ProbeResult { bailouts: Bailout[]; maxDepth: number; nodes: number }
 
-const probeExpansion = (root: ts.Type, limit: number): ProbeResult => {
+const probeExpansion = (root: Type, limit: number): ProbeResult => {
   const bailouts: Bailout[] = [];
   let maxDepth = 0;
   let nodes = 0;
 
-  const walk = (type: ts.Type, depth: number, stack: Set<number>, p: string): void => {
+  const walk = (type: Type, depth: number, stack: Set<number>, p: string): void => {
     nodes += 1;
     if (depth > maxDepth) maxDepth = depth;
 
-    const id = (type as ts.Type & { id?: number }).id;
-    if (id !== undefined) {
-      // mirrors tsProgram.ts:211-219
-      if (stack.has(id)) {
-        bailouts.push({ kind: 'cycle', depth, path: p, rendered: checker.typeToString(type) });
-        return;
-      }
-      stack.add(id);
+    // mirrors tsProgram.ts's cycle guard
+    if (stack.has(type.id)) {
+      bailouts.push({ kind: 'cycle', depth, path: p, rendered: checker.typeToString(type) });
+      return;
     }
+    stack.add(type.id);
     try {
-      // mirrors tsProgram.ts:222-227
+      // mirrors tsProgram.ts's depth bailout
       if (depth > limit) {
         bailouts.push({ kind: 'depth', depth, path: p, rendered: checker.typeToString(type) });
         return;
       }
-      if (type.isStringLiteral() || type.isNumberLiteral()) return;
+      if (type.isStringLiteralType() || type.isNumberLiteralType()) return;
       if (
         type.flags & (
-          ts.TypeFlags.String | ts.TypeFlags.Number | ts.TypeFlags.Boolean | ts.TypeFlags.BooleanLiteral
-          | ts.TypeFlags.Undefined | ts.TypeFlags.Null | ts.TypeFlags.Any | ts.TypeFlags.Unknown
-          | ts.TypeFlags.Never | ts.TypeFlags.Void
+          TypeFlags.String | TypeFlags.Number | TypeFlags.Boolean | TypeFlags.BooleanLiteral
+          | TypeFlags.Undefined | TypeFlags.Null | TypeFlags.Any | TypeFlags.Unknown
+          | TypeFlags.Never | TypeFlags.Void
         )
       ) return;
 
-      if (type.isUnion() || type.isIntersection()) {
-        for (const inner of (type as ts.UnionOrIntersectionType).types) walk(inner, depth + 1, stack, p);
+      if (type.isUnionType() || type.isIntersectionType()) {
+        for (const inner of type.getTypes()) walk(inner, depth + 1, stack, p);
         return;
       }
 
-      if (type.flags & ts.TypeFlags.Object) {
-        const objectType = type as ts.ObjectType;
+      if (type.isObjectType()) {
         // mirrors the FIXED tuple branch — tests the TARGET's ObjectFlags.Tuple
-        const tupleTarget = (objectType.objectFlags & ts.ObjectFlags.Reference)
-          ? ((objectType as ts.TypeReference).target as ts.ObjectType)
-          : objectType;
-        if (tupleTarget.objectFlags & ts.ObjectFlags.Tuple) {
-          for (const arg of checker.getTypeArguments(objectType as ts.TypeReference)) {
+        const tupleTarget = type.isTypeReference() ? type.getTarget() : type;
+        if (tupleTarget.objectFlags & ObjectFlags.Tuple) {
+          for (const arg of type.isTypeReference() ? checker.getTypeArguments(type) : []) {
             walk(arg, depth + 1, stack, `${p}[tuple]`);
           }
           return;
         }
-        if (objectType.objectFlags & ts.ObjectFlags.Reference) {
-          const targetName = (objectType as ts.TypeReference).target.symbol?.name ?? '';
+        if (type.isTypeReference()) {
+          const targetName = type.getTarget().getSymbol()?.name ?? '';
           if (targetName === 'Array' || targetName === 'ReadonlyArray') {
-            const arg = checker.getTypeArguments(objectType as ts.TypeReference)[0];
+            const arg = checker.getTypeArguments(type)[0];
             if (arg) walk(arg, depth + 1, stack, `${p}[]`);
             return;
           }
@@ -170,21 +159,21 @@ const probeExpansion = (root: ts.Type, limit: number): ProbeResult => {
         //? `type.symbol.name` read. Retained as an ASSERTABLE probe — with the
         //? tuple branch fixed above, nothing should reach it any more, which is
         //? what the `crash: 0` expectations below pin.
-        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- ts.Type.symbol is typed non-nullable but IS undefined at runtime for tuple references
-        if ((type as ts.Type & { symbol?: ts.Symbol }).symbol === undefined) {
+        const symbol = type.getSymbol();
+        if (symbol === undefined) {
           bailouts.push({ kind: 'crash', depth, path: p, rendered: checker.typeToString(type) });
           return;
         }
-        if (SKIP_EXPANSION_MIRROR.has(type.symbol.name || (type.aliasSymbol?.name ?? ''))) return;
+        if (SKIP_EXPANSION_MIRROR.has(symbol.name || (type.getAliasSymbol()?.name ?? ''))) return;
 
         for (const prop of checker.getPropertiesOfType(type)) {
-          // mirrors tsProgram.ts:341
-          if (prop.getName().startsWith('__@')) continue;
-          walk(checker.getTypeOfSymbol(prop), depth + 1, stack, `${p}.${prop.getName()}`);
+          // mirrors tsProgram.ts's symbol-key skip
+          if (prop.name.startsWith('__@')) continue;
+          walk(checker.getTypeOfSymbol(prop), depth + 1, stack, `${p}.${prop.name}`);
         }
       }
     } finally {
-      if (id !== undefined) stack.delete(id);
+      stack.delete(type.id);
     }
   };
 
@@ -197,15 +186,26 @@ const probeExpansion = (root: ts.Type, limit: number): ProbeResult => {
 //? files loaded TypeScript concurrently, skipping this entire 27-test suite.
 //? Give only this known-heavy setup a deterministic CI budget.
 beforeAll(() => {
-  program = buildFixtureProgram();
-  checker = program.getTypeChecker();
+  const { project } = openTsconfigProject(path.join(FIXTURE_DIR, 'tsconfig.json'));
+  program = project.program;
+  checker = project.checker;
 }, 30_000);
+afterAll(() => {
+  disposeTsApi();
+});
 
 describe('fixture integrity', () => {
   it('the decorator-based MikroORM fixture type-checks under experimentalDecorators', () => {
-    const diagnostics = ts.getPreEmitDiagnostics(program)
-      .filter((d) => d.file?.fileName.includes('__fixtures__'))
-      .map((d) => ts.flattenDiagnosticMessageText(d.messageText, ' '));
+    const fixtureFiles = program.getSourceFileNames().filter((fileName) => fileName.includes('__fixtures__'));
+    const diagnostics = [
+      ...program.getConfigFileParsingDiagnostics(),
+      ...program.getProgramDiagnostics(),
+      ...program.getSyntacticDiagnostics(fixtureFiles),
+      ...program.getGlobalDiagnostics(),
+      ...program.getSemanticDiagnostics(fixtureFiles),
+    ]
+      .filter((d) => d.fileName?.includes('__fixtures__'))
+      .map((d) => d.text);
     expect(diagnostics).toEqual([]);
   });
 
@@ -216,7 +216,7 @@ describe('fixture integrity', () => {
 
     //? The scaffold starter's `EntitySchema<Item>` shape CANNOT reproduce this:
     //? its type argument is a phantom generic, so expansion stops at depth 1.
-    const props = checker.getPropertiesOfType(items!).map((p) => p.getName());
+    const props = checker.getPropertiesOfType(items!).map((p) => p.name);
     expect(props).toContain('property');
     expect(props).toContain('snapshot');
   });
@@ -265,20 +265,20 @@ describe('expandTypeDetailed — the DEVKIT-1 failure mechanism (FIXED)', () => 
   it('root cause: a tuple reference carries ObjectFlags.Tuple on its TARGET, not its instance', () => {
     const tuple = findTypeByRendering(getRouteReturnType(), '[string, string]');
     expect(tuple, 'MikroORM EntityProperty.embedded?: [string, string] must be reachable').toBeDefined();
-    const objectType = tuple as ts.ObjectType;
+    if (!tuple?.isTypeReference()) throw new Error('the tuple must be a type reference');
 
     // The old tuple branch tested the INSTANCE for ObjectFlags.Tuple...
-    expect(objectType.objectFlags & ts.ObjectFlags.Tuple, 'instance is NOT flagged Tuple').toBe(0);
+    expect(tuple.objectFlags & ObjectFlags.Tuple, 'instance is NOT flagged Tuple').toBe(0);
     // ...but only the TARGET carries that flag — hence the fix tests the target.
-    expect(((objectType as ts.TypeReference).target as ts.ObjectType).objectFlags & ts.ObjectFlags.Tuple).toBeTruthy();
+    expect(tuple.getTarget().objectFlags & ObjectFlags.Tuple).toBeTruthy();
 
     // It is a Reference, so the old code entered the Reference branch...
-    expect(objectType.objectFlags & ts.ObjectFlags.Reference).toBeTruthy();
+    expect(tuple.objectFlags & ObjectFlags.Reference).toBeTruthy();
     // ...where the tuple target has NO symbol, so targetName === '' -> not Array, not SKIP_EXPANSION.
-    expect((objectType as ts.TypeReference).target.symbol).toBeUndefined();
+    expect(tuple.getTarget().getSymbol()).toBeUndefined();
 
     // ...and fell into `type.symbol.name`, where the instance has no symbol either. BOOM.
-    expect((tuple as ts.Type & { symbol?: ts.Symbol }).symbol).toBeUndefined();
+    expect(tuple.getSymbol()).toBeUndefined();
   });
 
   //? The empty tuple is the ONE shape the original instance-check DID catch:
@@ -286,8 +286,8 @@ describe('expandTypeDetailed — the DEVKIT-1 failure mechanism (FIXED)', () => 
   //? target and carries Tuple directly. This is why the branch was not 100%
   //? dead code — it fired for `[]` and nothing else.
   it('the empty tuple `[]` is flagged Tuple on the INSTANCE (why the old branch was not fully dead)', () => {
-    const empty = getTypeAliasType('EmptyTuple') as ts.ObjectType;
-    expect(empty.objectFlags & ts.ObjectFlags.Tuple).toBeTruthy();
+    const empty = getTypeAliasType('EmptyTuple');
+    expect(objectFlagsOf(empty) & ObjectFlags.Tuple).toBeTruthy();
     expect(expandTypeDetailed(empty, checker).text).toBe('[]');
   });
 
@@ -353,7 +353,7 @@ describe('expandTypeDetailed — which bailouts actually fire', () => {
   //? `Collection._em -> EntityManager -> Configuration -> MikroORMOptions -> driver`.
   it('REFUTED: Collection has no `_em` property; the deep chain runs through `property`', () => {
     const items = findTypeByRendering(getRouteReturnType(), 'Collection<FixtureItem, object>');
-    const props = checker.getPropertiesOfType(items!).map((p) => p.getName());
+    const props = checker.getPropertiesOfType(items!).map((p) => p.name);
     expect(props).not.toContain('_em');
 
     const { bailouts } = probeExpansion(getRouteReturnType(), 12);
@@ -377,7 +377,7 @@ describe('INFERENCE #1 — "typeToString serializes symbol-keyed members verbati
     const owner = findTypeByRendering(getRouteReturnType(), 'FixtureOwner');
     expect(checker.typeToString(owner!)).toBe('FixtureOwner');
     expect(
-      checker.typeToString(owner!, undefined, ts.TypeFormatFlags.InTypeAlias | ts.TypeFormatFlags.NoTruncation),
+      checker.typeToString(owner!, undefined, TypeFormatFlags.InTypeAlias | TypeFormatFlags.NoTruncation),
     ).toBe('FixtureOwner');
   });
 
@@ -386,13 +386,13 @@ describe('INFERENCE #1 — "typeToString serializes symbol-keyed members verbati
     //? Without InTypeAlias, typeToString prints the ALIAS NAME — itself more
     //? evidence that it names rather than serializes. InTypeAlias forces the
     //? structural rendering, which is the only mode that could leak a marker.
-    expect(checker.typeToString(symbolKeyed, undefined, ts.TypeFormatFlags.NoTruncation))
+    expect(checker.typeToString(symbolKeyed, undefined, TypeFormatFlags.NoTruncation))
       .toBe('LiteralWithSymbolKey');
 
     const rendered = checker.typeToString(
       symbolKeyed,
       undefined,
-      ts.TypeFormatFlags.InTypeAlias | ts.TypeFormatFlags.NoTruncation,
+      TypeFormatFlags.InTypeAlias | TypeFormatFlags.NoTruncation,
     );
     //? `__@iterator@N` is the INTERNAL escaped name (`symbol.getName()`).
     //? typeToString never emits it — it emits the real, parseable syntax.
@@ -405,7 +405,7 @@ describe('INFERENCE #1 — "typeToString serializes symbol-keyed members verbati
   //? `prop.getName()` raw at tsProgram.ts:353 — and :341 already skips those.
   it('the `__@` skip at tsProgram.ts:341 is what actually drops symbol members', () => {
     const symbolKeyed = getTypeAliasType('LiteralWithSymbolKey');
-    const props = checker.getPropertiesOfType(symbolKeyed).map((p) => p.getName());
+    const props = checker.getPropertiesOfType(symbolKeyed).map((p) => p.name);
     expect(props).toContain('id');
     expect(props.some((p) => p.startsWith('__@'))).toBe(true); // the raw escaped name IS `__@iterator@N`
 
@@ -418,7 +418,7 @@ describe('INFERENCE #1 — "typeToString serializes symbol-keyed members verbati
   it('Collection carries the `__@` symbol members that motivated the strip helper', () => {
     const items = findTypeByRendering(getRouteReturnType(), 'Collection<FixtureItem, object>');
     const symbolProps = checker.getPropertiesOfType(items!)
-      .map((p) => p.getName())
+      .map((p) => p.name)
       .filter((n) => n.startsWith('__@'));
     expect(symbolProps.map((n) => n.replace(/@\d+$/, ''))).toEqual(['__@iterator', '__@custom']);
   });
@@ -526,9 +526,9 @@ describe('SKIP_EXPANSION and the `Date` claim', () => {
 
   it('Date reaches SKIP_EXPANSION by symbol name, not via the Reference branch', () => {
     const dateType = getTypeAliasType('PlainDate');
-    expect(dateType.symbol.name).toBe('Date');
-    expect(SKIP_EXPANSION_MIRROR.has(dateType.symbol.name)).toBe(true);
+    expect(dateType.getSymbol()?.name).toBe('Date');
+    expect(SKIP_EXPANSION_MIRROR.has(dateType.getSymbol()?.name ?? '')).toBe(true);
     //? Non-generic -> no type arguments -> the :294 Reference branch does not apply.
-    expect((dateType as ts.ObjectType).objectFlags & ts.ObjectFlags.Reference).toBe(0);
+    expect(objectFlagsOf(dateType) & ObjectFlags.Reference).toBe(0);
   });
 });

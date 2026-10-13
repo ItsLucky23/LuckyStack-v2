@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeAll, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeAll, afterAll, afterEach } from 'vitest';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -21,32 +21,26 @@ const ROUTE = path.join(FIXTURE_DIR, 'mikroRoute_v1.ts');
 //? body, so anything it closes over from module scope would be in the TDZ.
 //? `expandTypeDetailed` and the rest stay REAL — only the program source is
 //? swapped, so this exercises the true extraction path.
-vi.mock('./tsProgram', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('./tsProgram')>();
-  const ts = await import('typescript');
+vi.mock('./tsApi', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./tsApi')>();
   const nodePath = await import('node:path');
   const dir = nodePath.default.join(
     nodePath.default.dirname(fileURLToPath(import.meta.url)),
     '__fixtures__',
   );
 
-  let program: import('typescript').Program | undefined;
+  let project: import('typescript-7-api/sync').Project | undefined;
   return {
     ...actual,
     getServerProgram: () => {
-      if (!program) {
-        const cfgPath = nodePath.default.join(dir, 'tsconfig.json');
-        const { config } = ts.readConfigFile(cfgPath, ts.sys.readFile.bind(ts.sys));
-        const { options, fileNames } = ts.parseJsonConfigFileContent(config, ts.sys, dir);
-        program = ts.createProgram(fileNames, options);
-      }
-      return program;
+      project ??= actual.openTsconfigProject(nodePath.default.join(dir, 'tsconfig.json')).project;
+      return project;
     },
   };
 });
 
 const { getInputTypeDetailsFromFile, getOutputTypeDetailsFromFile } = await import('./extractors');
-const { getServerProgram } = await import('./tsProgram');
+const { disposeTsApi, getServerProgram } = await import('./tsApi');
 const { getExtractionFailures, clearExtractionFailures, recordExtractionOutcome, findExtractionFailure } = await import('./extractionDiagnostics');
 
 //? Warm the (memoized) fixture program here rather than letting whichever test
@@ -55,6 +49,9 @@ const { getExtractionFailures, clearExtractionFailures, recordExtractionOutcome,
 beforeAll(() => {
   getServerProgram();
 }, 180_000);
+afterAll(() => {
+  disposeTsApi();
+});
 
 const EXTRACTION_TIMEOUT_MS = 120_000;
 

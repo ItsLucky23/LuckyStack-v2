@@ -1,7 +1,7 @@
 import path from 'node:path';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { getOutputTypeDetailsFromFile } from './extractors';
-import { getServerProgram } from './tsProgram';
+import { disposeTsApi, getServerProgram } from './tsApi';
 
 const FIXTURES = path.join(import.meta.dirname, '__fixtures__');
 const EXTRACTION_TIMEOUT_MS = 120_000;
@@ -18,6 +18,9 @@ const outputFor = (name: string): string => {
 beforeAll(() => {
   getServerProgram();
 }, 180_000);
+afterAll(() => {
+  disposeTsApi();
+});
 
 describe('wire projection — real ORM type matrix', () => {
   it('preserves a deep Prisma GetResult graph and projects each Date without collapsing a JsonValue-bearing model', () => {

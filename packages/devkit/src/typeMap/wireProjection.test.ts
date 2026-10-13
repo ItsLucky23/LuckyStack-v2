@@ -1,7 +1,7 @@
 import path from 'node:path';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { getInputTypeDetailsFromFile, getOutputTypeDetailsFromFile } from './extractors';
-import { getServerProgram } from './tsProgram';
+import { disposeTsApi, getServerProgram } from './tsApi';
 
 const FIXTURES = path.join(import.meta.dirname, '__fixtures__');
 const MIKRO_ROUTE = path.join(FIXTURES, 'mikroRoute_v1.ts');
@@ -15,6 +15,9 @@ const EXTRACTION_TIMEOUT_MS = 120_000;
 beforeAll(() => {
   getServerProgram();
 }, 180_000);
+afterAll(() => {
+  disposeTsApi();
+});
 
 describe('wire projection — outputs say what the client actually receives', () => {
   //? THE BUG THIS CLOSES: the generator emitted the type the HANDLER returns, but

@@ -1,6 +1,6 @@
-import { describe, it, expect } from 'vitest';
-import * as ts from 'typescript';
+import { afterAll, describe, it, expect } from 'vitest';
 import { stripSymbolKeyedMembers } from './emitterArtifacts';
+import { disposeTsApi, transpileSourceText } from './tsApi';
 
 //? DEVKIT-1: MikroORM entities carry symbol-keyed members whose escaped name is
 //? `__@<name>@<id>` — an invalid TS identifier `checker.typeToString` can leak
@@ -8,10 +8,13 @@ import { stripSymbolKeyedMembers } from './emitterArtifacts';
 
 const parses = (text: string): boolean => {
   const wrapped = `type T = ${text};`;
-  const sf = ts.createSourceFile('t.ts', wrapped, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
-  //? A syntactic error surfaces as a parse diagnostic on the source file.
-  return (sf as unknown as { parseDiagnostics: unknown[] }).parseDiagnostics.length === 0;
+  //? Transpiling reports only syntactic errors, which is exactly "parses".
+  return (transpileSourceText('t.ts', wrapped).diagnostics ?? []).length === 0;
 };
+
+afterAll(() => {
+  disposeTsApi();
+});
 
 describe('stripSymbolKeyedMembers', () => {
   it('returns the input untouched when there is no __@ marker', () => {

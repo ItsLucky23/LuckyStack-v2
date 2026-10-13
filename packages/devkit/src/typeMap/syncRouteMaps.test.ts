@@ -1,7 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest';
-import * as ts from 'typescript';
+import { describe, it, expect, beforeEach, afterAll } from 'vitest';
 import { buildTypeMapArtifacts, ApiTypeEntry, SyncTypeEntry } from './emitterArtifacts';
 import { clearExtractionFailures } from './extractionDiagnostics';
+import { disposeTsApi, transpileSourceText } from './tsApi';
 
 //? `syncMetaMap` + `syncInputSchemas` are what the test-runner sweeps walk to
 //? reach sync routes, the way `apiMetaMap` + `apiInputSchemas` let them reach
@@ -53,12 +53,15 @@ const sliceExport = (content: string, name: string): string => {
 };
 
 const syntaxErrors = (content: string): string[] => {
-  const result = ts.transpileModule(content, { reportDiagnostics: true, compilerOptions: { module: ts.ModuleKind.ESNext } });
-  return (result.diagnostics ?? []).map((d) => ts.flattenDiagnosticMessageText(d.messageText, '\n'));
+  const result = transpileSourceText('generated.ts', content);
+  return (result.diagnostics ?? []).map((d) => d.text);
 };
 
 beforeEach(() => {
   clearExtractionFailures();
+});
+afterAll(() => {
+  disposeTsApi();
 });
 
 describe('syncMetaMap', () => {

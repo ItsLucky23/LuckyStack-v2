@@ -1,7 +1,7 @@
 import path from 'node:path';
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { getInputTypeDetailsFromFile, getOutputTypeDetailsFromFile } from './extractors';
-import { getServerProgram } from './tsProgram';
+import { disposeTsApi, getServerProgram } from './tsApi';
 
 //? DEPTH + BREADTH coverage for the wire projection, beyond the single 2-level
 //? cycle in `wireProjection.test.ts`. The route returns a 3-level MikroORM graph
@@ -28,6 +28,9 @@ beforeAll(() => {
   //? Warm the memoized program (see wireProjection.test.ts for why).
   getServerProgram();
 }, 180_000);
+afterAll(() => {
+  disposeTsApi();
+});
 
 describe('wire projection — deep 3-level ORM graph', () => {
   it('projects each Date that survives the live entity\'s primary-key relation serialization', () => {

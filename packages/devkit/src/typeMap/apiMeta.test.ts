@@ -1,12 +1,14 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterAll, afterEach } from "vitest";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-//? `apiMeta.ts` only needs `inferHttpMethod` + `tryCatchSync` from core; stub
+//? `apiMeta.ts` only needs `inferHttpMethod` + `tryCatchSync` from core, plus
+//? `ROOT_DIR` as the compiler process's working directory (tsApi.ts); stub
 //? them so the test runs without a core build. `tryCatchSync` mirrors the real
 //? `[error, result]` tuple contract the extractors rely on.
 vi.mock("@luckystack/core", () => ({
+  ROOT_DIR: process.cwd(),
   inferHttpMethod: vi.fn(() => "POST"),
   tryCatchSync: <T>(fn: () => T): [unknown, T | undefined] => {
     try {
@@ -18,6 +20,11 @@ vi.mock("@luckystack/core", () => ({
 }));
 
 import { extractAuth } from "./apiMeta";
+import { disposeTsApi } from "./tsApi";
+
+afterAll(() => {
+  disposeTsApi();
+});
 
 const tmpFiles: string[] = [];
 
