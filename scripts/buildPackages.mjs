@@ -1,73 +1,78 @@
 #!/usr/bin/env node
-//? Builds every framework package via its own tsup config.
+//? Builds every framework package: JavaScript through each package's own tsup
+//? config, declarations through ONE TypeScript 7 solution build
+//? (`tsc -b tsconfig.packages.json`).
 //?
-//? Topology:
-//?   wave 1 → core                                         (no @luckystack deps)
-//?   wave 2 → email, login, devkit, router,
-//?            create-luckystack-app, secret-manager, mcp  (depend on core only — or nothing)
-//?   wave 3 → error-tracking, test-runner                  (type-check against login's dist —
-//?                                                         error-tracking: PostLogoutPayload;
-//?                                                         test-runner: dynamic import())
-//?   wave 4 → api, sync, presence                          (depend on login + core)
-//?   wave 5 → server                                       (depends on api, sync, presence, login, core)
-//?   wave 6 → docs-ui, cli                                 (docs-ui's ./register imports server; cli is a leaf)
+//? Why no waves: tsup only bundles JavaScript and keeps @luckystack/* external,
+//? so no package needs another package's dist to build. The only cross-package
+//? dependency is in the declarations, and `tsc -b` orders those itself from each
+//? package tsconfig's `references`, building independent packages in parallel.
+//? So every tsup build and the declaration build start at once, sharing one
+//? thread budget (scripts/threadBudget.mjs, LUCKYSTACK_MAX_THREADS).
 //?
-//? Within a wave packages build in parallel. Across waves we wait so the next
-//? wave can resolve dts paths against freshly-emitted dist files.
+//? The declaration outputs are cleaned first (`tsc -b --clean`) so a published
+//? dist never carries a stale .d.ts for a deleted source file; tsup's own clean
+//? removes only JavaScript, so the two writers never delete each other's files.
+//? After emit, relative declaration imports get explicit `.js` paths so
+//? NodeNext consumers resolve them (scripts/fixDeclarationSpecifiers.mjs).
 //?
-//? Each package's stdout/stderr is captured and replayed on completion so
-//? interleaved parallel logs don't become unreadable. A summary table prints
-//? at the end with per-package status + timing.
+//? Each build's stdout/stderr is captured and replayed on completion so
+//? interleaved parallel logs stay readable. A summary table prints at the end.
 //?
 //? Usage:
 //?   node scripts/buildPackages.mjs                  # build all
 //?   node scripts/buildPackages.mjs --pack-dry-run   # build all, then npm pack --dry-run per package
-//?   node scripts/buildPackages.mjs --serial         # disable parallelism (slow; debug)
+//?   node scripts/buildPackages.mjs --serial         # one build at a time, single-threaded (debug)
 
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import process from 'node:process';
 
-const WAVES = [
-  ['core'],
-  // mcp is a standalone stdio server (only deps: @modelcontextprotocol/sdk + zod);
-  // no @luckystack/* runtime imports, so its placement is free — kept here as a leaf.
-  ['email', 'login', 'devkit', 'router', 'create-luckystack-app', 'secret-manager', 'mcp', 'cron'],
-  // Both of these type-check against @luckystack/login's freshly-built
-  // dist/index.d.ts, so they MUST run in a wave after login:
-  //  - error-tracking: `import type { PostLogoutPayload } from '@luckystack/login'`
-  //    (auto-instrumentation type-checks 'postLogout' as a keyof HookPayloads,
-  //    which is only populated when login is in scope).
-  //  - test-runner: `await import('@luckystack/login')` in customTests/runAllTests;
-  //    tsup's DTS pass resolves it against login's dist (dist/ is gitignored, so a
-  //    fresh CI checkout has no stale dts to resolve against — TS7016 if built in
-  //    parallel with login).
-  ['error-tracking', 'test-runner'],
-  ['api', 'sync', 'presence'],
-  ['server'],
-  // docs-ui's `./register` side-effect imports `@luckystack/server`
-  // (registerCustomRoute) so the docs route auto-mounts on bare `npm i`.
-  // Build it AFTER server so server's dist/index.d.ts resolves for the dts pass.
-  // cli has no @luckystack runtime imports (it copies shipped assets + patches
-  // consumer files), so its placement is free — kept here with the tail tools.
-  ['docs-ui', 'cli'],
+import { fixDeclarationSpecifiers } from './fixDeclarationSpecifiers.mjs';
+import { getThreadBudget, threadEnv } from './threadBudget.mjs';
+
+const ALL_PACKAGES = [
+  'core',
+  'email',
+  'login',
+  'devkit',
+  'router',
+  'create-luckystack-app',
+  'secret-manager',
+  'mcp',
+  'cron',
+  'error-tracking',
+  'test-runner',
+  'api',
+  'sync',
+  'presence',
+  'server',
+  'docs-ui',
+  'cli',
 ];
 
-const ALL_PACKAGES = WAVES.flat();
+const DECLARATIONS = 'declarations';
 
 const args = new Set(process.argv.slice(2));
 const dryPack = args.has('--pack-dry-run');
 const serial = args.has('--serial');
 
+const budget = serial ? 1 : getThreadBudget();
+//? tsc 7 gets a quarter of the budget: the declaration build is one process over
+//? small projects, while the 17 tsup builds are each a short, mostly
+//? single-threaded esbuild run that parallelises better across processes.
+const declarationThreads = Math.max(1, Math.floor(budget / 4));
+const bundleSlots = serial ? 1 : Math.max(1, budget - declarationThreads);
+
 const COLORS = process.stdout.isTTY
   ? {
-      reset: '[0m',
-      bold: '[1m',
-      dim: '[2m',
-      red: '[31m',
-      green: '[32m',
-      yellow: '[33m',
-      cyan: '[36m',
+      reset: '\x1b[0m',
+      bold: '\x1b[1m',
+      dim: '\x1b[2m',
+      red: '\x1b[31m',
+      green: '\x1b[32m',
+      yellow: '\x1b[33m',
+      cyan: '\x1b[36m',
     }
   : { reset: '', bold: '', dim: '', red: '', green: '', yellow: '', cyan: '' };
 
@@ -76,14 +81,13 @@ const formatDuration = (ms) => {
   return `${(ms / 1000).toFixed(2)}s`;
 };
 
-const runOne = (name, command, commandArgs) =>
+const run = ({ name, cwd, command, commandArgs, threads }) =>
   new Promise((resolve) => {
-    const cwd = path.join('packages', name);
     const startedAt = Date.now();
     const child = spawn(command, commandArgs, {
       cwd,
       shell: true,
-      env: { ...process.env, FORCE_COLOR: '1' },
+      env: { ...threadEnv(threads), FORCE_COLOR: '1' },
     });
 
     let stdout = '';
@@ -115,30 +119,43 @@ const runOne = (name, command, commandArgs) =>
     });
   });
 
+const runInPackage = (name, commandArgs) =>
+  run({ name, cwd: path.join('packages', name), command: 'npm', commandArgs, threads: 1 });
+
+//? Runs `task` for every item with at most `slots` in flight, keeping input order.
+const pool = async (items, slots, task) => {
+  const results = new Array(items.length);
+  let next = 0;
+  const worker = async () => {
+    while (next < items.length) {
+      const index = next;
+      next += 1;
+      results[index] = await task(items[index]);
+    }
+  };
+  await Promise.all(Array.from({ length: Math.min(slots, items.length) }, worker));
+  return results;
+};
+
+const tscArgs = (extra) => [
+  'tsc',
+  '-b',
+  'tsconfig.packages.json',
+  ...(serial
+    ? ['--singleThreaded']
+    : ['--builders', String(declarationThreads), '--checkers', String(Math.min(2, declarationThreads))]),
+  ...extra,
+];
+
 const printResult = (result) => {
   const status = result.ok
     ? `${COLORS.green}OK${COLORS.reset}`
     : `${COLORS.red}FAILED${COLORS.reset}`;
-  const header = `${COLORS.bold}=== @luckystack/${result.name} — ${status} (${formatDuration(result.durationMs)}) ===${COLORS.reset}`;
+  const label = result.name === DECLARATIONS ? 'declarations (tsc -b)' : `@luckystack/${result.name}`;
+  const header = `${COLORS.bold}=== ${label} — ${status} (${formatDuration(result.durationMs)}) ===${COLORS.reset}`;
   process.stdout.write(`\n${header}\n`);
   if (result.stdout) process.stdout.write(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
-};
-
-const runWave = async (wave) => {
-  if (serial) {
-    const results = [];
-    for (const name of wave) {
-      const result = await runOne(name, 'npm', ['run', 'build']);
-      printResult(result);
-      results.push(result);
-    }
-    return results;
-  }
-  const inFlight = wave.map((name) => runOne(name, 'npm', ['run', 'build']));
-  const results = await Promise.all(inFlight);
-  for (const result of results) printResult(result);
-  return results;
 };
 
 const printSummary = (results, totalMs) => {
@@ -164,52 +181,48 @@ const printSummary = (results, totalMs) => {
 
 const main = async () => {
   const startedAt = Date.now();
-  const allResults = [];
 
-  for (const [waveIndex, wave] of WAVES.entries()) {
-    process.stdout.write(
-      `\n${COLORS.cyan}${COLORS.bold}── wave ${String(waveIndex + 1)}/${String(WAVES.length)}: ${wave.join(', ')}${COLORS.reset}\n`,
-    );
-
-    const results = await runWave(wave);
-    allResults.push(...results);
-
-    if (results.some((r) => !r.ok)) {
-      //? Stop the build sequence on the first wave that has any failures —
-      //? later waves' packages depend on the failed ones' freshly-built dts,
-      //? so continuing would just produce noise on top of the real error.
-      const remaining = WAVES.slice(waveIndex + 1).flat();
-      for (const skipped of remaining) {
-        allResults.push({
-          name: skipped,
-          ok: false,
-          durationMs: 0,
-          stdout: '',
-          stderr: `(skipped — earlier wave failed)\n`,
-        });
-      }
-      break;
-    }
+  const cleaned = await run({
+    name: DECLARATIONS,
+    cwd: '.',
+    command: 'npx',
+    commandArgs: tscArgs(['--clean']),
+    threads: 1,
+  });
+  if (!cleaned.ok) {
+    printResult(cleaned);
+    process.exit(1);
   }
 
+  process.stdout.write(
+    `\n${COLORS.cyan}${COLORS.bold}── building ${String(ALL_PACKAGES.length)} packages + declarations (${String(budget)} threads: ${String(declarationThreads)} tsc, ${String(bundleSlots)} tsup)${COLORS.reset}\n`,
+  );
+
+  const [declarations, bundles] = await Promise.all([
+    run({ name: DECLARATIONS, cwd: '.', command: 'npx', commandArgs: tscArgs([]), threads: declarationThreads }),
+    pool(ALL_PACKAGES, bundleSlots, async (name) => {
+      const result = await runInPackage(name, ['run', 'build']);
+      printResult(result);
+      return result;
+    }),
+  ]);
+  if (declarations.ok) {
+    const unresolved = ALL_PACKAGES.flatMap((name) => fixDeclarationSpecifiers(path.join('packages', name, 'dist')));
+    if (unresolved.length > 0) {
+      declarations.ok = false;
+      declarations.stderr += `\nUnresolvable relative imports in emitted declarations:\n  ${unresolved.join('\n  ')}\n`;
+    }
+  }
+  printResult(declarations);
+  const allResults = [declarations, ...bundles];
+
   if (dryPack && allResults.every((r) => r.ok)) {
-    process.stdout.write(`\n${COLORS.cyan}${COLORS.bold}── pack --dry-run (parallel)${COLORS.reset}\n`);
-    const packResults = serial
-      ? await (async () => {
-          const out = [];
-          for (const name of ALL_PACKAGES) {
-            const result = await runOne(name, 'npm', ['pack', '--dry-run']);
-            printResult(result);
-            out.push(result);
-          }
-          return out;
-        })()
-      : await (async () => {
-          const inFlight = ALL_PACKAGES.map((name) => runOne(name, 'npm', ['pack', '--dry-run']));
-          const out = await Promise.all(inFlight);
-          for (const r of out) printResult(r);
-          return out;
-        })();
+    process.stdout.write(`\n${COLORS.cyan}${COLORS.bold}── pack --dry-run${COLORS.reset}\n`);
+    const packResults = await pool(ALL_PACKAGES, budget, async (name) => {
+      const result = await runInPackage(name, ['pack', '--dry-run']);
+      printResult(result);
+      return result;
+    });
 
     const failed = packResults.filter((r) => !r.ok);
     if (failed.length > 0) {

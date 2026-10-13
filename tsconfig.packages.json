@@ -1,0 +1,24 @@
+{
+  //? Solution build for the publishable packages' declarations:
+  //?   tsc -b tsconfig.packages.json
+  //? Each package's references mirror its @luckystack imports, so the build order
+  //? follows the real dependency graph. cli and create-luckystack-app ship no types.
+  "files": [],
+  "references": [
+    { "path": "./packages/core" },
+    { "path": "./packages/email" },
+    { "path": "./packages/login" },
+    { "path": "./packages/devkit" },
+    { "path": "./packages/router" },
+    { "path": "./packages/secret-manager" },
+    { "path": "./packages/mcp" },
+    { "path": "./packages/cron" },
+    { "path": "./packages/error-tracking" },
+    { "path": "./packages/test-runner" },
+    { "path": "./packages/api" },
+    { "path": "./packages/sync" },
+    { "path": "./packages/presence" },
+    { "path": "./packages/server" },
+    { "path": "./packages/docs-ui" }
+  ]
+}

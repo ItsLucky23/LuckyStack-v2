@@ -3,9 +3,10 @@ import { defineConfig } from 'tsup';
 export default defineConfig({
   entry: ['src/index.ts', 'src/register.ts'],
   format: ['esm'],
-  dts: true,
+  //? Declarations come from `tsc -b tsconfig.packages.json`; clean keeps them.
+  dts: false,
   sourcemap: true,
-  clean: true,
+  clean: ['!**/*.d.ts', '!**/*.d.ts.map'],
   //? MUST stay on for multi-entry: `./register` shares the scheduler/registry
   //? singletons with the main entry — `splitting: false` would inline a private
   //? copy per entry and state written via `./register` would be invisible

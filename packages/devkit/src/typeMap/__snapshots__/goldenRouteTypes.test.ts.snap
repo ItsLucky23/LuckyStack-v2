@@ -23,19 +23,19 @@ exports[`golden baseline — generated route types > pins the inlined input + ou
 } | {
   status: 'success';
   result: {
-    name: string;
     id: string;
     email: string;
+    name: string;
     admin: boolean;
     avatar: string;
-    avatarFallback: string;
-    language: 'nl' | 'en' | 'de' | 'fr';
+    language: 'de' | 'en' | 'fr' | 'nl';
     theme: 'dark' | 'light';
-    provider: 'credentials' | 'google' | 'github' | 'x' | 'facebook' | 'linkedIn' | 'apple' | 'discord' | 'instagram';
+    provider: 'apple' | 'credentials' | 'discord' | 'facebook' | 'github' | 'google' | 'instagram' | 'linkedIn' | 'x';
     preferences: JsonValue;
     lastLogin: null | string;
     createdAt: string;
     updatedAt: string;
+    avatarFallback: string;
     roomCodes?: string[];
     location?: {
       pathName: string;
@@ -127,7 +127,7 @@ exports[`golden baseline — generated route types > pins the inlined input + ou
   },
   "playground/_api/throwError_v1.ts": {
     "input": "{
-  mode?: undefined | 'throw' | 'returnError';
+  mode?: undefined | 'returnError' | 'throw';
   errorCode?: undefined | string
 }",
     "output": "{
@@ -343,7 +343,7 @@ exports[`golden baseline — generated route types > pins the inlined input + ou
     "input": "{
   name?: undefined | string;
   theme?: undefined | 'dark' | 'light';
-  language?: undefined | 'nl' | 'en' | 'de' | 'fr';
+  language?: undefined | 'de' | 'en' | 'fr' | 'nl';
   avatar?: undefined | string
 }",
     "output": "{

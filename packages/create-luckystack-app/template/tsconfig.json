@@ -12,6 +12,8 @@
     "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
     "noEmit": true,
+    //? TypeScript 6+ no longer loads every visible `@types/*` package by itself.
+    "types": ["node"],
     "paths": {
       "src/*": ["./src/*"],
       "server/*": ["./server/*"],

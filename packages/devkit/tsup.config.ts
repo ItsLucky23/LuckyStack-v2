@@ -2,18 +2,15 @@ import { cp } from 'node:fs/promises';
 
 import { defineConfig } from 'tsup';
 
-//? devkit is tier-B (project-glue) but emits dts so consumers (project
-//? scripts, future plugins) get types. The package's tsconfig omits
-//? `rootDir` so tsc accepts cross-`src` imports from project files
-//? (e.g. server/utils/responseNormalizer for hot-reload). Output layout
-//? is unaffected — rollup-plugin-dts bundles into dist/index.d.ts
-//? regardless of where intermediate files came from.
+//? devkit is tier-B (project-glue) but ships declarations so consumers
+//? (project scripts, future plugins) get types. They come from
+//? `tsc -b tsconfig.packages.json`; clean keeps them.
 export default defineConfig({
   entry: ['src/index.ts', 'src/cli/validateDeploy.ts', 'src/supervisor.ts'],
   format: ['esm'],
-  dts: { entry: 'src/index.ts' },
+  dts: false,
   sourcemap: true,
-  clean: true,
+  clean: ['!**/*.d.ts', '!**/*.d.ts.map'],
   //? splitting MUST stay on for multi-entry packages: with it off, tsup inlines
   //? a private COPY of every shared module into each entry, so registry state
   //? written via one entry (e.g. ./register) is invisible through the other.

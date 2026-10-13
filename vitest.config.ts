@@ -1,4 +1,5 @@
 import { defineConfig, configDefaults } from "vitest/config";
+import { getThreadBudget } from "./scripts/threadBudget.mjs";
 import { buildLuckystackAliases } from "./vitest.aliases";
 
 export default defineConfig({
@@ -16,6 +17,9 @@ export default defineConfig({
     //? in the pure unit run.
     exclude: [...configDefaults.exclude, "**/*.integration.test.ts"],
     environment: "node",
+    //? Shares the build's thread budget (scripts/threadBudget.mjs) so a test
+    //? run beside lint/typecheck/build does not claim every core again.
+    maxWorkers: getThreadBudget(),
     //? Vitest's 5s default is wrong for this repo. The devkit typeMap suite
     //? (8 files today: tsProgram, transportInput, wireProjection*, extractors*,
     //? goldenRouteTypes) drives the real TypeScript compiler — each file builds

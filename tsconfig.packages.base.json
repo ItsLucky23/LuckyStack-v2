@@ -3,15 +3,34 @@
   "compilerOptions": {
     "module": "ESNext",
     "moduleResolution": "bundler",
+    //? Declarations come from `tsc -b tsconfig.packages.json`, not from tsup: one
+    //? solution build orders the packages by their references and builds independent
+    //? ones in parallel, where tsup's per-package dts pass forced sequential waves.
+    //? tsup only bundles the JavaScript (and its source maps).
+    "composite": true,
     "declaration": true,
-    "declarationMap": true,
-    "sourceMap": true,
+    //? Off: packages ship dist/ without src/, so a map would point at files the
+    //? consumer does not have.
+    "declarationMap": false,
+    "emitDeclarationOnly": true,
     "noEmit": false,
+    "rootDir": "${configDir}/src",
+    "outDir": "${configDir}/dist",
+    //? Outside dist/ so it is never packed, inside a gitignored .cache/.
+    "tsBuildInfoFile": "${configDir}/.cache/tsbuild/types.tsbuildinfo",
     "lib": ["ES2023", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
     //? TS 6 no longer auto-includes every visible `@types/*` the way 5.7 did, so
     //? declare the ambient type packages the package builds rely on: `node` for
     //? the server-side built-ins and `react`/`react-dom` for the `/client` subpaths.
     "types": ["node", "react", "react-dom"]
-  }
+  },
+  "include": ["${configDir}/src"],
+  //? Tests, fixtures and scaffold templates are not part of a package's public types.
+  "exclude": [
+    "${configDir}/src/**/*.test.ts",
+    "${configDir}/src/**/*.test.tsx",
+    "${configDir}/src/**/__fixtures__/**",
+    "${configDir}/src/templates/**"
+  ]
 }

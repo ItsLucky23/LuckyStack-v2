@@ -58,7 +58,8 @@
   "dependencies": {
     "@luckystack/core": "^0.10.2",
     "chokidar": "^5.0.0",
-    "dotenv": "^17.0.0"
+    "dotenv": "^17.0.0",
+    "typescript-7-api": "npm:typescript@7.1.0-dev.20261013.1"
   },
   "peerDependencies": {
     "@prisma/client": "^6.19.0",

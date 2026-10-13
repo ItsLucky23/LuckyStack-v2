@@ -3,8 +3,9 @@ import { defineConfig } from 'tsup';
 export default defineConfig({
   entry: ['src/index.ts'],
   format: ['esm'],
-  dts: true,
-  clean: true,
+  //? Declarations come from `tsc -b tsconfig.packages.json`; clean keeps them.
+  dts: false,
+  clean: ['!**/*.d.ts', '!**/*.d.ts.map'],
   sourcemap: true,
   splitting: false,
   target: 'node20',

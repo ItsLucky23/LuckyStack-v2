@@ -1,4 +1,14 @@
-﻿@import "tailwindcss";
+﻿@import "tailwindcss" source(none);
+
+/*
+ * Tailwind scans only code that renders in the browser: this app and the
+ * framework packages' sources (which the monorepo imports directly). Automatic
+ * detection would scan the whole repository — docs, generated indexes, the
+ * scaffolder template — and turn every class-like word in them into CSS.
+ */
+@source "./";
+@source "../packages/*/src/**/*.{ts,tsx}";
+@source not "../packages/create-luckystack-app";
 
 /*
  * COLOR PALETTE

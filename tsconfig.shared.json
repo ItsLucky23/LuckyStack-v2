@@ -1,9 +1,5 @@
 {
   "compilerOptions": {
-    /* TS 6 turns `baseUrl` (injected by tsup's dts build) into a hard deprecation
-       error (TS5101). Opt into the documented 5->6 migration grace so it keeps
-       functioning until we drop baseUrl entirely before TS 7. */
-    "ignoreDeprecations": "6.0",
     /* Language and Environment */
     "target": "ES2022", /* Set the JavaScript language version for emitted JavaScript and include compatible library declarations. */
     "lib": [
@@ -20,6 +16,9 @@
     "resolveJsonModule": true, /* Enable importing .json files. */
     "isolatedModules": true, /* Ensure that each file can be safely transpiled without relying on other imports. */
     "noErrorTruncation": true,
+    /* TS 7 checks in parallel; this keeps union/member order in emitted
+       declarations and messages identical between runs and with TS 6. */
+    "stableTypeOrdering": true,
     /* Type Checking */
     "strict": true, /* Enable all strict type-checking options. */
     "noUnusedLocals": true, /* Enable error reporting when a local variables aren't read. */

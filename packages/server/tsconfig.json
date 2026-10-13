@@ -4,5 +4,13 @@
     "outDir": "dist",
     "rootDir": "src"
   },
-  "include": ["src"]
+  "include": ["src"],
+  "references": [
+    { "path": "../api" },
+    { "path": "../core" },
+    { "path": "../devkit" },
+    { "path": "../login" },
+    { "path": "../presence" },
+    { "path": "../sync" }
+  ]
 }
