@@ -192,13 +192,37 @@ const run = (cmd, args, cwd, extraEnv = {}) => {
   return proc.status === 0;
 };
 
+//? On POSIX every long-lived child is spawned `detached`, which makes it the
+//? leader of its own process group. `child.kill()` would stop only the `sh -c`
+//? wrapper and orphan what it started (npx → verdaccio kept port 4873); a
+//? negative pid signals the whole group, also after the wrapper itself exited.
+const DETACH_GROUP = process.platform !== 'win32';
+
+//? A detached group no longer receives the terminal's Ctrl+C, so an interrupted
+//? run stops the groups it still owns itself.
+const liveTrees = new Set();
+for (const signal of ['SIGINT', 'SIGTERM']) {
+  process.on(signal, () => {
+    for (const child of liveTrees) stopProcessTree(child);
+    process.exit(130);
+  });
+}
+
+const trackProcessTree = (child) => {
+  liveTrees.add(child);
+  return child;
+};
+
 const stopProcessTree = (child) => {
-  if (child.pid === undefined || child.exitCode !== null) return;
+  liveTrees.delete(child);
+  if (child.pid === undefined) return;
   if (process.platform === 'win32') {
-    spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
-  } else {
-    child.kill();
+    if (child.exitCode === null) spawnSync('taskkill', ['/pid', String(child.pid), '/T', '/F'], { stdio: 'ignore' });
+    return;
   }
+  //? `--` is required: without it procps `kill` reads the negative group id as
+  //? an option, signals nothing and still exits 0.
+  spawnSync('kill', ['-TERM', '--', `-${String(child.pid)}`], { stdio: 'ignore' });
 };
 
 const getFreePort = () => new Promise((resolve, reject) => {
@@ -359,13 +383,13 @@ const smokeBuiltServer = async ({
     DEV_GOOGLE_CLIENT_SECRET: 'luckystack-e2e-secret',
   };
   Reflect.deleteProperty(childEnv, 'SERVER_PORT');
-  const child = spawn(command, commandArgs, {
+  const child = trackProcessTree(spawn(command, commandArgs, {
     cwd: projectDir,
     stdio: ['ignore', logFd, logFd],
     shell: true,
-    detached: false,
+    detached: DETACH_GROUP,
     env: childEnv,
-  });
+  }));
   let exited = false;
   child.on('exit', () => { exited = true; });
 
@@ -549,11 +573,11 @@ const main = async () => {
   //? into a mute 120-second timeout.
   const verdaccioLog = path.join(work, 'verdaccio.log');
   const logFd = fs.openSync(verdaccioLog, 'a');
-  const verdaccio = spawn(
+  const verdaccio = trackProcessTree(spawn(
     'npx',
     ['--yes', 'verdaccio@6', '--config', configPath, '--listen', `${HOST}:${String(PORT)}`],
-    { cwd: work, stdio: ['ignore', logFd, logFd], shell: true, detached: false },
-  );
+    { cwd: work, stdio: ['ignore', logFd, logFd], shell: true, detached: DETACH_GROUP },
+  ));
   let verdaccioExited = false;
   verdaccio.on('exit', () => {
     verdaccioExited = true;
@@ -799,13 +823,7 @@ const main = async () => {
     //? and silently poisons the NEXT run (it answers as a registry that has none
     //? of this run's tarballs). Learned the hard way — a stray from a manual run
     //? is exactly what made the first execution of this harness fail.
-    if (verdaccio.pid !== undefined && !verdaccioExited) {
-      if (process.platform === 'win32') {
-        spawnSync('taskkill', ['/pid', String(verdaccio.pid), '/T', '/F'], { stdio: 'ignore' });
-      } else {
-        verdaccio.kill();
-      }
-    }
+    stopProcessTree(verdaccio);
     if (args.keep) {
       console.log(`\n[e2e] --keep: left the workdir at ${work}`);
     } else {
