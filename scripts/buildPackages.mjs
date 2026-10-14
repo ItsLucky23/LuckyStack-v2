@@ -212,7 +212,7 @@ const main = async () => {
     const unresolved = ALL_PACKAGES.flatMap((name) => fixDeclarationSpecifiers(path.join('packages', name, 'dist')));
     if (unresolved.length > 0) {
       declarations.ok = false;
-      declarations.stderr += `\nUnresolvable relative imports in emitted declarations:\n  ${unresolved.join('\n  ')}\n`;
+      declarations.stderr += `\nImports a consumer cannot resolve in emitted declarations:\n  ${unresolved.join('\n  ')}\n`;
     }
   }
   printResult(declarations);

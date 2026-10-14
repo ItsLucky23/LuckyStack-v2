@@ -38,7 +38,7 @@ const META = {
   router: { desc: 'Run the load-balancer/router process in front of multiple service nodes.', example: 'npm run router' },
 
   // Build & bundle
-  build: { desc: 'Full production build: packages + generated artifacts, then typecheck + client + server bundle in parallel.', example: 'npm run build' },
+  build: { desc: 'Full production build: packages + generated artifacts, then typecheck in parallel with the client build followed by the server bundle (both write dist/).', example: 'npm run build' },
   verify: { desc: 'Completion gate in one go: lint, typecheck, build and unit tests in parallel within one thread budget (LUCKYSTACK_MAX_THREADS).', example: 'LUCKYSTACK_MAX_THREADS=6 npm run verify' },
   'build:packages': { desc: 'Build all @luckystack/* packages (JavaScript + declarations) in one parallel round.', example: 'npm run build:packages' },
   buildClient: { desc: 'Build only the client (type maps, then tsc + vite build in parallel).', example: 'npm run buildClient' },

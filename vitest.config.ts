@@ -11,7 +11,7 @@ export default defineConfig({
     alias: buildLuckystackAliases(import.meta.url),
   },
   test: {
-    include: ["packages/*/src/**/*.test.ts", "server/**/*.test.ts"],
+    include: ["packages/*/src/**/*.test.ts", "server/**/*.test.ts", "scripts/**/*.test.ts"],
     //? `*.integration.test.ts` need a real Redis — they live in the opt-in
     //? `npm run test:integration` suite (vitest.integration.config.ts), never
     //? in the pure unit run.

@@ -70,8 +70,10 @@ setDefaultPrismaResolver(buildDefaultPrismaClient);
 //? time*, so a `registerPrismaClient(...)` performed after this module is
 //? imported still wins. The empty-object Proxy target needs an `as` cast
 //? because the target is never read directly — every access is intercepted.
+//? The explicit annotation keeps the emitted declaration on `@prisma/client`;
+//? inferred, tsc would point it at Prisma's generated `.prisma/client` folder.
 // eslint-disable-next-line @typescript-eslint/consistent-type-assertions -- Proxy target placeholder
-export const prisma = new Proxy({} as PrismaClient, {
+export const prisma: PrismaClient = new Proxy({} as PrismaClient, {
   //? Bind methods to the real client so a CAPTURED method keeps its `this`.
   //? Without binding, a detached call (`const q = prisma.$queryRaw; q(...)`)
   //? runs with `this === undefined` and Prisma's internal `this`-access throws

@@ -28,8 +28,14 @@ const listDeclarations = (dir) => {
     .map((entry) => path.join(entry.parentPath, entry.name));
 };
 
-//? Returns the specifiers that resolve to no emitted declaration; the caller
-//? fails the build on any, because an unresolvable path is an `any` hole.
+//? Returns the specifiers a consumer cannot rely on; the caller fails the
+//? build on any, because an unresolvable path is an `any` hole.
+//?
+//? Besides relative paths without an emitted declaration, that includes a
+//? dot-prefixed package path such as `.prisma/client`. tsc writes the location
+//? an inferred type really lives in, and for Prisma that is its generated
+//? folder, not `@prisma/client`; the folder may be absent or elsewhere in a
+//? consumer install. The fix is an explicit type annotation on the export.
 export const fixDeclarationSpecifiers = (distDir) => {
   const unresolved = [];
   for (const file of listDeclarations(distDir)) {
@@ -39,6 +45,10 @@ export const fixDeclarationSpecifiers = (distDir) => {
     const { importedFiles } = ts.preProcessFile(source, true, true);
     const edits = [];
     for (const { fileName, pos } of importedFiles) {
+      if (fileName.startsWith('.') && !fileName.startsWith('./') && !fileName.startsWith('../')) {
+        unresolved.push(`${path.relative(process.cwd(), file)}: ${fileName} (generated package path; annotate the export's type)`);
+        continue;
+      }
       if (!fileName.startsWith('./') && !fileName.startsWith('../')) continue;
       //? `pos` is the opening quote; the specifier text follows it.
       const start = pos + 1;

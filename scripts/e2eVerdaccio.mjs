@@ -722,7 +722,16 @@ const main = async () => {
       //? BOTH typecheck and build (E1), mirroring what it already did for test.
       //? Leaving the step here would MASK a regression of that chaining.
       step('typecheck', () => run('npm', ['run', 'typecheck'], projectDir));
-      step('build', () => run('npm', ['run', 'build'], projectDir));
+      //? A zero exit is not a build: `vite build` empties dist/ when it writes,
+      //? so a server bundle produced beside it vanished while every step still
+      //? exited 0, and `npm run prod` had nothing to run. Check the artefacts.
+      const buildArtefactsExist = () => ['dist/index.html', 'dist/server.js'].every((rel) => {
+        const present = fs.existsSync(path.join(projectDir, rel));
+        if (!present) console.error(`[e2e]   missing build artefact: ${rel}`);
+        return present;
+      });
+      step('build', () => run('npm', ['run', 'build'], projectDir) && buildArtefactsExist());
+      step('verify (lint, typecheck, build in parallel)', () => run('npm', ['run', 'verify'], projectDir) && buildArtefactsExist());
 
       if (args.runtimeSmoke) {
         const orm = /(?:^|\s)--orm=([^\s]+)/.exec(args.scaffoldArgs)?.[1] ?? 'prisma';
