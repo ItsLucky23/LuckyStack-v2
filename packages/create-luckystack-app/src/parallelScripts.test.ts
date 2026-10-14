@@ -138,4 +138,21 @@ describe('withThreads.mjs', () => {
     expect(capped.stdout.trim()).toBe('1');
     expect(runNode('withThreads.mjs', []).status).toBe(2);
   });
+
+  it('caps by --max-threads, in either option order, and rejects a non-positive cap', () => {
+    const echo = ['node', '-e', 'console.log(process.argv[1])', '{threads}'];
+    const env = { LUCKYSTACK_MAX_THREADS: '8' };
+    expect(runNode('withThreads.mjs', ['--max-threads', '3', ...echo], env).stdout.trim()).toBe('3');
+    expect(runNode('withThreads.mjs', ['--max-threads', '3', '--mb-per-thread', '1', ...echo], env).stdout.trim()).toBe('3');
+    expect(runNode('withThreads.mjs', ['--max-threads', '20', ...echo], env).stdout.trim()).toBe('8');
+    expect(runNode('withThreads.mjs', ['--max-threads', '0', ...echo], env).status).toBe(2);
+  });
+
+  for (const [label, dir] of [['framework repo', REPO_ROOT], ['template', TEMPLATE]] as const) {
+    it(`${label}: lint caps type-aware ESLint at 3 workers`, () => {
+      //? Each worker rebuilds the whole TypeScript program; past ~3 that costs
+      //? more than it gains (measured in scripts/withThreads.mjs).
+      expect(scriptsOf(dir).lint).toContain('--max-threads 3');
+    });
+  }
 });
