@@ -456,7 +456,7 @@ export default function Playground() {
   //? the session whenever it changes (login, reload, server push). Join/Leave then
   //? update it optimistically from their response for instant feedback.
   const { session } = useSession();
-  const [joinedRooms, setJoinedRooms] = useState<string[]>([]);
+  const [joinedRooms, setJoinedRooms] = useState<string[]>(session?.roomCodes ?? []);
   const [echoMessage, setEchoMessage] = useState<string>('hello world');
   const [streamText, setStreamText] = useState<string>(
     'The quick brown fox jumps over the lazy dog. This sentence is being streamed token by token to demonstrate live broadcast streaming across every browser joined to the room.',
@@ -518,9 +518,12 @@ export default function Playground() {
   //? Seed + re-sync the joined-room badge from the persisted session. This is
   //? what makes the badge correct after a reload (the previous local-only state
   //? reset to empty on refresh even though the server session still had the room).
-  useEffect(() => {
+  //? Re-synced during render when the session's list changes, not in an effect.
+  const [syncedRoomCodes, setSyncedRoomCodes] = useState(session?.roomCodes);
+  if (syncedRoomCodes !== session?.roomCodes) {
+    setSyncedRoomCodes(session?.roomCodes);
     setJoinedRooms(session?.roomCodes ?? []);
-  }, [session?.roomCodes]);
+  }
 
   const log = (
     channel: LogEntry['channel'],

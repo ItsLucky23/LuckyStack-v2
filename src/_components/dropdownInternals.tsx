@@ -324,6 +324,7 @@ export function useDropdownMenu({ showSearch }: UseDropdownMenuArgs): DropdownMe
   useLayoutEffect(() => {
     if (!isMenuMounted || !isOpen || isMenuPositionReady) return;
     updateMenuPosition();
+    // eslint-disable-next-line react-x/set-state-in-effect -- measure-then-render before paint is what a layout effect is for; deferring it would show the menu unpositioned for a frame
     setIsMenuPositionReady(true);
   }, [isMenuMounted, isOpen, isMenuPositionReady, updateMenuPosition]);
 

@@ -193,6 +193,7 @@ export function useFloatingLayer(args: UseFloatingLayerArgs = {}): FloatingLayer
   useLayoutEffect(() => {
     if (!isMounted || !isOpen || isPositionReady) return;
     updatePosition();
+    // eslint-disable-next-line react-x/set-state-in-effect -- measure-then-render before paint is what a layout effect is for; deferring it would show the layer unpositioned for a frame
     setIsPositionReady(true);
   }, [isMounted, isOpen, isPositionReady, updatePosition]);
 

@@ -144,7 +144,7 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     };
     //? `socket` is a module-level singleton (not React state) — listed only to
     //? re-attach if the binding is replaced; eslint can't see it as reactive.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps, react-x/exhaustive-deps -- re-attach if the module-level socket binding is replaced
   }, [socket]);
 
   const contextValue = useMemo(() => ({

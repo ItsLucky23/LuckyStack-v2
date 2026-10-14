@@ -17,12 +17,12 @@ const applyDomClass = (theme: Theme): void => {
 
 export const useTheme = () => {
   const initialTheme = (getProjectConfig().defaultTheme) ?? 'light';
-  const [theme, setThemeState] = useState<Theme>(initialTheme);
+  const [themeState, setThemeState] = useState<Theme>(initialTheme);
 
   const setTheme = useCallback((next: Theme) => {
     setThemeState(next);
     applyDomClass(next);
   }, []);
 
-  return { theme, setTheme };
+  return { theme: themeState, setTheme };
 };

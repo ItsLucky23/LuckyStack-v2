@@ -26,3 +26,21 @@
 - `verify` groen (unit 2208/2208), `pack:dry`, AI-checks, e2e ALL GREEN.
 
 **Files touched:** `package.json`, `package-lock.json`, `scripts/{generateTypeMaps.ts,threadBudget.mjs,publishPackages.mjs,e2eVerdaccio.mjs}`, `packages/create-luckystack-app/template/{package.json,scripts/generateTypeMaps.ts,scripts/threadBudget.mjs}`, `packages/create-luckystack-app/src/parallelScripts.test.ts`, `packages/create-luckystack-app/CHANGELOG.md`, lesson 0026.
+
+## 2026-10-14 17:10 — Lint op 3 workers; react-x terug in de root-app
+
+**User prompt (summary):** react-x volgens advies terugzetten (apart, na de parallel-verbeteringen).
+
+**What I did:**
+- **Lint-cap:** ESLint gaf zelf `ESLintPoorConcurrencyWarning`. Koude lint per aantal workers gemeten; `withThreads.mjs` kreeg `--max-threads`, en lint in repo en template gebruikt er 3.
+- **react-x:** stond sinds juni uit de root-config, omdat de ESLint-9-lijn TypeScript op 5.x begrensde. 5.26.5 accepteert elke ESLint en TypeScript (de template draaide er al op), dus weer aan. 6 waarschuwingen, geen fouten, opgelost:
+  - Navbar en playground zetten state niet meer in een effect, maar tijdens render bij een gewijzigde waarde;
+  - dropdown en floating layer kregen dezelfde onderbouwde suppressie als de template;
+  - `SessionProvider` kreeg de bestaande suppressie ook voor react-x;
+  - `useTheme` kreeg een interne hernoeming.
+
+**Notes / decisions:** de state-wijzigingen in Navbar/playground zijn gedragsgelijk (reset bij route- resp. sessiewijziging), alleen zonder extra render met de oude waarde. Niet in een browser gecontroleerd.
+
+**Verification:** lint koud 1/2/3/4/6 workers: 41,3/31,7/29,3/31,6/34,9 s, CPU 63/92/124/177/239 s, piekgeheugen 2,8–9,4 GB. Volledige `verify` koud 55,5 → 52,0 s, warm 35,4 → 28,6 s (drukkere machine dan de eerste meting). `verify` groen (unit 2211/2211), lint 0 meldingen, `pack:dry`, AI-checks.
+
+**Files touched:** `scripts/withThreads.mjs` (+ templatekopie), lint-scripts in beide `package.json`, `eslint.official.config.js`, `package.json`/`package-lock.json` (react-x), `src/_components/{Navbar,dropdownInternals}.tsx`, `src/_components/inputs/floatingLayer.tsx`, `src/_providers/SessionProvider.tsx`, `src/playground/page.tsx`, `packages/core/src/react/useTheme.ts`, changelog en test van create-luckystack-app.

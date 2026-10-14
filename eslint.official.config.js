@@ -9,11 +9,10 @@ import globals from 'globals'
 import reactHooks from 'eslint-plugin-react-hooks'
 import reactRefresh from 'eslint-plugin-react-refresh'
 import tseslint from 'typescript-eslint'
-//? eslint-plugin-react-x / -react-dom temporarily removed: their eslint-9 line
-//? (1.x/2.x) caps `typescript` at 5.x and is incompatible with TypeScript 6,
-//? while the TS-6-compatible line (3.x+) requires ESLint 10 — which is itself
-//? blocked upstream (eslint-plugin-react + jsx-a11y have no eslint-10 release).
-//? Re-add `eslint-plugin-react-x@^5` (+ `react-dom`) once ESLint 10 is unblocked.
+//? react-x was out of this config from June 2026: its ESLint-9 line capped
+//? `typescript` at 5.x. 5.x accepts any ESLint and TypeScript, so it is back,
+//? matching the scaffold template.
+import reactX from 'eslint-plugin-react-x'
 import eslintPluginUnicorn from 'eslint-plugin-unicorn'
 import eslintPluginImportX from 'eslint-plugin-import-x'
 import jsxA11y from 'eslint-plugin-jsx-a11y'
@@ -33,6 +32,7 @@ export default tseslint.config(
       ...tseslint.configs.stylisticTypeChecked,
       js.configs.recommended,
       tseslint.configs.recommended,
+      reactX.configs.recommended,
       eslintPluginUnicorn.configs['flat/recommended'],
       eslintPluginImportX.flatConfigs.recommended,
       eslintPluginImportX.flatConfigs.typescript,

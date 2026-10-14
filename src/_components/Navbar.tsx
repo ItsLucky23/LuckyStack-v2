@@ -10,7 +10,7 @@ import {
 } from "@fortawesome/free-solid-svg-icons";
 import { type IconDefinition } from "@fortawesome/fontawesome-svg-core";
 import { FontAwesomeIcon } from "@fortawesome/react-fontawesome";
-import { ReactNode, useEffect, useState } from "react";
+import { ReactNode, useState } from "react";
 import { useLocation } from "react-router-dom";
 
 import { SessionLayout } from "config";
@@ -159,10 +159,14 @@ export default function Navbar({ items }: NavbarProps = {}) {
   //? active locale (useTranslator is a hook; cannot be called at module level).
   const resolvedItems = items ?? buildDefaultItems(translate);
 
-  // Auto-collapse on route change so the mobile drawer doesn't stay open.
-  useEffect(() => {
+  //? Auto-collapse on route change so the mobile drawer doesn't stay open.
+  //? Done during render (React's "adjust state when a prop changes"), not in an
+  //? effect, so the new page never renders a frame with the drawer still open.
+  const [foldedForPath, setFoldedForPath] = useState(location.pathname);
+  if (foldedForPath !== location.pathname) {
+    setFoldedForPath(location.pathname);
     setState('folded');
-  }, [location.pathname]);
+  }
 
   if (!session) return null;
 
