@@ -14,8 +14,16 @@ if (!npmCli) {
   process.exit(1);
 }
 
+//? npm hands an `allow-scripts` line from the user's `.npmrc` to this process as
+//? `npm_config_allow_scripts`; the child audit reads it as a CLI flag and fails
+//? with EALLOWSCRIPTS in a project. The child reads the same `.npmrc` itself.
+//? Same fix as installEnv in packages/create-luckystack-app/src/index.ts.
+const auditEnv = Object.fromEntries(
+  Object.entries(process.env).filter(([key]) => !/^npm_config_allow[-_]scripts$/i.test(key)),
+);
 const audit = spawnSync(process.execPath, [npmCli, 'audit', '--omit=dev', '--omit=optional', '--json'], {
   cwd: root,
+  env: auditEnv,
   encoding: 'utf8',
   shell: false,
 });
