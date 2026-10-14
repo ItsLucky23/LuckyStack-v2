@@ -11,7 +11,7 @@ The build is the production boundary. Application overlays and generated routing
 ## Minimal production procedure
 
 1. Configure public origins, bind addresses and topology from the application configuration and generated templates. Keep real secrets in the deployment's secret store or restricted local files, never in Git or image build arguments.
-2. Install from the lockfile with build dependencies available, then run `npm run build` and the project's verification gate. Retain generated data-layer runtime artifacts when preparing the production image.
+2. Install from the lockfile with build dependencies **and optional dependencies** available: the TypeScript 7 compiler that generates the route artifacts, and the bundlers, ship their native binaries as platform-specific optional packages, so `--omit=optional` breaks the build. Then run the project's verification gate, which includes the production build, and confirm the artifact contains both the client and the server entry; a zero exit code alone does not prove that. Retain generated data-layer runtime artifacts when preparing the production image.
 3. Apply an explicitly reviewed migration plan against the intended database, with a backup/rollback strategy. Startup must not silently migrate or seed shared data.
 4. Start the production command from the application's `package.json` under a process/container supervisor. Use an unprivileged private backend binding behind HTTPS ingress.
 5. Verify real browser flows, not just a health endpoint: login, a protected write, realtime reconnect and any streaming routes the app uses. Send the real public `Origin` header in HTTP smoke tests so origin-policy mistakes are visible.

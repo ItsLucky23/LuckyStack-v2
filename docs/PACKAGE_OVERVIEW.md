@@ -21,7 +21,7 @@ Choose an existing boundary before building the same capability in application c
 | Development API exploration | `@luckystack/docs-ui` | Discover generated contracts without turning an explorer into production access policy. |
 | External secret resolution | `@luckystack/secret-manager` | Keep committed references separate from real credentials and rotation ownership. |
 | AI context queries | `@luckystack/mcp` | Retrieve relevant generated context rather than loading or hand-maintaining code inventories. |
-| Evolve an existing app | `@luckystack/cli` | Preserve consumer ownership while adopting/refeshing framework-authored files. |
+| Evolve an existing app | `@luckystack/cli` | Preserve consumer ownership while adopting/refreshing framework-authored files. |
 | Start a new app | `create-luckystack-app` | Resolve initial choices coherently rather than assembling a partial skeleton by hand. |
 
 For a new project use `npx create-luckystack-app`; for an existing project inspect `npx luckystack list` and use [the adoption guide](LUCKYSTACK_ADD_GUIDE.md). Ask before installing a package. Do not infer prerequisites from this map or propose an unpublished placeholder as an available capability.
