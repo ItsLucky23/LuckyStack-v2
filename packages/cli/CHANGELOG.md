@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Package and consumer instructions use `AGENTS.md`. Updates preserve customized legacy `CLAUDE.md` and propose its manual retirement instead of deleting it. Handwritten docs emphasize rationale, ownership and operational safety.
 
+### Fixed
+
+- The dependency install started by `npx luckystack` no longer fails with `EALLOWSCRIPTS` when `~/.npmrc` contains `allow-scripts`: npm 11.19 passes that setting on as `npm_config_allow_scripts`, which the child install rejected as a command-line flag. The install starts without the variable; npm reads the setting from `.npmrc` itself.
+
 ## [0.9.0] - 2026-08-28
 
 ### Changed

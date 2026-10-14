@@ -1556,18 +1556,34 @@ const resolveCommandPath = (command: string): string | null => {
 //? Invoke comspec with the path in an OUTER+INNER quote pair: with `/s`, cmd
 //? strips the OUTER pair and runs the rest verbatim, so the inner pair keeps the
 //? spaced path intact. `windowsVerbatimArguments` stops cmd from re-quoting.
-const spawnResolved = (resolved: string, args: readonly string[], cwd: string): ReturnType<typeof spawnSync> => {
+const spawnResolved = (
+  resolved: string,
+  args: readonly string[],
+  cwd: string,
+  env: NodeJS.ProcessEnv = process.env,
+): ReturnType<typeof spawnSync> => {
   const needsShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(resolved);
   if (needsShell) {
     const comspec = process.env.ComSpec ?? 'cmd.exe';
     return spawnSync(comspec, ['/d', '/s', '/c', `""${resolved}" ${args.join(' ')}"`], {
       cwd,
+      env,
       stdio: 'inherit',
       windowsVerbatimArguments: true,
     });
   }
-  return spawnSync(resolved, [...args], { cwd, stdio: 'inherit' });
+  return spawnSync(resolved, [...args], { cwd, env, stdio: 'inherit' });
 };
+
+//? npm (11.19) hands its whole config to child processes as `npm_config_*`
+//? variables, so an `allow-scripts` line in the user's `.npmrc` reaches this
+//? process — run by npx — as `npm_config_allow_scripts`. The install we spawn
+//? reads that variable as a command-line flag, which npm rejects in a project
+//? install (EALLOWSCRIPTS), and the scaffold ends without dependencies. Dropping
+//? it loses nothing: the child npm reads the same `.npmrc` itself.
+//? Mirrored in packages/cli/src/lib/project.ts (this package has no dependencies).
+export const installEnv = (env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv =>
+  Object.fromEntries(Object.entries(env).filter(([key]) => !/^npm_config_allow[-_]scripts$/i.test(key)));
 
 //? `<pm> install` — the spawn is IDENTICAL for npm and bun (both take a bare
 //? `install`); only the resolved binary differs. bun resolves to `bun.exe` on
@@ -1582,7 +1598,7 @@ const runNpmInstall = (cwd: string, packageManager: PackageManager): void => {
     console.error(`\n[create-luckystack-app] Could not locate \`${packageManager}\` on PATH. Run \`${packageManager} install\` manually in the project directory.`);
     return;
   }
-  const result = spawnResolved(resolved, ['install'], cwd);
+  const result = spawnResolved(resolved, ['install'], cwd, installEnv());
   if (result.status !== 0) {
     console.error(`\n[create-luckystack-app] \`${packageManager} install\` failed. You can run it manually in the project directory.`);
   }

@@ -25,3 +25,17 @@
 **Files touched:** `package.json`, `packages/create-luckystack-app/template/{package.json,scripts/help.mjs}`, `scripts/{help,e2eVerdaccio,buildPackages,fixDeclarationSpecifiers}.mjs`, `scripts/fixDeclarationSpecifiers.test.ts`, `packages/create-luckystack-app/src/parallelScripts.test.ts`, `vitest.config.ts`, `packages/core/src/db.ts`, changelogs van core en create-luckystack-app, lesson 0025.
 
 **Runtime / remaining:** branch-omgeving via `dev` (24 uur TTL): `https://test-ts7-verification-luckystack-v2.keetlerop.nl`, frontend 5195, backend 4121, Mongo 27108, Redis 6418. Lokale registry op 4874 gestopt. Publicatie wacht op een nieuwe npm-token.
+
+## 2026-10-14 10:35 — Scaffold-installatie faalde op een `allow-scripts`-regel in `~/.npmrc`
+
+**User prompt (summary):** fix pushen (gedaan, CI 38534936628 groen 4/4), daarna de gemelde installatiefout van de scaffold oplossen en opruimen.
+
+**What I did:** npm 11.19's `resolve-allow-scripts.js` gelezen en gereproduceerd. Mijn eerdere diagnose ("template mist `allowScripts`") was fout: npm gooit `EALLOWSCRIPTS` alleen voor een waarde uit de opdrachtregel of de omgeving, en dat vóór het `package.json#allowScripts` leest. npm geeft zijn config zelf door als `npm_config_*` aan alles wat het start (`npx`, `npm run`), dus de `npm install` die de scaffolder (en `npx luckystack`) start, ziet de `.npmrc`-regel als verboden vlag. Beide installaties starten nu zonder `npm_config_allow_scripts`; de kind-npm leest de `.npmrc` zelf, er gaat geen beleid verloren.
+
+**Notes / decisions:**
+- Een `allowScripts`-veld in de template zou niets oplossen; niet toegevoegd.
+- Een vlag die iemand bewust meegeeft (`npx --allow-scripts=… create-luckystack-app`) valt nu ook weg voor de projectinstallatie; npm verbiedt die daar toch.
+
+**Verification:** test met echte npm: met de variabele `EALLOWSCRIPTS`, gefilterd status 0; pariteit scaffolder ↔ CLI. `verify` groen (unit 2208/2208), `pack:dry`, AI-checks, e2e ALL GREEN.
+
+**Files touched:** `packages/create-luckystack-app/src/{index.ts,installEnv.test.ts}`, `packages/cli/src/lib/project.ts`, changelogs van create-luckystack-app en cli.

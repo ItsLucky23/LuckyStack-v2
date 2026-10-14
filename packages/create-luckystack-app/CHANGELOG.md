@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Classes used only inside LuckyStack's own components reach the CSS.** Tailwind never scans `node_modules`, so a page guard's loading state (`animate-spin`, `border-t-primary`) and the presence indicator's corner classes were missing from a scaffold's stylesheet and rendered unstyled. `src/index.css` now adds `@source "../node_modules/@luckystack/*/dist/**/*.js"`.
+- **An `allow-scripts` line in `~/.npmrc` no longer breaks the dependency install.** npm 11.19 passes it to `npx create-luckystack-app` as the variable `npm_config_allow_scripts`, and the `npm install` the scaffolder starts then rejected it as a command-line flag (`EALLOWSCRIPTS`), leaving the project without dependencies. The install now starts without that variable; npm still reads the setting from `.npmrc` itself.
 
 ### Upgrading an existing project
 

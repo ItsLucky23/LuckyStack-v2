@@ -368,6 +368,15 @@ export const detectPackageManager = (root: string, pkg: PackageJson): string => 
   return 'npm';
 };
 
+//? npm (11.19) hands its whole config to child processes as `npm_config_*`
+//? variables, so an `allow-scripts` line in the user's `.npmrc` reaches this
+//? process — run by npx — as `npm_config_allow_scripts`. The install we spawn
+//? reads that variable as a command-line flag, which npm rejects in a project
+//? install (EALLOWSCRIPTS). Dropping it loses nothing: the child npm reads the
+//? same `.npmrc` itself. Mirrors create-luckystack-app's `installEnv`.
+export const installEnv = (env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv =>
+  Object.fromEntries(Object.entries(env).filter(([key]) => !/^npm_config_allow[-_]scripts$/i.test(key)));
+
 export const runNpmInstall = (root: string, pkg: PackageJson = {}): boolean => {
   //? Security (Windows): `spawnSync('npm.cmd', …, { shell: true, cwd: root })` lets
   //? cmd.exe resolve `npm.cmd` against the CWD BEFORE PATH — a malicious `npm.cmd`
@@ -397,11 +406,12 @@ export const runNpmInstall = (root: string, pkg: PackageJson = {}): boolean => {
     const comspec = process.env.ComSpec ?? 'cmd.exe';
     const shellResult = spawnSync(comspec, ['/d', '/s', '/c', `""${resolved}" install"`], {
       cwd: root,
+      env: installEnv(),
       stdio: 'inherit',
       windowsVerbatimArguments: true,
     });
     return shellResult.status === 0;
   }
-  const result = spawnSync(resolved, ['install'], { cwd: root, stdio: 'inherit' });
+  const result = spawnSync(resolved, ['install'], { cwd: root, env: installEnv(), stdio: 'inherit' });
   return result.status === 0;
 };
