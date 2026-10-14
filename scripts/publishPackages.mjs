@@ -25,8 +25,15 @@
 //?   node scripts/publishPackages.mjs                  # real publish (with provenance — CI only)
 //?   node scripts/publishPackages.mjs --no-provenance  # real publish from a dev machine (no OIDC available;
 //?                                                     # overrides the package.json `publishConfig.provenance: true`)
+//?   --parallel / --sequential                         # force or forbid publishing a wave's packages at once
+//?
+//? PARALLEL: the packages inside one wave do not depend on each other, so they
+//? publish at the same time (each npm call mostly waits on the registry). Waves
+//? stay in order. A real publish from a terminal stays sequential unless
+//? `--parallel` is passed: npm may then ask for a one-time password, and several
+//? prompts at once cannot be answered.
 
-import { spawnSync } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import fs from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
@@ -84,28 +91,70 @@ if (!run('npm', ['run', 'build:packages'], ROOT)) {
   process.exit(1);
 }
 
-console.log(`\n${dryRun ? '[DRY RUN] ' : ''}Step 2/2 — publishing in dependency-wave order…`);
+const parallel = flags.has('--parallel') || (!flags.has('--sequential') && (dryRun || !process.stdin.isTTY));
+
+//? Buffered variant for parallel publishing: each package's npm output is
+//? printed in one piece when it finishes, so concurrent logs stay readable.
+const runBuffered = (cmd, args, cwd) =>
+  new Promise((resolve) => {
+    const chunks = [];
+    const child = spawn(cmd, args, { cwd, shell: process.platform === 'win32' });
+    child.stdout.on('data', (chunk) => chunks.push(chunk));
+    child.stderr.on('data', (chunk) => chunks.push(chunk));
+    child.on('error', (err) => resolve({ ok: false, output: `spawn error: ${String(err)}\n` }));
+    child.on('close', (code) => resolve({ ok: code === 0, output: Buffer.concat(chunks).toString() }));
+  });
+
+const isAlreadyPublishedAsync = async (dir) => {
+  const pkg = readPkg(dir);
+  const res = await runBuffered('npm', ['view', `${pkg.name}@${pkg.version}`, 'version'], ROOT);
+  return res.ok && res.output.trim() === pkg.version;
+};
+
+const provenanceArgs = noProvenance ? ['--provenance=false'] : ['--provenance'];
+const publishArgs = ['publish', '--access', 'public', ...(dryRun ? ['--dry-run'] : provenanceArgs)];
+
+//? Skip versions already on the registry so a re-run after a partial failure
+//? finishes the rest instead of aborting. (A dry-run still exercises every
+//? package — it never uploads, so there's nothing to skip.)
+const publishOne = async (name) => {
+  const cwd = path.join(ROOT, 'packages', name);
+  if (!parallel) {
+    if (!dryRun && isAlreadyPublished(name)) return { name, outcome: 'skipped' };
+    console.log(`\n→ (packages/${name}) npm ${publishArgs.join(' ')}`);
+    return { name, outcome: run('npm', publishArgs, cwd) ? 'done' : 'failed' };
+  }
+  if (!dryRun && (await isAlreadyPublishedAsync(name))) return { name, outcome: 'skipped' };
+  const result = await runBuffered('npm', publishArgs, cwd);
+  process.stdout.write(`\n→ (packages/${name}) npm ${publishArgs.join(' ')}\n${result.output}`);
+  return { name, outcome: result.ok ? 'done' : 'failed' };
+};
+
+console.log(`\n${dryRun ? '[DRY RUN] ' : ''}Step 2/2 — publishing in dependency-wave order${parallel ? ', each wave in parallel' : ''}…`);
 const done = [];
 const skipped = [];
 for (const wave of WAVES) {
-  for (const name of wave) {
-    //? Skip versions already on the registry so a re-run after a partial failure
-    //? finishes the rest instead of aborting. (A dry-run still exercises every
-    //? package — it never uploads, so there's nothing to skip.)
-    if (!dryRun && isAlreadyPublished(name)) {
-      console.log(`\n• (packages/${name}) already published at this version — skipping.`);
-      skipped.push(name);
-      continue;
+  const results = [];
+  if (parallel) {
+    results.push(...(await Promise.all(wave.map((name) => publishOne(name)))));
+  } else {
+    for (const name of wave) {
+      const result = await publishOne(name);
+      results.push(result);
+      if (result.outcome === 'failed') break;
     }
-    const provenanceArgs = noProvenance ? ['--provenance=false'] : ['--provenance'];
-    const args = ['publish', '--access', 'public', ...(dryRun ? ['--dry-run'] : provenanceArgs)];
-    console.log(`\n→ (packages/${name}) npm ${args.join(' ')}`);
-    if (!run('npm', args, path.join(ROOT, 'packages', name))) {
-      console.error(`\nPublish FAILED for @luckystack/${name}. Done this run: ${done.join(', ') || '(none)'}; skipped (already published): ${skipped.join(', ') || '(none)'}.`);
-      console.error('Fix the cause, then re-run — the script now skips already-uploaded versions, so a re-run completes the remaining packages.');
-      process.exit(1);
-    }
-    done.push(name);
+  }
+  for (const result of results) {
+    if (result.outcome === 'skipped') console.log(`\n• (packages/${result.name}) already published at this version — skipping.`);
+    if (result.outcome === 'done') done.push(result.name);
+    if (result.outcome === 'skipped') skipped.push(result.name);
+  }
+  const failed = results.filter((result) => result.outcome === 'failed').map((result) => result.name);
+  //? A failed wave stops the run before the next wave: later waves depend on it.
+  if (failed.length > 0) {
+    console.error(`\nPublish FAILED for ${failed.map((name) => `@luckystack/${name}`).join(', ')}. Done this run: ${done.join(', ') || '(none)'}; skipped (already published): ${skipped.join(', ') || '(none)'}.`);
+    console.error('Fix the cause, then re-run — the script now skips already-uploaded versions, so a re-run completes the remaining packages.');
+    process.exit(1);
   }
 }
 

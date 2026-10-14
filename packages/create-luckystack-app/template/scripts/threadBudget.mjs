@@ -22,6 +22,15 @@ export const splitThreads = (total, weights) => {
   const exact = weights.map((weight) => (total * weight) / weightSum);
   const shares = exact.map((value) => Math.max(1, Math.floor(value)));
   let spare = total - shares.reduce((sum, share) => sum + share, 0);
+  //? Raising a small share to the one-thread minimum can overshoot the budget
+  //? (4 threads over weights 2/1/1/8 gave 1/1/1/2); take it back from the
+  //? largest shares.
+  while (spare < 0) {
+    const largest = shares.indexOf(Math.max(...shares));
+    if (shares[largest] <= 1) break;
+    shares[largest] -= 1;
+    spare += 1;
+  }
   const byRemainder = exact
     .map((value, index) => ({ index, remainder: value - Math.floor(value) }))
     .sort((a, b) => b.remainder - a.remainder);

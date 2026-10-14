@@ -94,12 +94,14 @@ describe('threadBudget', () => {
   it('splits the budget by weight without exceeding it', () => {
     expect(splitThreads(12, [4, 2, 1, 1, 4])).toEqual([4, 2, 1, 1, 4]);
     expect(splitThreads(10, [1, 1, 1])).toEqual([4, 3, 3]);
-    for (const total of [1, 2, 5, 7, 12, 24]) {
-      const weights = [4, 2, 1, 4];
-      const shares = splitThreads(total, weights);
-      const sum = shares.reduce((a, b) => a + b, 0);
-      expect(shares.every((share) => share >= 1)).toBe(true);
-      expect(sum).toBe(Math.max(total, weights.length));
+    for (const weights of [[4, 2, 1, 4], [2, 1, 1, 8], [1, 1, 10], [4, 2, 1]]) {
+      for (const total of [1, 2, 3, 4, 5, 6, 7, 12, 24]) {
+        const shares = splitThreads(total, weights);
+        const sum = shares.reduce((a, b) => a + b, 0);
+        const label = `${String(total)} over ${JSON.stringify(weights)} → ${JSON.stringify(shares)}`;
+        expect(shares.every((share) => share >= 1), label).toBe(true);
+        expect(sum, label).toBe(Math.max(total, weights.length));
+      }
     }
   });
 

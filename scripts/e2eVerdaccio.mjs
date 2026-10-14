@@ -108,14 +108,23 @@ const resolveBun = () => {
   return null;
 };
 
+//? A local listener accepts within milliseconds, so a connect that gets no
+//? answer at all means nothing listens. Without the timeout that case waited for
+//? the kernel's SYN retries (~130 s): WSL's mirrored networking leaves a SYN to
+//? a free 127.0.0.1 port unanswered instead of refusing it, and the pre-flight
+//? check stalled the run for over two minutes before verdaccio even started.
+const PORT_PROBE_TIMEOUT_MS = 2000;
 const isPortOpen = async (port) =>
   new Promise((resolve) => {
     const socket = net.connect(port, HOST);
-    socket.on('connect', () => {
-      socket.end();
-      resolve(true);
-    });
-    socket.on('error', () => resolve(false));
+    const settle = (open) => {
+      clearTimeout(timer);
+      socket.destroy();
+      resolve(open);
+    };
+    const timer = setTimeout(() => settle(false), PORT_PROBE_TIMEOUT_MS);
+    socket.on('connect', () => settle(true));
+    socket.on('error', () => settle(false));
   });
 
 const waitForPort = async (port, timeoutMs, isDead) => {
@@ -606,7 +615,9 @@ const main = async () => {
     //? script's registry-side idempotency check. Invoked via `node` directly, not
     //? `npm run`: npm@11 eats the flag when routed through a script (lesson 0005).
     step(`publish ${String(packages.length)} packages to the local registry`, () =>
-      run('node', ['scripts/publishPackages.mjs', '--no-provenance'], ROOT, {
+      //? `--parallel`: the local registry never asks for a one-time password, so
+      //? the terminal-run default (sequential) only costs time here.
+      run('node', ['scripts/publishPackages.mjs', '--no-provenance', '--parallel'], ROOT, {
         ...registryEnv,
         NPM_CONFIG_PROVENANCE: 'false',
       }),
