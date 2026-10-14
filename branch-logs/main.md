@@ -1531,3 +1531,15 @@ PR #9 kreeg om een verwante reden nooit CI: `pull_request` draait tegen `refs/pu
 **Runtime / remaining:** via `dev` opnieuw gestart en beschermd; blijft draaien op `https://main-luckystack-v2.keetlerop.nl`, frontend 5181 (PID 349256), backend 4107 (PID 349334), Mongo 27106 en Redis 6420. Oude app-poorten 5191/4117 en de tussentijdse 5186/4112 zijn niet meer de actieve omgeving. Finale testontvangst: `/tmp/ls-mongo-repair-live-sweep-final.log`; infrastructuurtests: `/tmp/ls-mongo-readiness-tests.log`. Data-back-up blijft beschikbaar; niets gepubliceerd.
 
 **Integratie (2026-10-13, latere sessie):** dit werk stond ongecommit op v0.9.1 in de hoofdcheckout. Gecommit op `chore/docs-integration` en gerebased op GitHub-`main` (v0.10.2). De twee ADR's van dit werk kregen de nummers 0065 en 0066, omdat 0057–0064 al op `main` gepubliceerd waren. Docs-conflicten opgelost door de WHY-first-vorm te houden en de nieuwe afspraken uit 0.9.2–0.10.2 (ADR 0057–0064) erin te verwerken.
+
+## 2026-10-14 22:05 — v0.10.2 en v0.11.0 gepubliceerd
+
+**User prompt (summary):** nieuwe npm-token in GitHub gezet; "ja go" voor 0.10.2 en 0.11.0 erachteraan, "als die niet groen is dan fixen en blijven proberen publishen totdat het gelukt is".
+
+**v0.10.2.** De publicatie van 2026-10-09 (`publish.yml` run 37940598273) faalde alleen op de echte publish-stap: de `NPM_TOKEN`-secret was verlopen. Run opnieuw gestart (poging 2, tag `v0.10.2` op `8f72a56`): elke stap `success`, 17/17 op de registry met provenance-attestatie, geverifieerd via directe fetch van `/<pakket>/0.10.2` (`cron` en `create-luckystack-app` kwamen pas na enkele minuten door; propagatie-lag, zoals bij v0.10.1).
+
+**v0.11.0.** Lockstep minor-bump 0.10.2 → 0.11.0 (manifests + lockfile), alle `[Unreleased]`-secties afgesloten als `[0.11.0] - 2026-10-14`. Minor omdat de TypeScript 7-toolchain, devkit op de TypeScript 7.1-API en de `verify`-gate handmatige upgradestappen vragen. Gate vóór de tag: `verify` (unit 2211/2211), `lint:packages`, `audit:production` (critical=0 high=0), `pack:dry`, `publish:dry`, `ai:changelog-check`, `ai:lint`, `ai:check-ids --backrefs`, `e2e:verdaccio` ALL GREEN. `dc878f3` + tag `v0.11.0` gepusht → `publish.yml` run 38627942423 en `ci` run 38627939122 groen; registry 17/17 met provenance om 22:04, `latest` = 0.11.0. Tarball-spotcheck: devkit hangt aan `typescript-7-api` = `typescript@7.1.0-dev.20261013.1`; de scaffold-template heeft `verify`, `generateArtifacts` en de lint-cap `--max-threads 3`; de scaffolder bevat de `npm_config_allow_scripts`-strip.
+
+**Onderweg gevonden.** `audit:production` faalde lokaal met "no vulnerabilities map": dezelfde oorzaak als `installEnv` in `55506f0` (npm 11.19 geeft `allow-scripts` uit `~/.npmrc` door als `npm_config_allow_scripts`, het kind-`npm audit` weigert dan met EALLOWSCRIPTS). In CI onzichtbaar omdat daar geen `.npmrc` met die regel staat. Het script filtert die variabele nu uit de omgeving van het kind.
+
+**Files:** `scripts/auditProduction.mjs`, 17 × `packages/*/package.json` + `CHANGELOG.md`, `package-lock.json`, `branch-logs/{main,INDEX}.md`. Tags `v0.11.0`.
