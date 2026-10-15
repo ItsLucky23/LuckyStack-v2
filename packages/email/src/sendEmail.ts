@@ -246,7 +246,7 @@ const buildMessage = (input: SendEmailInput, config: EmailConfigShape): BuildMes
 //? a KNOWN address), so scrub any email-address-shaped substring with a minimal
 //? regex before the error escapes.
 const EMAIL_ADDRESS_PATTERN = /[^\s<>@]+@[^\s<>@]+\.[^\s<>@]+/g;
-const scrubEmailPii = (value: string): string => value.replaceAll(EMAIL_ADDRESS_PATTERN, '[redacted-email]');
+export const scrubEmailPii = (value: string): string => value.replaceAll(EMAIL_ADDRESS_PATTERN, '[redacted-email]');
 
 //? Normalize the `sender.send` tuple into an `EmailResult`. Mirrors the inline
 //? mapping exactly: a thrown error → `send-threw` (or its message); a
@@ -360,7 +360,13 @@ const normalizeSendResult = (sendError: Error | null, sendResult: EmailResult | 
 //? Recipients and subjects are redacted in log output (EMAIL-O6) — PII must
 //? not reach the server log in plain text. The Sentry capture path already
 //? applied redaction; the logger path was missing it.
-const reportSendOutcome = (senderName: string, message: EmailMessage, result: EmailResult, config: EmailConfigShape): void => {
+const reportSendOutcome = (
+  senderName: string,
+  message: EmailMessage,
+  result: EmailResult,
+  config: EmailConfigShape,
+  internals: SendEmailInternals,
+): void => {
   if (result.ok) {
     if (config.logging.sends) {
       getLogger().info(`[email:${senderName}] sent`, { to: redactRecipients(message.to), subject: redactSubject(message.subject), id: result.id });
@@ -372,6 +378,10 @@ const reportSendOutcome = (senderName: string, message: EmailMessage, result: Em
     getLogger().warn(`[email:${senderName}] FAILED`, { to: redactRecipients(message.to), subject: redactSubject(message.subject), reason: result.reason });
   }
 
+  if (internals.onFailure) {
+    internals.onFailure(result);
+    return;
+  }
   captureException(result.cause ?? new Error(`Email send failed: ${result.reason}`), {
     fn: 'sendEmail',
     senderName,
@@ -392,7 +402,30 @@ const reportSendOutcome = (senderName: string, message: EmailMessage, result: Em
 //? Thin orchestrator over `buildMessage` → `preEmailSend` hook →
 //? `sender.send` (normalized via `normalizeSendResult`) → `postEmailSend` hook
 //? → `reportSendOutcome` (E13 decomposition — same effects, same order).
-export const sendEmail = async (input: SendEmailInput): Promise<EmailResult> => {
+//? `sendEmail` (end of file) is this orchestrator with default internals.
+
+/** Package-internal controls; not part of the public `sendEmail` input. */
+export interface SendEmailInternals {
+  /**
+   * Receives a failed send instead of the per-mail tracker capture, so
+   * `sendEmailBatch` can report one event per failure reason rather than one
+   * per recipient (ADR 0069). Logging is unchanged.
+   */
+  onFailure?: (failure: Extract<EmailResult, { ok: false }>) => void;
+}
+
+//? Like `tryCatch`, but without its automatic tracker capture: in a batch the
+//? caller aggregates failures, and a capture per thrown error would still
+//? produce one event per recipient.
+export const settle = <T>(run: () => Promise<T>): Promise<[Error | null, T | null]> =>
+  Promise.resolve()
+    .then(run)
+    .then(
+      (value): [null, T] => [null, value],
+      (error: unknown): [Error, null] => [error instanceof Error ? error : new Error(String(error)), null],
+    );
+
+export const sendEmailWith = async (input: SendEmailInput, internals: SendEmailInternals): Promise<EmailResult> => {
   const config = getEmailConfig();
   const sender = resolveSender(input);
 
@@ -453,9 +486,11 @@ export const sendEmail = async (input: SendEmailInput): Promise<EmailResult> => 
   //? timeout after provider dispatch is explicitly `deliveryOutcome: unknown`;
   //? callers must retry with the same idempotency key instead of assuming the
   //? first attempt failed. Legacy adapters still work because context is optional.
-  const [sendError, sendResult] = await tryCatch<EmailResult, undefined>(() =>
-    sendWithControls(sender, message, input, config.sendTimeoutMs, idempotencyKey),
-  );
+  const dispatch = (): Promise<EmailResult> =>
+    sendWithControls(sender, message, input, config.sendTimeoutMs, idempotencyKey);
+  const [sendError, sendResult] = internals.onFailure
+    ? await settle(dispatch)
+    : await tryCatch<EmailResult, undefined>(dispatch);
   const result = normalizeSendResult(sendError, sendResult);
 
   await dispatchHook('postEmailSend', {
@@ -467,7 +502,9 @@ export const sendEmail = async (input: SendEmailInput): Promise<EmailResult> => 
     deliveryOutcome: result.ok ? undefined : result.deliveryOutcome,
   });
 
-  reportSendOutcome(sender.name, message, result, config);
+  reportSendOutcome(sender.name, message, result, config, internals);
 
   return result;
 };
+
+export const sendEmail = (input: SendEmailInput): Promise<EmailResult> => sendEmailWith(input, {});

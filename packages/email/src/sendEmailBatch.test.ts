@@ -5,6 +5,8 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import {
   clearAllHooks,
   registerEmailSender,
+  registerErrorTracker,
+  registerErrorTrackers,
   registerHook,
   type EmailMessage,
   type EmailResult,
@@ -13,6 +15,7 @@ import {
 } from '@luckystack/core';
 
 import { DEFAULT_EMAIL_CONFIG, registerEmailConfig } from './emailConfig';
+import { sendEmail } from './sendEmail';
 import { sendEmailBatch } from './sendEmailBatch';
 import { registerEmailTemplate, resetEmailTemplatesForTests } from './templates';
 
@@ -40,11 +43,31 @@ const recipients = (count: number) =>
 
 const delay = (ms: number) => new Promise((resolve) => { setTimeout(resolve, ms); });
 
+interface TrackerEvent {
+  message: string;
+  context?: Record<string, unknown>;
+}
+
+//? Records what reaches the error tracker (Sentry and friends).
+const recordingTracker = (): TrackerEvent[] => {
+  const events: TrackerEvent[] = [];
+  registerErrorTracker({
+    name: 'recording',
+    captureException: (error, context) => {
+      events.push({ message: error instanceof Error ? error.message : String(error), context });
+    },
+    captureMessage: () => { /* not used by email */ },
+    setUser: () => { /* not used by email */ },
+  });
+  return events;
+};
+
 describe('sendEmailBatch', () => {
   beforeEach(() => {
     clearAllHooks();
     resetEmailTemplatesForTests();
     registerEmailConfig(DEFAULT_EMAIL_CONFIG);
+    registerErrorTrackers([]);
   });
 
   it('renders tokens per recipient and reports every mail as sent, in input order', async () => {
@@ -253,6 +276,84 @@ describe('sendEmailBatch', () => {
     recordingSender();
     const result = await sendEmailBatch({ subject: 's', html: 'h', recipients: recipients(501) });
     expect(result).toMatchObject({ ok: false, reason: 'batch-too-large' });
+  });
+
+  describe('error tracker reports', () => {
+    it('sends one event per failure reason, with the count, instead of one per recipient', async () => {
+      const events = recordingTracker();
+      recordingSender(() => ({ ok: false, reason: 'API key is invalid' }));
+      registerEmailConfig({ ...DEFAULT_EMAIL_CONFIG, logging: { ...DEFAULT_EMAIL_CONFIG.logging, errors: false } });
+
+      await sendEmailBatch({ subject: 's', html: 'h', recipients: recipients(500) });
+
+      expect(events).toHaveLength(1);
+      expect(events[0]?.message).toBe('[email] batch: API key is invalid (500×)');
+      expect(events[0]?.context).toMatchObject({ fn: 'sendEmailBatch', count: 500, unknown: 500, notSent: 0, total: 500 });
+    });
+
+    it('groups reasons that only differ by the echoed address, and never sends the address', async () => {
+      const events = recordingTracker();
+      recordingSender((message) => ({ ok: false, reason: `Invalid recipient ${String(message.to)}`, deliveryOutcome: 'not-sent' }));
+
+      await sendEmailBatch({ subject: 's', html: 'h', recipients: recipients(3) });
+
+      expect(events.map((event) => event.message)).toEqual(['[email] batch: Invalid recipient [redacted-email] (3×)']);
+      expect(JSON.stringify(events)).not.toContain('@example.com');
+    });
+
+    it('counts thrown adapter errors once per reason, not once per mail', async () => {
+      const events = recordingTracker();
+      recordingSender(() => { throw new Error('socket hang up'); });
+
+      await sendEmailBatch({ subject: 's', html: 'h', recipients: recipients(4) });
+
+      expect(events.map((event) => event.message)).toEqual(['[email] batch: socket hang up (4×)']);
+    });
+
+    it('reports a throw from sendEmail itself (required sender missing) once', async () => {
+      const events = recordingTracker();
+      recordingSender();
+      registerEmailConfig({ ...DEFAULT_EMAIL_CONFIG, required: true });
+
+      //? An explicit slot that is not registered throws when a sender is required.
+      const result = await sendEmailBatch({ subject: 's', html: 'h', recipients: recipients(2), adapter: 'billing' });
+
+      expect(result.counts).toMatchObject({ total: 2, unknown: 2 });
+      expect(events).toHaveLength(1);
+      expect(events[0]?.message).toMatch(/\(2×\)$/);
+    });
+
+    it('caps distinct reasons at ten events plus one summary', async () => {
+      const events = recordingTracker();
+      recordingSender((message) => ({ ok: false, reason: `error ${String(message.to).slice(0, 6)}` }));
+
+      await sendEmailBatch({ subject: 's', html: 'h', recipients: recipients(12) });
+
+      expect(events).toHaveLength(11);
+      expect(events[10]?.message).toBe('[email] batch: 2 more failure reasons (2×)');
+    });
+
+    it('sends nothing to the tracker when every mail succeeds or the caller aborts before start', async () => {
+      const events = recordingTracker();
+      recordingSender();
+      const controller = new AbortController();
+      controller.abort();
+
+      await sendEmailBatch({ subject: 's', html: 'h', recipients: recipients(3) });
+      await sendEmailBatch({ subject: 's', html: 'h', recipients: recipients(3), signal: controller.signal });
+
+      expect(events).toHaveLength(0);
+    });
+
+    it('leaves a single sendEmail reporting its own failure as before', async () => {
+      const events = recordingTracker();
+      recordingSender(() => ({ ok: false, reason: 'API key is invalid' }));
+
+      await sendEmail({ to: 'a@example.com', subject: 's', html: 'h' });
+
+      expect(events).toHaveLength(1);
+      expect(events[0]?.context).toMatchObject({ fn: 'sendEmail', reason: 'API key is invalid' });
+    });
   });
 
   it('returns an empty, successful result for an empty list', async () => {

@@ -24,6 +24,10 @@ The batch validates nothing about recipients: address syntax, duplicates, opt-ou
 
 Concurrency bounds mails in flight; providers also limit requests per second, so set a per-second bound when a list is large enough to hit it. A rate-limited mail is not retried.
 
+## Error reports
+
+A batch sends the error tracker one event per failure reason, with the number of recipients it hit, instead of one event per failed mail. A wrong API key in a batch of 500 is one event saying so 500 times, not 500 events that exhaust the tracker quota and bury other errors. Reasons that differ only by an echoed address are grouped, and the address never reaches the tracker. The server log still has one redacted line per failed mail, and the batch result names each recipient's reason.
+
 ## Tokens
 
 `{{token}}` substitution is deliberately small: values are inserted, never interpreted, and an unknown token — or one whose value is missing or `null` — stays visible in the sent mail so a typo or a gap in the data is noticed instead of silently blank. Only a deliberate empty string renders empty. HTML bodies escape values; subject and text bodies do not, since they are plain text. A value placed in a link must be a URL the project built itself — escaping prevents broken markup, not a hostile `javascript:` link. For conditional or localized content, register an `EmailTemplate` and use the prepared-messages form instead.

@@ -29,7 +29,9 @@ failure known to have happened before the provider accepted the mail is
 explicitly, and a provider 429 counts as a refusal. Any failure without that
 statement is `unknown`. A batch key derives one key per message from the key,
 position and address. Recipient validation, de-duplication and consent remain
-with the project; a maximum list size refuses an oversized batch. Marketing and
+with the project; a maximum list size refuses an oversized batch. Failures
+reach the error tracker as one event per failure reason with its count, not
+one per recipient; the server log keeps a redacted line per mail. Marketing and
 newsletter features are out of scope for the package.
 
 ## Rejected alternatives
@@ -46,6 +48,9 @@ newsletter features are out of scope for the package.
 - **Derive keys from position only.** Removing or reordering a recipient
   between attempts hands one recipient's key to another, so the provider skips
   or rejects a mail that was never sent.
+- **Keep one tracker event per failed mail.** A batch of 500 with a wrong API
+  key would send 500 identical events, exhaust the tracker quota and bury
+  unrelated errors; the per-mail detail already lives in the server log.
 - **Validate and de-duplicate addresses in the batch.** Whether two rows for
   one address are duplicates or two distinct mails depends on project data;
   a framework rule would silently drop legitimate mail.

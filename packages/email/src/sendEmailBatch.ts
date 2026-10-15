@@ -1,10 +1,16 @@
 //? @adr 0069
 import { createHash } from 'node:crypto';
 
-import { tryCatch, type EmailDeliveryOutcome, type EmailMessage, type EmailResult } from '@luckystack/core';
+import { captureException, type EmailDeliveryOutcome, type EmailMessage, type EmailResult } from '@luckystack/core';
 
 import { renderTokens, type TokenValues } from './renderTokens';
-import { normalizeIdempotencyKey, sendEmail, type SendEmailInput } from './sendEmail';
+import {
+  normalizeIdempotencyKey,
+  scrubEmailPii,
+  sendEmailWith,
+  settle,
+  type SendEmailInput,
+} from './sendEmail';
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 
@@ -103,6 +109,44 @@ export type BatchResult =
 
 const DEFAULT_CONCURRENCY = 2;
 const DEFAULT_MAX_MESSAGES = 500;
+//? Distinct failure reasons reported per batch; the rest are summed into one
+//? extra event so a batch of varied provider errors still stays bounded.
+const MAX_REPORTED_REASONS = 10;
+
+interface FailureGroup {
+  count: number;
+  notSent: number;
+  unknown: number;
+  cause: unknown;
+}
+
+//? One tracker event per failure reason instead of one per recipient: a batch
+//? of 500 with a bad API key would otherwise send 500 identical events and use
+//? up the tracker quota (ADR 0069). The server log keeps one redacted line per
+//? mail. Reasons are scrubbed because adapter-returned text can echo an address.
+const reportFailures = (groups: ReadonlyMap<string, FailureGroup>, total: number): void => {
+  const entries = [...groups.entries()];
+  for (const [reason, group] of entries.slice(0, MAX_REPORTED_REASONS)) {
+    captureException(new Error(`[email] batch: ${reason} (${String(group.count)}×)`, { cause: group.cause }), {
+      fn: 'sendEmailBatch',
+      reason,
+      count: group.count,
+      notSent: group.notSent,
+      unknown: group.unknown,
+      total,
+    });
+  }
+  const rest = entries.slice(MAX_REPORTED_REASONS);
+  if (rest.length > 0) {
+    const count = rest.reduce((sum, [, group]) => sum + group.count, 0);
+    captureException(new Error(`[email] batch: ${String(rest.length)} more failure reasons (${String(count)}×)`), {
+      fn: 'sendEmailBatch',
+      reasons: rest.map(([reason]) => reason),
+      count,
+      total,
+    });
+  }
+};
 
 const isTokenBatch = (input: SendEmailBatchInput): input is TokenBatchInput => 'recipients' in input;
 
@@ -218,11 +262,33 @@ export const sendEmailBatch = async (input: SendEmailBatchInput): Promise<BatchR
     return message;
   };
 
+  const failures = new Map<string, FailureGroup>();
+  const recordFailure = (reason: string, deliveryOutcome: BatchDeliveryOutcome, cause: unknown): void => {
+    const key = scrubEmailPii(reason);
+    const group = failures.get(key) ?? { count: 0, notSent: 0, unknown: 0, cause };
+    group.count += 1;
+    if (deliveryOutcome === 'not-sent') group.notSent += 1;
+    if (deliveryOutcome === 'unknown') group.unknown += 1;
+    failures.set(key, group);
+  };
+
   const sendOne = async (index: number): Promise<BatchItemResult> => {
     const message = messageAt(index);
     const idempotencyKey = message.idempotencyKey ?? (batchKey ? deriveKey(batchKey, index, message.to) : undefined);
-    const [error, result] = await tryCatch(() => sendEmail({ ...message, signal, idempotencyKey }));
-    return toItem(index, message.to, error, result);
+    //? An object, not a `let`: the flag flips inside a callback, which control
+    //? flow analysis cannot see.
+    const state = { reported: false };
+    const [error, result] = await settle(() => sendEmailWith({ ...message, signal, idempotencyKey }, {
+      onFailure: (failure) => {
+        state.reported = true;
+        recordFailure(failure.reason, failure.deliveryOutcome ?? 'unknown', failure.cause);
+      },
+    }));
+    const item = toItem(index, message.to, error, result);
+    //? A throw out of sendEmail (e.g. a required sender that is missing) never
+    //? reached its reporting step; count it here so it is not silent.
+    if (!state.reported && error) recordFailure(item.reason ?? 'send-threw', item.deliveryOutcome, error);
+    return item;
   };
 
   const items: BatchItemResult[] = Array.from({ length: list.length });
@@ -237,6 +303,7 @@ export const sendEmailBatch = async (input: SendEmailBatchInput): Promise<BatchR
     }
   };
   await Promise.all(Array.from({ length: Math.min(concurrency, list.length) }, () => worker()));
+  reportFailures(failures, list.length);
 
   return { ok: true, items, counts: countItems(items) };
 };
