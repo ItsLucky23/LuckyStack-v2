@@ -1543,3 +1543,13 @@ PR #9 kreeg om een verwante reden nooit CI: `pull_request` draait tegen `refs/pu
 **Onderweg gevonden.** `audit:production` faalde lokaal met "no vulnerabilities map": dezelfde oorzaak als `installEnv` in `55506f0` (npm 11.19 geeft `allow-scripts` uit `~/.npmrc` door als `npm_config_allow_scripts`, het kind-`npm audit` weigert dan met EALLOWSCRIPTS). In CI onzichtbaar omdat daar geen `.npmrc` met die regel staat. Het script filtert die variabele nu uit de omgeving van het kind.
 
 **Files:** `scripts/auditProduction.mjs`, 17 × `packages/*/package.json` + `CHANGELOG.md`, `package-lock.json`, `branch-logs/{main,INDEX}.md`. Tags `v0.11.0`.
+
+## 2026-10-15 13:30 — v0.12.0 gepubliceerd
+
+**User prompt (summary):** ESLint 10 + unicorn 78 als 0.12.0, framework volledig testen, alle errors en warnings fixen en releasen (werk op `chore/eslint-10`, zie die log).
+
+**Release.** `ce1c538` "chore(release): v0.12.0 — ESLint 10, unicorn 78, Node 22.13" fast-forward op GitHub `main` (vanaf `7a6f760`), tag `v0.12.0` → `publish.yml` run 38720441501 en `ci` run 38720437915 groen (lint-build-test op Node 22 en 24, ai-records, e2e-scaffold). Registry 17/17 met provenance (na ~3 minuten propagatie-lag), `latest` = 0.12.0. Tarball-spotcheck: de template van `create-luckystack-app@0.12.0` heeft `eslint` ^10.12.0, unicorn ^78.0.0, `jsx-a11y-x`, `engines.node` >=22.13.0 en `ADOPTED_UNICORN_RULES`; de scaffolder schrijft `bun-types/sqlite`; `@luckystack/core` peer `eslint` = `^9.0.0 || ^10.0.0`.
+
+**Open (voorgelegd, niet gefixt):** `--pm=bun` blokkeert postinstalls (o.a. `better-sqlite3`, dus drizzle+sqlite werkt niet), en de e-mailbevestigingspagina in template/CLI-assets mist de bescherming tegen linkvoorvertoning die de referentie-app heeft.
+
+**Files:** `branch-logs/{main,chore--eslint-10,INDEX}.md`. Tag `v0.12.0`.
