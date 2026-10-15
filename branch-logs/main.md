@@ -1553,3 +1553,13 @@ PR #9 kreeg om een verwante reden nooit CI: `pull_request` draait tegen `refs/pu
 **Open (voorgelegd, niet gefixt):** `--pm=bun` blokkeert postinstalls (o.a. `better-sqlite3`, dus drizzle+sqlite werkt niet), en de e-mailbevestigingspagina in template/CLI-assets mist de bescherming tegen linkvoorvertoning die de referentie-app heeft.
 
 **Files:** `branch-logs/{main,chore--eslint-10,INDEX}.md`. Tag `v0.12.0`.
+
+## 2026-10-15 14:25 — v0.12.1 gepubliceerd
+
+**User prompt (summary):** "1. akkoord. 2. ja. 3. ja. 4. ja." — Bun mag `better-sqlite3` bouwen, bevestigingspagina met knop in nieuwe projecten, `npm ci` in de hoofdcheckout, eslint-10 opruimen; "zorgen dat 0.12 goed online komt" (werk op `fix/0.12.1`, zie die log).
+
+**Release.** `1cfbb39` fast-forward op GitHub `main` (vanaf `4ef51c1`), tag `v0.12.1` → `publish.yml` run 38727137651 en `ci` run 38727135609 groen (Node 22 en 24, ai-records, e2e-scaffold). Registry 17/17 met provenance, `latest` = 0.12.1. Tarball-spotcheck: scaffolder bevat `trustInstallScripts`, template-locales hebben `confirmButton`, de confirm-pagina gebruikt geen `useEffect` meer, core-dist heeft `emailChangeConfirmPath: "/settings/confirm-email"`.
+
+**Opgeruimd vóór dit werk:** worktree `eslint-10` + branch `chore/eslint-10` + branch-omgeving + e2e-werkmap verwijderd; `npm ci` in de hoofdcheckout (ESLint 10.12), main-omgeving herstart.
+
+**Files:** `branch-logs/{main,fix--0.12.1,INDEX}.md`. Tag `v0.12.1`.
