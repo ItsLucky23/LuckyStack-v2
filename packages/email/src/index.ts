@@ -3,6 +3,21 @@ export type { PreEmailSendPayload, PostEmailSendPayload } from './hookPayloads';
 
 export { sendEmail } from './sendEmail';
 export type { SendEmailInput } from './sendEmail';
+export { sendEmailBatch } from './sendEmailBatch';
+export type {
+  BatchCounts,
+  BatchDeliveryOutcome,
+  BatchItemResult,
+  BatchMessage,
+  BatchRecipient,
+  BatchRefusal,
+  BatchResult,
+  MessagesBatchInput,
+  SendEmailBatchInput,
+  TokenBatchInput,
+} from './sendEmailBatch';
+export { renderTokens } from './renderTokens';
+export type { RenderTokensOptions, TokenValue, TokenValues } from './renderTokens';
 export { renderEmailLayout } from './renderEmailLayout';
 export type { RenderEmailLayoutInput, RenderedEmail } from './renderEmailLayout';
 export {

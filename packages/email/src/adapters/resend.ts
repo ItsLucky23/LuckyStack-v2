@@ -14,7 +14,7 @@ interface ResendClient {
   emails: {
     send: (input: Record<string, unknown>, options?: { idempotencyKey?: string }) => Promise<{
       data: { id: string } | null;
-      error: { message?: string } | null;
+      error: { message?: string; statusCode?: number | null } | null;
     }>;
   };
 }
@@ -71,7 +71,7 @@ export const ResendSender = (options: ResendSenderOptions): EmailSender => {
       }
       const fromAddress = message.from ?? defaultFrom;
       if (!fromAddress) {
-        return { ok: false, reason: 'missing-from' };
+        return { ok: false, reason: 'missing-from', deliveryOutcome: 'not-sent' };
       }
 
       const { data, error } = await client.emails.send(
@@ -80,7 +80,11 @@ export const ResendSender = (options: ResendSenderOptions): EmailSender => {
       );
 
       if (error) {
-        return { ok: false, reason: error.message || 'resend-error', cause: error }; // eslint-disable-line @typescript-eslint/prefer-nullish-coalescing -- empty `message` should fall back too
+        //? 429 (rate limit or daily/monthly quota) is a refusal before Resend
+        //? accepted the mail, so it is definitively not-sent. Other errors keep
+        //? no outcome: a 5xx or dropped connection may still have been accepted.
+        const rejected = error.statusCode === 429 ? { deliveryOutcome: 'not-sent' as const } : {};
+        return { ok: false, reason: error.message || 'resend-error', cause: error, ...rejected }; // eslint-disable-line @typescript-eslint/prefer-nullish-coalescing -- empty `message` should fall back too
       }
       if (!data) {
         return { ok: false, reason: 'no-response-data' };

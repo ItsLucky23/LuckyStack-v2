@@ -183,7 +183,7 @@ const buildMessage = (input: SendEmailInput, config: EmailConfigShape): BuildMes
       if (config.logging.errors) {
         getLogger().warn(`[email] template '${input.template}' not registered`, { to: redactRecipients(input.to) });
       }
-      return { failure: { ok: false, reason: 'no-template' } };
+      return { failure: { ok: false, reason: 'no-template', deliveryOutcome: 'not-sent' } };
     }
     const data = input.data ?? {};
     //? A consumer-registered template's `render` or `subject` can throw (e.g.
@@ -194,14 +194,14 @@ const buildMessage = (input: SendEmailInput, config: EmailConfigShape): BuildMes
       if (config.logging.errors) {
         getLogger().warn(`[email] template '${input.template}' render threw`, { error: renderError?.message ?? 'unknown' });
       }
-      return { failure: { ok: false, reason: 'template-render-failed' } };
+      return { failure: { ok: false, reason: 'template-render-failed', deliveryOutcome: 'not-sent' } };
     }
     const [subjectError, resolvedSubject] = tryCatchSync(() => template.subject(data));
     if (subjectError || typeof resolvedSubject !== 'string') {
       if (config.logging.errors) {
         getLogger().warn(`[email] template '${input.template}' subject threw`, { error: subjectError?.message ?? 'unknown' });
       }
-      return { failure: { ok: false, reason: 'template-render-failed' } };
+      return { failure: { ok: false, reason: 'template-render-failed', deliveryOutcome: 'not-sent' } };
     }
     return {
       message: {
@@ -256,7 +256,7 @@ const scrubEmailPii = (value: string): string => value.replaceAll(EMAIL_ADDRESS_
 //? reaches `captureException` already redacted (#57).
 const MAX_IDEMPOTENCY_KEY_LENGTH = 256;
 
-const normalizeIdempotencyKey = (value: string | undefined): string | null => {
+export const normalizeIdempotencyKey = (value: string | undefined): string | null => {
   if (value === undefined) return '';
   if (value.length === 0 || value.length > MAX_IDEMPOTENCY_KEY_LENGTH) return null;
   //? Provider keys become HTTP headers. Restrict to visible ASCII without
@@ -415,7 +415,9 @@ export const sendEmail = async (input: SendEmailInput): Promise<EmailResult> => 
       }
     }
 
-    return { ok: false, reason: 'no-sender' };
+    //? Every failure returned before `sender.send` is definitively not-sent;
+    //? `sendEmailBatch` reads a missing outcome as `unknown` (ADR 0069).
+    return { ok: false, reason: 'no-sender', deliveryOutcome: 'not-sent' };
   }
 
   const built = buildMessage(input, config);
@@ -444,7 +446,7 @@ export const sendEmail = async (input: SendEmailInput): Promise<EmailResult> => 
     adapter: sender.name,
   });
   if (preSend.stopped) {
-    return { ok: false, reason: preSend.signal.errorCode || 'email.suppressed' };
+    return { ok: false, reason: preSend.signal.errorCode || 'email.suppressed', deliveryOutcome: 'not-sent' };
   }
 
   //? EMAIL-O8/TW-15: bound the wait AND signal cooperative cancellation. A

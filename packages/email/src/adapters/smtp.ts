@@ -55,7 +55,7 @@ export const SmtpSender = (options: SmtpSenderOptions): EmailSender => {
       }
       const fromAddress = message.from ?? defaultFrom;
       if (!fromAddress) {
-        return { ok: false, reason: 'missing-from' };
+        return { ok: false, reason: 'missing-from', deliveryOutcome: 'not-sent' };
       }
 
       const [error, info] = await tryCatch(() => transporter.sendMail(toProviderPayload(message, fromAddress)));

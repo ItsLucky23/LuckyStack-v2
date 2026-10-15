@@ -47,7 +47,7 @@ describe('ResendSender', () => {
   it('returns missing-from when neither the message nor the default supplies from', async () => {
     const sender = ResendSender({ apiKey: 'rk_123' });
     const result = await sender.send({ to: 'u@test.dev', subject: 'S', html: '<p>x</p>' });
-    expect(result).toEqual({ ok: false, reason: 'missing-from' });
+    expect(result).toEqual({ ok: false, reason: 'missing-from', deliveryOutcome: 'not-sent' });
     // Resolution short-circuits before calling the SDK.
     expect(sendMock).not.toHaveBeenCalled();
   });
@@ -96,11 +96,28 @@ describe('ResendSender', () => {
   });
 
   it('returns the provider error message when the SDK reports an error', async () => {
-    sendMock.mockResolvedValue({ data: null, error: { message: 'rate limited' } });
+    sendMock.mockResolvedValue({ data: null, error: { message: 'validation failed', statusCode: 422 } });
     const sender = ResendSender({ apiKey: 'rk_123' });
     const result = await sender.send(message);
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.reason).toBe('rate limited');
+    if (!result.ok) {
+      expect(result.reason).toBe('validation failed');
+      expect(result.deliveryOutcome).toBeUndefined();
+    }
+  });
+
+  it('marks a 429 (rate limit or quota) as definitively not-sent', async () => {
+    sendMock.mockResolvedValue({ data: null, error: { message: 'Too many requests', statusCode: 429, name: 'rate_limit_exceeded' } });
+    const sender = ResendSender({ apiKey: 'rk_123' });
+    const result = await sender.send(message);
+    expect(result).toMatchObject({ ok: false, reason: 'Too many requests', deliveryOutcome: 'not-sent' });
+  });
+
+  it('leaves a 5xx without an outcome, since Resend may have accepted the mail', async () => {
+    sendMock.mockResolvedValue({ data: null, error: { message: 'Internal error', statusCode: 500 } });
+    const sender = ResendSender({ apiKey: 'rk_123' });
+    const result = await sender.send(message);
+    if (!result.ok) expect(result.deliveryOutcome).toBeUndefined();
   });
 
   it('falls back to a generic reason when the provider error has no message', async () => {

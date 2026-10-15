@@ -74,7 +74,7 @@ describe('sendEmail template resolution', () => {
       data: {},
     });
 
-    expect(result).toEqual({ ok: false, reason: 'no-template' });
+    expect(result).toEqual({ ok: false, reason: 'no-template', deliveryOutcome: 'not-sent' });
     expect(captured).toBeNull();
   });
 });

@@ -5,6 +5,18 @@ All notable changes to `@luckystack/email` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.13.0] - 2026-10-15
+
+### Added
+
+- **`sendEmailBatch`: send transactional mail to a list with one outcome per recipient.** Pass either shared content with `{{token}}` placeholders plus a recipient list, or a list of prepared messages (raw or registered templates). Every mail goes through `sendEmail`, so hooks, header sanitizing, timeout and log redaction apply per mail. Each recipient ends `sent`, `not-sent` or `unknown`; a normal failure never throws. Options bound mails in flight (default 2) and, optionally, mails started per second; an abort signal stops the batch; a batch key gives each mail a stable key derived from the key, its position and its address. Lists over 500 messages (configurable) are refused without sending. Address checks, de-duplication and consent stay with the project. See `docs/batch.md`.
+- **`renderTokens`**: the `{{token}}` substitution the batch uses, exported for projects that build their own messages. Exact key first, then case-insensitive; an unknown token stays visible; a `null`/`undefined` value renders empty; values are HTML-escaped unless `escape: 'none'`; a value is never expanded a second time.
+
+### Changed
+
+- **Failures that stop a mail before it reaches the provider now say so.** No sender, no template, a failed template render, a `preEmailSend` veto and a missing `from` return `deliveryOutcome: 'not-sent'`. Code that compares a whole `sendEmail` result with `toEqual` sees the extra field; code reading `ok` and `reason` is unaffected.
+- **Resend: a 429 (rate limit, daily or monthly quota) returns `deliveryOutcome: 'not-sent'`**, since Resend refused the mail. Other Resend errors still carry no outcome, because a server error may follow acceptance.
+
 ## [0.12.0] - 2026-10-15
 
 ### Changed

@@ -124,7 +124,7 @@ describe('sendEmail orchestration (post-E13 decomposition)', () => {
 
     const result = await sendEmail({ to: 'suppressed@example.com', subject: 'S', html: '<p>x</p>' });
 
-    expect(result).toEqual({ ok: false, reason: 'gdpr.opted-out' });
+    expect(result).toEqual({ ok: false, reason: 'gdpr.opted-out', deliveryOutcome: 'not-sent' });
     expect(sent).toBe(false);
     expect(post).toHaveLength(0);
   });
@@ -136,7 +136,7 @@ describe('sendEmail orchestration (post-E13 decomposition)', () => {
       registerEmailSender(okSender());
 
       const result = await sendEmail({ to: 'u@example.com', subject: 'S', html: '<p>x</p>', adapter: 'nonexistent' });
-      expect(result).toEqual({ ok: false, reason: 'no-sender' });
+      expect(result).toEqual({ ok: false, reason: 'no-sender', deliveryOutcome: 'not-sent' });
     });
 
     it('uses the named adapter slot when it IS registered', async () => {
