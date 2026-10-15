@@ -170,6 +170,8 @@
       "label": "Enter a new email address and we'll send a confirmation link to it. Clicking the link signs you out of all devices.",
       "button": "Send confirmation",
       "checkInbox": "Check the new inbox for a confirmation link.",
+      "confirmPrompt": "Click the button below to confirm your new email address.",
+      "confirmButton": "Confirm email change",
       "confirming": "Confirming your new email...",
       "confirmedTitle": "Email updated",
       "confirmedBody": "Your email address has been changed. All sessions have been signed out — please log in with the new email.",

@@ -5,6 +5,12 @@ All notable changes to `@luckystack/core` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.1] - 2026-10-15
+
+### Fixed
+
+- **Email-change confirmation links open the confirm page.** The default `auth.emailChangeConfirmPath` was `/confirm-email-change`, a route no LuckyStack project has: the scaffold and `luckystack add login` put the page at `/settings/confirm-email`. Every confirmation email therefore linked to a missing page unless the project overrode the setting. The default is now `/settings/confirm-email`. A project that set the key itself is unaffected; one that worked around it with a redirect or an extra route at `/confirm-email-change` can remove it. Links in emails sent before the upgrade keep the old path until they expire (one hour by default).
+
 ## [0.12.0] - 2026-10-15
 
 ### Added

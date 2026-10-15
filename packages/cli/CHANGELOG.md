@@ -5,6 +5,13 @@ All notable changes to `@luckystack/cli` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.1] - 2026-10-15
+
+### Fixed
+
+- **The login assets' email-change confirmation waits for a click.** `src/settings/confirm-email/page.tsx` called the confirm API as soon as it opened, so a mail client or link scanner that opens links for a preview could spend the one-shot token before the user clicked, leaving them with an "invalid link" error. It now shows a confirm button, as the reference app already did. The page uses `settings.emailChange.confirmPrompt` and `settings.emailChange.confirmButton`; a project without them shows the raw key until they are added (they ship in the scaffold's locales from `create-luckystack-app` 0.12.1).
+- `luckystack switch-orm` to drizzle or mikro-orm on SQLite adds `better-sqlite3` to `trustedDependencies` (from the fresh render) and switching away removes only that entry, so a Bun-installed project builds the driver's native binding. Your own `trustedDependencies` entries are kept.
+
 ## [0.12.0] - 2026-10-15
 
 ### Changed

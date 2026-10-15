@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { REGISTRY } from './registry';
 import { AUTH_MODES, OAUTH_PROVIDERS, EMAIL_PROVIDERS, MONITORING_PROVIDERS } from './featureOptions';
+import { DEFAULT_PROJECT_CONFIG } from '../../core/src/projectConfig';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(here, '..', '..', '..');
@@ -193,6 +194,47 @@ describe('secret-manager block parity (CLI ↔ scaffolder)', () => {
     expect(script.includes("import('@luckystack/secret-manager')")).toBe(true);
     expect(script.replaceAll(literalBody('SERVER_COMMENTED'), '').includes('@luckystack/secret-manager\')')).toBe(false);
     expect(scaffolder.includes("'scripts/mikroOrmSchema.ts']")).toBe(true);
+  });
+});
+
+//? Mail clients and link scanners open links to build previews. A confirm page
+//? that called the API on mount let such a preview spend the one-shot token
+//? before the user clicked; the reference app waited for a button, the shipped
+//? copies did not. Guard the shipped page and the keys it renders.
+describe('email-change confirm page (template + login asset)', () => {
+  const page = normalize(
+    readFileSync(path.join(TEMPLATE_ROOT, 'src', 'settings', 'confirm-email', 'page.tsx'), 'utf8'),
+  );
+
+  //? The default once pointed at `/confirm-email-change`, a route no project has,
+  //? so every email-change link landed on a missing page.
+  it.each([
+    ['emailChangeConfirmPath', DEFAULT_PROJECT_CONFIG.auth.emailChangeConfirmPath],
+    ['passwordResetPath', DEFAULT_PROJECT_CONFIG.auth.passwordResetPath],
+  ])('the default %s (%s) is a page the scaffold ships', (_name, route) => {
+    expect(existsSync(path.join(TEMPLATE_ROOT, 'src', ...route.split('/').filter(Boolean), 'page.tsx'))).toBe(true);
+  });
+
+  it('waits for an explicit click before spending the token', () => {
+    expect(page).not.toContain('useEffect');
+    expect(page).toContain("useState<Status>(token ? 'idle' : 'error')");
+    expect(page).toMatch(/onClick=\{\(\) => \{ void handleConfirm\(\); \}\}/);
+  });
+
+  it('every translation key it renders exists in every template locale', () => {
+    const keys = [...page.matchAll(/key: '([^']+)'/g)].map((match) => match[1] ?? '');
+    expect(keys).toContain('settings.emailChange.confirmButton');
+    const localeDir = path.join(TEMPLATE_ROOT, 'src', '_locales');
+    for (const file of readdirSync(localeDir).filter((name) => name.endsWith('.json'))) {
+      const locale = JSON.parse(readFileSync(path.join(localeDir, file), 'utf8')) as Record<string, unknown>;
+      for (const key of keys) {
+        const value = key.split('.').reduce<unknown>(
+          (node, part) => (node !== null && typeof node === 'object' ? (node as Record<string, unknown>)[part] : undefined),
+          locale,
+        );
+        expect(typeof value, `${file} is missing ${key}`).toBe('string');
+      }
+    }
   });
 });
 

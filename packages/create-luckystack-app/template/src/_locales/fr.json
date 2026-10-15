@@ -170,6 +170,8 @@
       "label": "Entrez une nouvelle adresse e-mail ; nous y enverrons un lien de confirmation. En confirmant, vous serez déconnecté sur tous les appareils.",
       "button": "Envoyer la confirmation",
       "checkInbox": "Vérifiez la nouvelle boîte de réception pour le lien de confirmation.",
+      "confirmPrompt": "Cliquez sur le bouton ci-dessous pour confirmer votre nouvelle adresse e-mail.",
+      "confirmButton": "Confirmer le changement d'e-mail",
       "confirming": "Confirmation de la nouvelle adresse en cours...",
       "confirmedTitle": "E-mail mis à jour",
       "confirmedBody": "Votre adresse e-mail a été modifiée. Toutes les sessions ont été déconnectées — veuillez vous reconnecter avec la nouvelle adresse.",

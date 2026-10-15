@@ -30,6 +30,8 @@ interface OrmSurface {
   scripts: string[];
   /** Top-level package.json keys owned by this orm (e.g. mikro-orm CLI config). */
   pkgKeys: string[];
+  /** `trustedDependencies` entries this orm may add (bun skips other install scripts). */
+  trusted: string[];
   /** Active shims: replaced on switch (with a .bak of the previous version). */
   replaceFiles: string[];
   /** Starters: copied from the fresh render only when absent (user-owned). */
@@ -44,6 +46,7 @@ export const ORM_SURFACES: Record<DetectedOrm, OrmSurface> = {
     devDeps: ['prisma'],
     scripts: ['prisma:generate', 'prisma:db:push', 'prisma:migrate:dev'],
     pkgKeys: [],
+    trusted: [],
     replaceFiles: SHARED_REPLACE_FILES,
     starterFiles: ['prisma/schema.prisma', 'scripts/prismaWithSecrets.ts'],
   },
@@ -52,6 +55,7 @@ export const ORM_SURFACES: Record<DetectedOrm, OrmSurface> = {
     devDeps: ['drizzle-kit', '@types/pg', '@types/better-sqlite3', 'bun-types'],
     scripts: ['db:generate', 'db:migrate', 'db:push', 'db:studio'],
     pkgKeys: [],
+    trusted: ['better-sqlite3'],
     replaceFiles: SHARED_REPLACE_FILES,
     starterFiles: ['server/db/schema.ts', 'drizzle.config.ts'],
   },
@@ -69,6 +73,7 @@ export const ORM_SURFACES: Record<DetectedOrm, OrmSurface> = {
     devDeps: [],
     scripts: ['db:schema:update'],
     pkgKeys: [],
+    trusted: ['better-sqlite3'],
     replaceFiles: SHARED_REPLACE_FILES,
     starterFiles: ['server/db/entities.ts', 'server/db/mikro-orm.config.ts', 'scripts/mikroOrmSchema.ts'],
   },
@@ -77,6 +82,7 @@ export const ORM_SURFACES: Record<DetectedOrm, OrmSurface> = {
     devDeps: [],
     scripts: [],
     pkgKeys: [],
+    trusted: [],
     replaceFiles: SHARED_REPLACE_FILES,
     starterFiles: [],
   },
@@ -112,6 +118,9 @@ const readPackageJson = (filePath: string): PackageJsonShape | null => {
     return null;
   }
 };
+
+const stringList = (value: unknown): string[] =>
+  Array.isArray(value) ? value.filter((item): item is string => typeof item === 'string') : [];
 
 //? Replace-with-backup: keeps the previous shim readable next to the new one
 //? (.bak extension keeps it out of tsc/lint/vite).
@@ -250,6 +259,18 @@ export const switchOrm = (project: ConsumerProject, input: SwitchOrmInput): Resu
     }
     for (const key of toSurface.pkgKeys) {
       if (freshPkg[key] !== undefined) pkg[key] = freshPkg[key];
+    }
+    //? `trustedDependencies` is shared with the user's own entries: remove and
+    //? add single names, never the whole key.
+    const trusted = new Set(stringList(pkg.trustedDependencies));
+    for (const name of fromSurface.trusted) trusted.delete(name);
+    for (const name of stringList(freshPkg.trustedDependencies)) {
+      if (toSurface.trusted.includes(name)) trusted.add(name);
+    }
+    if (trusted.size > 0) {
+      pkg.trustedDependencies = [...trusted];
+    } else {
+      delete pkg.trustedDependencies;
     }
     fs.writeFileSync(project.pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
     //? Keep the shared ConsumerProject snapshot aligned with the file we just

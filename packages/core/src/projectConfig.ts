@@ -487,7 +487,8 @@ export interface AuthConfig {
   /**
    * Frontend path the email-change confirmation email links to (login F22).
    * The confirmation token is appended as a query param.
-   * DEFAULT `/confirm-email-change`.
+   * DEFAULT `/settings/confirm-email`, where the scaffold and `luckystack add
+   * login` put the confirm page.
    */
   emailChangeConfirmPath: string;
   /**
@@ -892,7 +893,7 @@ export const DEFAULT_PROJECT_CONFIG: ProjectConfig = {
     emailChangeTtlSeconds: 60 * 60,
     allowRegistration: true,
     passwordResetPath: '/reset-password',
-    emailChangeConfirmPath: '/confirm-email-change',
+    emailChangeConfirmPath: '/settings/confirm-email',
     emailCodeLogin: false,
     emailCodeTtlSeconds: 60 * 10,
     emailCodeLength: 6,

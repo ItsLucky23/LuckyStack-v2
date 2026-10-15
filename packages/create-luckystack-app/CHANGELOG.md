@@ -5,6 +5,18 @@ All notable changes to `create-luckystack-app` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.1] - 2026-10-15
+
+### Fixed
+
+- **SQLite projects installed with Bun work.** `bun install` runs a package's install script only when the package is listed in `trustedDependencies`, so `better-sqlite3` never built its native binding: a `--pm=bun` drizzle or mikro-orm project on SQLite crashed on its first query under Node (`Could not locate the bindings file`) and `db:push` created no tables. Those scaffolds now add `better-sqlite3` to the existing `trustedDependencies` list. Only that package is added: every entry lets a third-party package run code during install. npm ignores the field.
+- **The email-change confirmation link is spent only by the user.** `src/settings/confirm-email/page.tsx` confirmed as soon as it opened, so a mail client or link scanner opening the link for a preview could use the one-shot token first. The page now waits for a confirm button (new locale keys `settings.emailChange.confirmPrompt` and `confirmButton` in all four languages), and no longer shows "Email updated" before anything was changed.
+
+### Upgrading an existing project
+
+1. With login: `npx luckystack update --app` brings the new `src/settings/confirm-email/page.tsx` and the locale files; a locale file you edited gets a `.new` sidecar — copy the two `settings.emailChange` keys from it.
+2. Bun + SQLite: add `"better-sqlite3"` to `trustedDependencies` in `package.json` (package.json is never touched by `update`), then run `bun install`.
+
 ## [0.12.0] - 2026-10-15
 
 ### Changed

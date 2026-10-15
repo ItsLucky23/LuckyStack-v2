@@ -44,10 +44,7 @@ export default function ConfirmEmailPage() {
         <div className="p-6 bg-container1 border border-container1-border rounded-xl shadow-sm text-title flex flex-col gap-5 max-w-[360px] w-full">
           {status === 'idle' && (
             <>
-              <h1 className="text-lg font-semibold">
-                {translate({ key: 'settings.emailChange.confirmedTitle' })}
-              </h1>
-              <p className="text-xs text-common">
+              <p className="text-sm text-common">
                 {translate({ key: 'settings.emailChange.confirmPrompt' })}
               </p>
               <button

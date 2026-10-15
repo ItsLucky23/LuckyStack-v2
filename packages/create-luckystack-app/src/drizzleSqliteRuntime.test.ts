@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
-import { DRIZZLE_DRIVER_DEPS, drizzleDbShimFor } from './index';
+import os from 'node:os';
+import { applyOrmChoice, DEFAULT_CHOICES, DRIZZLE_DRIVER_DEPS, drizzleDbShimFor } from './index';
 
 describe('Drizzle SQLite scaffold runtime parity', () => {
   it('ships both runtime-native driver paths without statically loading either one', () => {
@@ -29,6 +30,28 @@ describe('Drizzle SQLite scaffold runtime parity', () => {
   //? The whole package declares Bun's globals for the entire program, including
   //? `import.meta.hot` as always present, which made the browser-side HMR guard in
   //? MenuHandler fail `no-unnecessary-condition` in every drizzle+sqlite scaffold.
+  //? `bun install` runs no install script unless the package is trusted, so
+  //? better-sqlite3 had no native binding and a `--pm=bun` sqlite project
+  //? crashed on its first query under Node. Exactly that one package is trusted.
+  it.each([
+    ['drizzle', 'sqlite', true],
+    ['mikro-orm', 'sqlite', true],
+    ['drizzle', 'postgresql', false],
+    ['mikro-orm', 'postgresql', false],
+  ] as const)('%s + %s scaffold trusts better-sqlite3: %s', (orm, dbProvider, trustsDriver) => {
+    const target = fs.mkdtempSync(path.join(os.tmpdir(), 'luckystack-orm-trusted-'));
+    try {
+      fs.cpSync(path.resolve(import.meta.dirname, '../template'), target, { recursive: true });
+      const readTrusted = (): string[] =>
+        (JSON.parse(fs.readFileSync(path.join(target, 'package.json'), 'utf8')) as { trustedDependencies: string[] }).trustedDependencies;
+      const templateTrusted = readTrusted();
+      applyOrmChoice(target, { ...DEFAULT_CHOICES, orm, dbProvider }, 'file:./dev.db');
+      expect(readTrusted()).toEqual(trustsDriver ? [...templateTrusted, 'better-sqlite3'] : templateTrusted);
+    } finally {
+      fs.rmSync(target, { recursive: true, force: true });
+    }
+  });
+
   it('loads only the bun:sqlite declarations, not all of bun-types', () => {
     const shim = drizzleDbShimFor('sqlite', 'file:./dev.db');
     expect(shim).toContain('/// <reference types="bun-types/sqlite" />');

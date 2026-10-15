@@ -219,6 +219,52 @@ describe('switchOrm — prisma → drizzle (fixture render)', () => {
     expect(manifest.choices.orm).toBe('prisma');
   });
 
+  //? bun only runs install scripts of packages in `trustedDependencies`; without
+  //? better-sqlite3 there a `--pm=bun` sqlite project crashes on its first query.
+  it('adds the render\'s trusted driver and keeps the user\'s own entries', () => {
+    seedPrismaProject();
+    seedFreshDrizzleRender();
+    const consumerPkg = JSON.parse(fs.readFileSync(path.join(consumerDir, 'package.json'), 'utf8')) as Record<string, unknown>;
+    write(consumerDir, 'package.json', JSON.stringify({ ...consumerPkg, trustedDependencies: ['my-native-addon'] }, null, 2));
+    const freshPkg = JSON.parse(fs.readFileSync(path.join(freshDir, 'package.json'), 'utf8')) as Record<string, unknown>;
+    write(freshDir, 'package.json', JSON.stringify({ ...freshPkg, trustedDependencies: ['better-sqlite3', 'not-ours'] }, null, 2));
+
+    const result = switchOrm(project(), {
+      from: 'prisma',
+      to: 'drizzle',
+      dbProvider: 'sqlite',
+      cliVersion: '0.5.0',
+      renderFreshScaffold: () => ({ projectDir: freshDir, cleanup: () => undefined }),
+    });
+    expect(result.ok).toBe(true);
+    const pkg = JSON.parse(fs.readFileSync(path.join(consumerDir, 'package.json'), 'utf8')) as { trustedDependencies?: string[] };
+    expect(pkg.trustedDependencies).toEqual(['my-native-addon', 'better-sqlite3']);
+  });
+
+  it('switching away drops only the orm\'s trusted entry (and an emptied key)', () => {
+    const run = (trusted: string[]): { trustedDependencies?: string[] } => {
+      write(consumerDir, 'package.json', JSON.stringify({
+        name: 'app',
+        dependencies: { 'drizzle-orm': '^0.45.2', 'better-sqlite3': '^12.4.0' },
+        trustedDependencies: trusted,
+      }, null, 2));
+      write(consumerDir, 'config.ts', `${PLACEHOLDER_BLOCK}\nexport interface SessionLayout {}\n`);
+      write(freshDir, 'package.json', JSON.stringify({ name: 'app', dependencies: { '@prisma/client': '^6.19.3' } }, null, 2));
+      write(freshDir, 'config.ts', `${PRISMA_USER_TYPE_IMPORT}\nexport interface SessionLayout {}\n`);
+      const result = switchOrm(project(), {
+        from: 'drizzle',
+        to: 'prisma',
+        dbProvider: 'sqlite',
+        cliVersion: '0.5.0',
+        renderFreshScaffold: () => ({ projectDir: freshDir, cleanup: () => undefined }),
+      });
+      expect(result.ok).toBe(true);
+      return JSON.parse(fs.readFileSync(path.join(consumerDir, 'package.json'), 'utf8')) as { trustedDependencies?: string[] };
+    };
+    expect(run(['better-sqlite3', 'my-native-addon']).trustedDependencies).toEqual(['my-native-addon']);
+    expect('trustedDependencies' in run(['better-sqlite3'])).toBe(false);
+  });
+
   it('fails cleanly when the fresh render cannot be produced', () => {
     seedPrismaProject();
     const result = switchOrm(project(), {
@@ -251,6 +297,12 @@ describe('switchOrm parity with the scaffolder (drift guards)', () => {
     for (const driver of Object.values(DRIZZLE_DRIVER_DEPS)) {
       for (const name of [...Object.keys(driver.deps), ...Object.keys(driver.devDeps)]) {
         expect(drizzleNames.has(name), `drizzle surface must include ${name}`).toBe(true);
+      }
+    }
+    for (const driver of Object.values(DRIZZLE_DRIVER_DEPS)) {
+      for (const name of driver.trusted) {
+        expect(ORM_SURFACES.drizzle.trusted, `drizzle surface must trust ${name}`).toContain(name);
+        expect(ORM_SURFACES['mikro-orm'].trusted, `mikro surface must trust ${name}`).toContain(name);
       }
     }
     const mikroNames = new Set(ORM_SURFACES['mikro-orm'].deps);

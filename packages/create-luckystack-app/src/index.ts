@@ -2684,16 +2684,30 @@ const stripPrismaSurface = (targetDir: string): void => {
 //? drizzle-kit itself) + functions/db.ts exporting the live client.
 
 //? Exported for CLI parity tests (the ORM switcher keeps name-only copies).
+//? `trusted`: packages whose install script must run. `bun install` skips
+//? lifecycle scripts unless a package is listed in `trustedDependencies`, so
+//? better-sqlite3 never builds its native binding and Node crashes on the first
+//? query. npm ignores the field. Only the driver is listed: every extra entry
+//? lets one more third-party package run code at install time.
 export const DRIZZLE_DRIVER_DEPS: Record<
   Exclude<DbProvider, 'mongodb'>,
-  { deps: Record<string, string>; devDeps: Record<string, string> }
+  { deps: Record<string, string>; devDeps: Record<string, string>; trusted: string[] }
 > = {
-  postgresql: { deps: { pg: '^8.16.0' }, devDeps: { '@types/pg': '^8.15.0' } },
-  mysql: { deps: { mysql2: '^3.15.0' }, devDeps: {} },
+  postgresql: { deps: { pg: '^8.16.0' }, devDeps: { '@types/pg': '^8.15.0' }, trusted: [] },
+  mysql: { deps: { mysql2: '^3.15.0' }, devDeps: {}, trusted: [] },
   sqlite: {
     deps: { 'better-sqlite3': '^12.4.0' },
     devDeps: { '@types/better-sqlite3': '^7.6.13', 'bun-types': '^1.3.14' },
+    trusted: ['better-sqlite3'],
   },
+};
+
+//? Add names to package.json `trustedDependencies`, keeping any already there.
+const trustInstallScripts = (pkg: ScaffoldPackageJson, names: readonly string[]): void => {
+  if (names.length === 0) return;
+  const current: unknown = pkg.trustedDependencies;
+  const existing = Array.isArray(current) ? current.filter((name): name is string => typeof name === 'string') : [];
+  pkg.trustedDependencies = [...new Set([...existing, ...names])];
 };
 
 const drizzleSchemaFor = (dbProvider: DbProvider): string => {
@@ -3013,8 +3027,8 @@ void run();
 
 //? Apply the chosen non-prisma data layer (ADR 0020): strip Prisma, then wire
 //? the ORM-specific starter files + dependencies + scripts. `orm: 'prisma'`
-//? never reaches this function.
-const applyOrmChoice = (targetDir: string, choices: ScaffoldChoices, databaseUrl: string): void => {
+//? never reaches this function. Exported for tests.
+export const applyOrmChoice = (targetDir: string, choices: ScaffoldChoices, databaseUrl: string): void => {
   stripPrismaSurface(targetDir);
 
   if (choices.orm === 'none') {
@@ -3044,6 +3058,7 @@ const applyOrmChoice = (targetDir: string, choices: ScaffoldChoices, databaseUrl
         'db:push': 'drizzle-kit push',
         'db:studio': 'drizzle-kit studio',
       };
+      trustInstallScripts(pkg, driver.trusted);
     });
     return;
   }
@@ -3067,6 +3082,8 @@ const applyOrmChoice = (targetDir: string, choices: ScaffoldChoices, databaseUrl
     //? and the CLI can't resolve secret-manager pointers. `db:schema:update`
     //? runs the SchemaGenerator via the MikroORM API in scripts/mikroOrmSchema.ts.
     pkg.scripts = { ...pkg.scripts, 'db:schema:update': 'tsx --tsconfig tsconfig.server.json scripts/mikroOrmSchema.ts' };
+    //? @mikro-orm/better-sqlite depends on better-sqlite3: same native build.
+    if (choices.dbProvider === 'sqlite') trustInstallScripts(pkg, DRIZZLE_DRIVER_DEPS.sqlite.trusted);
   });
 };
 
