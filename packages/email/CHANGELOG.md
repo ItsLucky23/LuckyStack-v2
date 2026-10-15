@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`sendEmailBatch`: send transactional mail to a list with one outcome per recipient.** Pass either shared content with `{{token}}` placeholders plus a recipient list, or a list of prepared messages (raw or registered templates). Every mail goes through `sendEmail`, so hooks, header sanitizing, timeout and log redaction apply per mail. Each recipient ends `sent`, `not-sent` or `unknown`; a normal failure never throws. Options bound mails in flight (default 2) and, optionally, mails started per second; an abort signal stops the batch; a batch key gives each mail a stable key derived from the key, its position and its address. Lists over 500 messages (configurable) are refused without sending. Address checks, de-duplication and consent stay with the project. See `docs/batch.md`.
-- **`renderTokens`**: the `{{token}}` substitution the batch uses, exported for projects that build their own messages. Exact key first, then case-insensitive; an unknown token stays visible; a `null`/`undefined` value renders empty; values are HTML-escaped unless `escape: 'none'`; a value is never expanded a second time.
+- **`renderTokens`**: the `{{token}}` substitution the batch uses, exported for projects that build their own messages. Exact key first, then case-insensitive; a missing key or a `null`/`undefined` value leaves the token visible, an empty string renders empty; values are HTML-escaped unless `escape: 'none'`; a value is never expanded a second time.
 
 ### Changed
 

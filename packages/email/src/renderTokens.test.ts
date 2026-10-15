@@ -23,8 +23,8 @@ describe('renderTokens', () => {
     expect(renderTokens('Hi {{nmae}}', { name: 'Sam' })).toBe('Hi {{nmae}}');
   });
 
-  it('renders a known key with a null or undefined value as empty', () => {
-    expect(renderTokens('[{{a}}][{{b}}]', { a: null, b: undefined })).toBe('[][]');
+  it('renders an empty string as empty but leaves null and undefined values as the token', () => {
+    expect(renderTokens('[{{a}}][{{b}}][{{c}}]', { a: '', b: null, c: undefined })).toBe('[][{{b}}][{{c}}]');
   });
 
   it('does not resolve tokens to Object.prototype members', () => {

@@ -27,10 +27,11 @@ const escapeHtml = (value: string): string =>
 
 /**
  * Replace `{{name}}` with `values.name`, exact key first, then
- * case-insensitive. An unknown token stays literally in the output so a typo
- * is visible in the sent mail instead of silently blank; a known key whose
- * value is `null`/`undefined` renders empty. Substitution is a single pass, so
- * a value that itself contains `{{…}}` is never expanded.
+ * case-insensitive. A missing key, or one whose value is `null`/`undefined`,
+ * leaves the token literally in the output so a gap in the data is visible in
+ * the sent mail instead of silently blank; an empty string renders empty.
+ * Substitution is a single pass, so a value that itself contains `{{…}}` is
+ * never expanded.
  */
 export const renderTokens = (
   template: string,
@@ -48,9 +49,8 @@ export const renderTokens = (
 
   return template.replaceAll(TOKEN_PATTERN, (match, name: string) => {
     const key = Object.hasOwn(values, name) ? name : lowerIndex.get(name.toLowerCase());
-    if (key === undefined) return match;
-    const value = values[key];
-    if (value === null || value === undefined) return '';
+    const value = key === undefined ? undefined : values[key];
+    if (value === null || value === undefined) return match;
     const text = String(value);
     return escape === 'html' ? escapeHtml(text) : text;
   });

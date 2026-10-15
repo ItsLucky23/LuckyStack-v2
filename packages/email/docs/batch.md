@@ -26,6 +26,6 @@ Concurrency bounds mails in flight; providers also limit requests per second, so
 
 ## Tokens
 
-`{{token}}` substitution is deliberately small: values are inserted, never interpreted, and an unknown token stays visible in the sent mail so a typo is noticed instead of silently blank. HTML bodies escape values; subject and text bodies do not, since they are plain text. A value placed in a link must be a URL the project built itself — escaping prevents broken markup, not a hostile `javascript:` link. For conditional or localized content, register an `EmailTemplate` and use the prepared-messages form instead.
+`{{token}}` substitution is deliberately small: values are inserted, never interpreted, and an unknown token — or one whose value is missing or `null` — stays visible in the sent mail so a typo or a gap in the data is noticed instead of silently blank. Only a deliberate empty string renders empty. HTML bodies escape values; subject and text bodies do not, since they are plain text. A value placed in a link must be a URL the project built itself — escaping prevents broken markup, not a hostile `javascript:` link. For conditional or localized content, register an `EmailTemplate` and use the prepared-messages form instead.
 
 Copy recipients (`cc`/`bcc`) on the shared form go on the first mail only, so a manager copied on a 200-recipient batch receives one mail instead of 200.
