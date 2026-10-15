@@ -1,6 +1,6 @@
 # @luckystack/email
 
-Transactional email for LuckyStack, including pluggable delivery and password-reset messages. In a scaffolded app, select email when creating it or add it later; otherwise install `@luckystack/email` and the provider SDK you actually use. Register a sender before relying on delivery. Console delivery is useful in development but does **not** send real mail. See [adapters](./docs/adapters.md) and the installed types for setup details.
+Transactional email for LuckyStack, including pluggable delivery and password-reset messages. In a scaffolded app, select email when creating it or add it later; otherwise install `@luckystack/email` and the provider SDK you actually use. Register a sender before relying on delivery. Console delivery is useful in development but does **not** send real mail. See [adapters](./docs/adapters.md) and the installed types for setup details. For transactional mail to a list with one outcome per recipient, see [batch sending](./docs/batch.md); newsletters and marketing are out of scope.
 
 ## Delivery safety
 
