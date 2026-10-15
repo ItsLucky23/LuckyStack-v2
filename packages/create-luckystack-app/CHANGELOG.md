@@ -5,6 +5,30 @@ All notable changes to `create-luckystack-app` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-10-15
+
+### Changed
+
+- **Scaffolds lint with ESLint 10.** `eslint` `^10.12.0` and `@eslint/js` `^10.0.1`. Two plugins that stopped at ESLint 9 are replaced: `eslint-plugin-jsx-a11y` by its maintained fork `eslint-plugin-jsx-a11y-x` (identical recommended set; rule ids become `jsx-a11y-x/…`), and `eslint-plugin-react`, which only supplied `react/jsx-no-literals`, by `luckystack/no-untranslated-jsx-text` from `@luckystack/core/eslint` with the same behaviour and allow-list.
+- **`eslint-plugin-unicorn` 78 with the rule set it had before.** Between v64 and v78 its recommended preset grew from 137 to 338 rules; turning them all on meant thousands of new findings in an upgraded app, mostly naming and comment style. `eslint.official.config.js` lists the adopted rules (`ADOPTED_UNICORN_RULES`) and turns every other recommended rule off, so a rule unicorn adds later stays off until you add it. Four earlier rules that now flag many style-only sites (`prefer-ternary`, `prefer-simple-condition-first`, `prefer-default-parameters`, `prefer-logical-operator-over-ternary`) are left out; `no-unsafe-string-replacement` is added.
+- **An `eslint-disable` that no longer suppresses anything is a lint error.** `eslint-plugin-eslint-comments` is removed: its `no-unused-disable` rule did nothing under flat config, and ESLint's own report was switched off, so dead disables were never caught. `linterOptions.reportUnusedDisableDirectives` is now `'error'`.
+- `eslint-plugin-react-hooks` `^7.1.1` (5.x stopped at ESLint 9), pinned to the classic `rules-of-hooks` + `exhaustive-deps` pair: its 7.x `recommended` preset also enables the React-Compiler rules, which are a deliberate refactor rather than a dependency bump. `eslint-plugin-react-refresh` `^0.5.7`, `globals` `^17.13.0`.
+- Requires Node.js 22.13 or newer (was 20.19). Node 20 stopped receiving security updates in April 2026, and ESLint 10 needs 22.13.
+
+### Fixed
+
+- **A mikro-orm scaffold type-checks without `@luckystack/secret-manager`.** `scripts/mikroOrmSchema.ts` imported the package and read `config.secretManager` unconditionally, so `npm run typecheck` (and `verify`) failed in every mikro-orm project that did not choose secret-manager. The block now ships commented out, like the one in `scripts/prismaWithSecrets.ts`; `--secret-manager` and `luckystack add secret-manager` switch it on.
+- **A drizzle + SQLite scaffold no longer retypes browser code as Bun code.** `functions/db.ts` referenced all of `bun-types`, which declares Bun's globals for the whole program — `import.meta.hot` became always present, so the HMR guard in `MenuHandler` failed `@typescript-eslint/no-unnecessary-condition`. It now references only `bun-types/sqlite`, the declarations the Bun driver path needs.
+- The scaffolder's prune edits insert their replacement code verbatim. It was passed to `String#replaceAll` as a string, so a `$'` or `$&` in it was read as a replacement pattern.
+
+### Upgrading an existing project
+
+1. Use Node.js 22.13 or newer.
+2. `package.json` is never touched by `luckystack update`; edit the devDependencies by hand: `"eslint": "^10.12.0"`, `"@eslint/js": "^10.0.1"`, `"eslint-plugin-unicorn": "^78.0.0"`, `"eslint-plugin-jsx-a11y-x": "^0.2.0"`, `"eslint-plugin-react-hooks": "^7.1.1"`, `"eslint-plugin-react-refresh": "^0.5.7"`, `"eslint-plugin-react-x": "^5.27.1"`, `"eslint-plugin-import-x": "^4.17.1"`, `"globals": "^17.13.0"`; remove `eslint-plugin-jsx-a11y`, `eslint-plugin-react` and `eslint-plugin-eslint-comments`. If `npm install` then reports `ERESOLVE` over the `eslint@9` still recorded in the lockfile, run `npm install --force` once and confirm that a following `npm ci` succeeds without it.
+3. `npx luckystack update` delivers `eslint.official.config.js`; an edited copy gets a `.new` sidecar to merge by hand.
+4. Rename suppressions in your code: `react/jsx-no-literals` → `luckystack/no-untranslated-jsx-text`, `jsx-a11y/…` → `jsx-a11y-x/…`.
+5. Run `npm run lint`. Disables that no longer apply now fail; `npx eslint . --fix --fix-type directive` removes them (keep any reason they carried as a normal comment). The template's own copies were cleaned the same way, and `npx luckystack update --app` brings them (`src/_sockets/socketInitializer.ts`, `src/_components/inputs/dateUtils.ts` and, with login, `reset-password/_api/sendReset_v1.ts`, `settings/_api/requestEmailChange_v1.ts` and `settings/confirm-email/page.tsx`). Then run `npm run verify`.
+
 ## [0.11.0] - 2026-10-14
 
 ### Changed

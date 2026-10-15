@@ -10,8 +10,8 @@ import type { EslintRule } from '../internal/ruleTypes.js';
 const ARBITRARY_COLOR_PATTERN = /\b(?:text|bg|border|ring|fill|stroke|from|to|via|outline|decoration|accent|caret|placeholder|divide)-\[#[0-9a-fA-F]{3,8}\]/;
 
 //? This rule reads JSX AST nodes (`JSXAttribute`, `JSXExpressionContainer`,
-//? `TemplateLiteral` quasis) that eslint-plugin-react injects into the visitor
-//? map at runtime but that eslint's stock `Rule.Node` type doesn't model. The
+//? `TemplateLiteral` quasis) that the JSX-aware parser produces at runtime
+//? but that eslint's stock `Rule.Node` type doesn't model. The
 //? objects ARE real eslint nodes at runtime — `context.report({ node })` only
 //? needs `{ type, loc, range, ... }`, all present. This guard narrows an
 //? `unknown` to `Rule.Node` in one place so the call sites stay cast-free and
@@ -19,8 +19,8 @@ const ARBITRARY_COLOR_PATTERN = /\b(?:text|bg|border|ring|fill|stroke|from|to|vi
 const asRuleNode = (node: object): Rule.Node => node as Rule.Node;
 
 //? JSX AST nodes (JSXAttribute, JSXExpressionContainer, …) are not part of
-//? eslint's stock estree AST. eslint-plugin-react extends the visitor map at
-//? runtime, but the stock `Rule.RuleListener` type does not know about them,
+//? eslint's stock estree AST. The parser supplies them at runtime, but the
+//? stock `Rule.RuleListener` type does not know about them,
 //? so we describe the shapes we read inline. The actual eslint runtime gives
 //? us the right object; this is purely a TS-side annotation.
 type ClassNameValueShape =

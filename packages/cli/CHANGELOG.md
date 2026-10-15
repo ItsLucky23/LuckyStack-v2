@@ -5,6 +5,18 @@ All notable changes to `@luckystack/cli` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-10-15
+
+### Changed
+
+- Requires Node.js 22.13 or newer (was 20). Node 20 stopped receiving security updates in April 2026, and the scaffold's lint toolchain (ESLint 10) needs 22.13.
+
+### Fixed
+
+- **Code that `luckystack add`, `switch-orm` and the Docker assets inject arrives verbatim.** The injected text was passed to `String#replace` as a string, so a `$'`, `$&` or `$1` inside it (for example `const currency = '$';`) was read as a replacement pattern and spliced other parts of the file into the result. The replacement is now a function, which inserts the text as-is.
+- `luckystack add secret-manager` / `remove secret-manager` also switch the secret-resolution block in a mikro-orm project's `scripts/mikroOrmSchema.ts`, which now ships commented out (see `create-luckystack-app` 0.12.0).
+- The login assets no longer carry two `import-x/default` suppressions a consumer's `esModuleInterop` makes unnecessary (they fail lint under `reportUnusedDisableDirectives`), and the email-confirmation page sets its no-token error state on first render instead of from an effect (`react-x/set-state-in-effect`).
+
 ## [0.11.0] - 2026-10-14
 
 ### Changed

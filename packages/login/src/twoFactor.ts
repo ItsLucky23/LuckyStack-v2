@@ -401,7 +401,7 @@ export const verifyTwoFactorChallenge = async (input: VerifyTwoFactorInput): Pro
   }
 
   const method: TwoFactorMethod = input.method ?? 'totp';
-  let verified = false;
+  let verified: boolean;
   if (method === 'totp') {
     //? Login boundary → enforce the single-use timestep replay guard.
     verified = await verifyTotpForUser(user, input.code, true);

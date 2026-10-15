@@ -153,7 +153,7 @@ export const renderDockerVariables = (project: ConsumerProject): Record<string, 
 
 const render = (source: string, variables: Record<string, string>): string => {
   let rendered = source;
-  for (const [key, value] of Object.entries(variables)) rendered = rendered.replaceAll(`{{${key}}}`, value);
+  for (const [key, value] of Object.entries(variables)) rendered = rendered.replaceAll(`{{${key}}}`, () => value);
   const unresolved = /\{\{[A-Z0-9_]+\}\}/.exec(rendered)?.[0];
   if (unresolved) throw new Error(`Unresolved Docker asset placeholder: ${unresolved}`);
   return rendered;

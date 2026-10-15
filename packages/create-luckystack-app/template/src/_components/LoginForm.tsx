@@ -271,7 +271,7 @@ export default function LoginForm({ formType }: { formType: "login" | "register"
   })();
 
   return (
-    /* eslint-disable-next-line jsx-a11y/no-noninteractive-element-interactions -- form container needs Enter key handling */
+    /* eslint-disable-next-line jsx-a11y-x/no-noninteractive-element-interactions -- form container needs Enter key handling */
     <form
       tabIndex={-1}
       onKeyDown={handleKeyDown}

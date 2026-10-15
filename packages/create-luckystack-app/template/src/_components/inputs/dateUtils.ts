@@ -13,7 +13,7 @@ export interface CalendarDay {
 }
 
 export const getBrowserTimeZone = (): string =>
-  Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+  new Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 
 const partsToRecord = (parts: Intl.DateTimeFormatPart[]): Record<string, string> => {
   const out: Record<string, string> = {};

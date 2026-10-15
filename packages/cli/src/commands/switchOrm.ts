@@ -134,7 +134,7 @@ const tryTokenEdit = (project: ConsumerProject, relative: string, find: string, 
   const normalized = raw.replaceAll('\r\n', '\n');
   if (!normalized.includes(find)) return false;
   const eol = raw.includes('\r\n') ? '\r\n' : '\n';
-  fs.writeFileSync(absolute, normalized.replace(find, replace).replaceAll('\n', eol));
+  fs.writeFileSync(absolute, normalized.replace(find, () => replace).replaceAll('\n', () => eol));
   return true;
 };
 

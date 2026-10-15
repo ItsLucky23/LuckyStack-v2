@@ -196,7 +196,6 @@ export const validateDeploy = ({
       //? always-defined (Record lookup), but the runtime can return undefined
       //? when the user names a fallback env that doesn't exist. The else
       //? branch reports that error.
-      // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Record lookup can return undefined at runtime
       if (fallbackEnv) {
         if (fallbackEnv.redis !== envDef.redis) {
           findings.push({

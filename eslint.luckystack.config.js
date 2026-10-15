@@ -72,5 +72,6 @@ export default [
 //?      // eslint-disable-next-line luckystack/no-raw-fetch-in-src -- external API probe
 //?      const res = await fetch('/api/external/probe');
 //?
-//? `eslint-comments/no-unused-disable` is `error`, so any disable that
-//? stops applying surfaces and gets cleaned up — disables can't rot silently.
+//? `reportUnusedDisableDirectives` is `error` (eslint.official.config.js), so
+//? any disable that stops applying surfaces and gets cleaned up — disables
+//? can't rot silently.

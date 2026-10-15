@@ -5,6 +5,17 @@ All notable changes to `@luckystack/devkit` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-10-15
+
+### Changed
+
+- Requires Node.js 22.13 or newer (was 20). Node 20 stopped receiving security updates in April 2026, and the scaffold's lint toolchain (ESLint 10) needs 22.13.
+- `luckystack-validate-deploy` keeps the original import error as `cause` when a config file fails to load.
+
+### Fixed
+
+- Page/sync template placeholders and the expanded types in the functions metadata are inserted verbatim. They were passed to `String#replaceAll` as strings, so a `$'` or `$&` in a path or in a type such as `{ currency: '$' }` was read as a replacement pattern.
+
 ## [0.11.0] - 2026-10-14
 
 ### Changed

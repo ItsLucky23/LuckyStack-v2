@@ -49,7 +49,7 @@ export const socketConnected = async ({
     //? caches. Initial-connect cases are covered by the existing
     //? `onSocketConnect` hook from @luckystack/server.
     if (isReconnect) {
-      // eslint-disable-next-line @typescript-eslint/no-floating-promises -- fire-and-forget consumer hook; failures are isolated inside dispatchHook
+      //? Fire-and-forget consumer hook; failures are isolated inside dispatchHook.
       void dispatchHook('postSocketReconnect', {
         token,
         userId,
@@ -146,7 +146,7 @@ const handleGraceExpiry = async ({
     //? tab-switch path where `deleteSessionOnDisconnect` is false). This hook is
     //? the only seam that fires exactly when the grace window expires — mark
     //? offline in the DB, persist final state, audit the departure here.
-    // eslint-disable-next-line @typescript-eslint/no-floating-promises -- fire-and-forget consumer hook; failures are isolated inside dispatchHook
+    //? Fire-and-forget consumer hook; failures are isolated inside dispatchHook.
     void dispatchHook('postDisconnectGraceExpired', {
       token,
       userId,
@@ -218,7 +218,7 @@ export const socketDisconnecting = ({
   getLogger().debug(`presence: user disconnected`, { reason, timerSeconds: time / 1000 });
 
   const timeout = setTimeout(() => {
-    // eslint-disable-next-line @typescript-eslint/no-floating-promises -- timer body is self-contained (errors captured via tryCatch inside handleGraceExpiry); nothing awaits the timer
+    //? The timer body is self-contained (tryCatch inside handleGraceExpiry); nothing awaits the timer.
     void handleGraceExpiry({ token, reason, socket, timeout, deleteSessionOnDisconnect, time });
   }, time);
 
@@ -243,7 +243,7 @@ export const initActivityBroadcaster = ({
   //? docs/disconnect-grace.md: tab-switch is best-effort, the Redis TTL is the
   //? real bound on session lifetime.
   let intentionalDisconnectHandled = false;
-  // eslint-disable-next-line @typescript-eslint/no-misused-promises -- socket.io ignores the listener promise; errors are contained via tryCatch below
+  //? socket.io ignores the listener promise; errors are contained via tryCatch below.
   socket.on(socketEventNames.intentionalDisconnect, async () => {
     if (intentionalDisconnectHandled) { return; }
     intentionalDisconnectHandled = true;

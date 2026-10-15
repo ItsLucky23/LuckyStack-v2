@@ -184,7 +184,9 @@ const resolveLocalExportedTypes = ({
     const declarationType = checker.getTypeAtLocation(declarationNode);
     const expanded = normalizeInlineType(expandType(declarationType, checker));
 
-    resolved = resolved.replaceAll(new RegExp(String.raw`\b${exportName}\b`, 'g'), expanded);
+    //? Function replacement: a type text such as `'$'` would otherwise be read
+    //? as the `$'` replacement pattern.
+    resolved = resolved.replaceAll(new RegExp(String.raw`\b${exportName}\b`, 'g'), () => expanded);
   }
 
   return resolved;

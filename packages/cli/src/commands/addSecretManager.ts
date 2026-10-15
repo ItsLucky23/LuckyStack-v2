@@ -2,7 +2,8 @@
 //? `wireSecretManager`: adds @luckystack/secret-manager AND uncomments the three
 //? enable-later blocks the template ships (the `secretManager` slot in config.ts,
 //? the `initSecretManager` block in server/server.ts, and the identical block in
-//? scripts/prismaWithSecrets.ts so the `prisma:*` scripts resolve pointers). It stays dormant until
+//? scripts/prismaWithSecrets.ts so the `prisma:*` scripts resolve pointers, plus a
+//? mikro-orm project's scripts/mikroOrmSchema.ts). It stays dormant until
 //? LUCKYSTACK_SECRET_MANAGER_URL is set, so the project still boots without an
 //? external secret server. Remove re-comments both blocks + drops the dep.
 //? Edits are best-effort (idempotent): a project already in the target shape skips.
@@ -90,6 +91,10 @@ export const addSecretManager = (project: ConsumerProject, options: AddOptions):
   if (tryEdit(project.root, 'scripts/prismaWithSecrets.ts', SERVER_COMMENTED, SERVER_ACTIVE)) {
     console.log('• uncommented the secret-resolution block in scripts/prismaWithSecrets.ts');
   }
+  //? …and in a mikro-orm project's schema script, for `db:schema:update`.
+  if (tryEdit(project.root, 'scripts/mikroOrmSchema.ts', SERVER_COMMENTED, SERVER_ACTIVE)) {
+    console.log('• uncommented the secret-resolution block in scripts/mikroOrmSchema.ts');
+  }
   if (options.install) {
     console.log('• running npm install …');
     if (!runNpmInstall(project.root, project.pkg)) console.warn('  npm install failed — run it manually to finish.');
@@ -118,6 +123,9 @@ export const removeSecretManager = (project: ConsumerProject): Result<void> => {
   }
   if (tryEdit(project.root, 'scripts/prismaWithSecrets.ts', SERVER_ACTIVE, SERVER_COMMENTED)) {
     console.log('• re-commented the secret-resolution block in scripts/prismaWithSecrets.ts');
+  }
+  if (tryEdit(project.root, 'scripts/mikroOrmSchema.ts', SERVER_ACTIVE, SERVER_COMMENTED)) {
+    console.log('• re-commented the secret-resolution block in scripts/mikroOrmSchema.ts');
   }
   try {
     if (dropDependency(project, PKG)) console.log(`• removed ${PKG} from package.json`);

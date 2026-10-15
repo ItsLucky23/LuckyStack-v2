@@ -5,6 +5,12 @@ All notable changes to `@luckystack/sync` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-10-15
+
+### Changed
+
+- Requires Node.js 22.13 or newer (was 20). Node 20 stopped receiving security updates in April 2026, and the scaffold's lint toolchain (ESLint 10) needs 22.13.
+
 ## [0.11.0] - 2026-10-14
 
 ### Changed

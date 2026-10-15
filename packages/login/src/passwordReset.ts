@@ -12,9 +12,8 @@
 //? primitive, so a leaked Redis keyspace can't be replayed to mint a reset.
 //? The raw token is returned to the caller exactly once for the emailed URL.
 
-// eslint-disable-next-line import-x/no-named-as-default -- bcryptjs ships both a default and namespace export; using the default mirrors its README
+//? bcryptjs ships both a default and a namespace export; the default import and genSalt/hash/compare on it mirror its README.
 import bcrypt from 'bcryptjs';
-/* eslint-disable import-x/no-named-as-default-member -- accessing genSalt/hash/compare via the default import is the documented pattern */
 
 import { getProjectConfig, issueOneTimeToken, consumeOneTimeToken, formatKey, redis, oneTimeTokenKey } from '@luckystack/core';
 

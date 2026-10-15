@@ -340,7 +340,7 @@ server.registerTool(
   async () => {
     const root = await projectRoot();
     const graphPath = path.join(root, 'docs', 'ai-graph.json');
-    let graphMtime: Date | null = null;
+    let graphMtime: Date;
     try {
       const stat = await fs.stat(graphPath);
       graphMtime = stat.mtime;
@@ -359,7 +359,7 @@ server.registerTool(
     while (queue.length > 0 && visited < 5000) {
       const dir = queue.shift();
       if (dir === undefined) break;
-      let entries: { name: string; isDirectory: () => boolean }[] = [];
+      let entries: { name: string; isDirectory: () => boolean }[];
       try {
         entries = await fs.readdir(dir, { withFileTypes: true });
       } catch {

@@ -20,6 +20,7 @@ import noRawFetchInSrc from './rules/no-raw-fetch-in-src.js';
 import noRawTryCatch from './rules/no-raw-try-catch.js';
 import noUnsafeApiWrappers from './rules/no-unsafe-api-wrappers.js';
 import noUnsafeSyncWrappers from './rules/no-unsafe-sync-wrappers.js';
+import noUntranslatedJsxText from './rules/no-untranslated-jsx-text.js';
 import preferLuckystackConfirm from './rules/prefer-luckystack-confirm.js';
 import preferLuckystackDropdown from './rules/prefer-luckystack-dropdown.js';
 import preferLuckystackNotify from './rules/prefer-luckystack-notify.js';
@@ -35,6 +36,7 @@ const allRules: Record<string, EslintRule> = {
   'prefer-luckystack-notify': preferLuckystackNotify,
   'no-direct-prisma-import-in-components': noDirectPrismaImportInComponents,
   'no-arbitrary-tailwind-color': noArbitraryTailwindColor,
+  'no-untranslated-jsx-text': noUntranslatedJsxText,
 };
 
 const hasApi = hasPackage('@luckystack/api');
@@ -59,6 +61,8 @@ const ruleSeverities: Record<string, Linter.RuleSeverity> = {
   'luckystack/prefer-luckystack-notify': 'warn',
   'luckystack/no-direct-prisma-import-in-components': 'warn',
   'luckystack/no-arbitrary-tailwind-color': 'warn',
+  //? User-facing text goes through the translator (AGENTS.md rule 13).
+  'luckystack/no-untranslated-jsx-text': 'warn',
 };
 
 const luckystackConfig: Linter.Config[] = [

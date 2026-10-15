@@ -171,7 +171,6 @@ export const resolveTemplateKind = (ctx: TemplateMatchContext): TemplateKind | n
   for (const rule of getTemplateRules()) {
     //? `rule.match` is a user-supplied predicate, NOT String.prototype.match —
     //? the prefer-regexp-test rule is a false positive on this member call.
-    // eslint-disable-next-line unicorn/prefer-regexp-test
     if (rule.match(ctx)) return rule.kind;
   }
   return null;

@@ -8,7 +8,6 @@ import type { Socket } from 'socket.io-client';
 // The `export let socket` form gives importers a live binding — they always
 // see the current value after `setSocket` replaces it.
 
-// eslint-disable-next-line import-x/no-mutable-exports
 export let socket: Socket | null = null;
 
 //? One-shot waiters: promises that resolve the moment a non-null socket is

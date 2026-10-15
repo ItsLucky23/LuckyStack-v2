@@ -1,4 +1,4 @@
-/* eslint-disable @typescript-eslint/prefer-nullish-coalescing, @typescript-eslint/restrict-template-expressions */
+/* eslint-disable @typescript-eslint/prefer-nullish-coalescing */
 
 import { getProjectConfig } from './projectConfig';
 import { getLogger } from './loggerRegistry';

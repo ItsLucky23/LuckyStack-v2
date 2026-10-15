@@ -1,6 +1,6 @@
 //? LuckyStack-specific lint contract. Codifies framework rules into actual
 //? eslint enforcement (no raw try/catch, no raw fetch, prefer framework
-//? components, no arbitrary tailwind colors).
+//? components, no arbitrary tailwind colors, no untranslated JSX text).
 //?
 //? Rules ship via the `@luckystack/core/eslint` subpath. Package-gated
 //? rules probe `node_modules` at config-load time and skip silently when
@@ -44,9 +44,9 @@ export default luckystack
 //?      const res = await fetch('/api/external/probe')
 //?
 //?    Or file-level at the top: `/* eslint-disable luckystack/X -- reason */`.
-//?    `eslint-comments/no-unused-disable` is enabled, so dead disables get
-//?    flagged when the underlying code stops violating — they won't rot
-//?    silently.
+//?    `reportUnusedDisableDirectives` is `error` (eslint.official.config.js),
+//?    so dead disables get flagged when the underlying code stops violating —
+//?    they won't rot silently.
 //?
 //? Full rule list + behavior: docs/luckystack/ARCHITECTURE_FUNCTION_INJECTION.md
 //? has the framework spec; the rule definitions themselves live in

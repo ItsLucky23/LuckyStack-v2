@@ -123,7 +123,7 @@ const importConfig = async (file: string, label: string): Promise<void> => {
     await import(pathToFileURL(resolved).href);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`[luckystack-validate-deploy] failed to import ${label} at ${abs}: ${message}`);
+    throw new Error(`[luckystack-validate-deploy] failed to import ${label} at ${abs}: ${message}`, { cause: error });
   }
 };
 

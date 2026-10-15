@@ -181,7 +181,18 @@ describe('secret-manager block parity (CLI ↔ scaffolder)', () => {
   });
 
   it('scaffolder wireSecretManager uncomments scripts/prismaWithSecrets.ts', () => {
-    expect(scaffolder.includes("editScaffoldFile(targetDir, 'scripts/prismaWithSecrets.ts'")).toBe(true);
+    expect(scaffolder.includes("'scripts/prismaWithSecrets.ts'")).toBe(true);
+  });
+
+  //? A mikro-orm scaffold's scripts/mikroOrmSchema.ts used to import the package
+  //? unconditionally, so a scaffold without secret-manager failed `tsc` (no module,
+  //? no `secretManager` config key). It must ship the same COMMENTED block.
+  it('scaffolder mikro-orm schema script ships the CLI SERVER_COMMENTED block verbatim', () => {
+    const script = /const MIKRO_SCHEMA_SCRIPT = `([\s\S]*?)`;\n/.exec(scaffolder)?.[1] ?? '';
+    expect(script.includes(literalBody('SERVER_COMMENTED'))).toBe(true);
+    expect(script.includes("import('@luckystack/secret-manager')")).toBe(true);
+    expect(script.replaceAll(literalBody('SERVER_COMMENTED'), '').includes('@luckystack/secret-manager\')')).toBe(false);
+    expect(scaffolder.includes("'scripts/mikroOrmSchema.ts']")).toBe(true);
   });
 });
 

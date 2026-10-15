@@ -104,7 +104,7 @@ export const serveFile = async (req: IncomingMessage | { url: string }, res: Ser
   }
 
 
-  let contentType: string | null = 'text/html';
+  let contentType: string | null;
 
   //? here we get the content type of the file and serve it to the client
   //? if the file extension is not in the list below, we serve the index.html file

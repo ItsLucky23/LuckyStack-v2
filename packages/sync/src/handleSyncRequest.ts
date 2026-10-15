@@ -6,7 +6,7 @@
 //? `?.` chains on runtime-map values read as "unnecessary" to the typed view but
 //? are real runtime guards. (The former `user!` assertion at the `validateRequest`
 //? call site was removed once core made `validateRequest` null-safe — CORE-06.)
-/* eslint-disable @typescript-eslint/no-unnecessary-condition, @typescript-eslint/restrict-template-expressions, @typescript-eslint/prefer-nullish-coalescing, @typescript-eslint/no-non-null-assertion, eqeqeq */
+/* eslint-disable @typescript-eslint/no-unnecessary-condition, @typescript-eslint/prefer-nullish-coalescing, @typescript-eslint/no-non-null-assertion */
 import { randomUUID } from "node:crypto";
 import type { syncMessage, PostSyncFanoutPayload, PostSyncExecutePayload, BaseSessionLayout as SessionLayout, ErrorFormatter, RoomSocket } from "@luckystack/core";
 import { Socket } from "socket.io";

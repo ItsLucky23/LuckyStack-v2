@@ -25,4 +25,13 @@ describe('Drizzle SQLite scaffold runtime parity', () => {
     expect(DRIZZLE_DRIVER_DEPS.sqlite.devDeps['@types/better-sqlite3']).toBe('^7.6.13');
     expect(DRIZZLE_DRIVER_DEPS.sqlite.devDeps['bun-types']).toBe('^1.3.14');
   });
+
+  //? The whole package declares Bun's globals for the entire program, including
+  //? `import.meta.hot` as always present, which made the browser-side HMR guard in
+  //? MenuHandler fail `no-unnecessary-condition` in every drizzle+sqlite scaffold.
+  it('loads only the bun:sqlite declarations, not all of bun-types', () => {
+    const shim = drizzleDbShimFor('sqlite', 'file:./dev.db');
+    expect(shim).toContain('/// <reference types="bun-types/sqlite" />');
+    expect(shim).not.toContain('/// <reference types="bun-types" />');
+  });
 });

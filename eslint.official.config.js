@@ -15,17 +15,88 @@ import tseslint from 'typescript-eslint'
 import reactX from 'eslint-plugin-react-x'
 import eslintPluginUnicorn from 'eslint-plugin-unicorn'
 import eslintPluginImportX from 'eslint-plugin-import-x'
-import jsxA11y from 'eslint-plugin-jsx-a11y'
-import react from 'eslint-plugin-react'
+//? The maintained fork of eslint-plugin-jsx-a11y (same recommended set); the
+//? original stopped at ESLint 9. Rule ids are `jsx-a11y-x/…`.
+import jsxA11y from 'eslint-plugin-jsx-a11y-x'
 import i18next from 'eslint-plugin-i18next';
-import eslintPluginComments from 'eslint-plugin-eslint-comments';
+
+//? Unicorn rules this project has adopted. Between v64 and v78 unicorn's
+//? recommended preset grew from 137 to 338 rules; enabling them all at once
+//? meant ~2,900 new findings here and in every upgraded app, mostly naming and
+//? comment style. A rule unicorn adds later therefore stays off until someone
+//? adopts it on purpose: add its name here and fix what it reports.
+//? `prefer-ternary`, `prefer-simple-condition-first`, `prefer-default-parameters`
+//? and `prefer-logical-operator-over-ternary` were adopted before v66 but now
+//? flag ~290 style-only sites, so they are left out until re-adopted.
+const ADOPTED_UNICORN_RULES = new Set([
+  'catch-error-name', 'consistent-assert', 'consistent-date-clone',
+  'consistent-empty-array-spread', 'consistent-existence-index-check',
+  'consistent-function-scoping', 'consistent-template-literal-escape',
+  'empty-brace-spaces', 'error-message', 'escape-case',
+  'expiring-todo-comments', 'explicit-length-check', 'filename-case',
+  'import-style', 'isolated-functions', 'new-for-builtins',
+  'no-abusive-eslint-disable', 'no-accessor-recursion',
+  'no-anonymous-default-export', 'no-array-callback-reference',
+  'no-array-method-this-argument', 'no-array-reduce',
+  'no-array-reverse', 'no-array-sort', 'no-await-expression-member',
+  'no-await-in-promise-methods', 'no-console-spaces', 'no-document-cookie',
+  'no-empty-file', 'no-for-loop', 'no-immediate-mutation',
+  'no-instanceof-builtins', 'no-invalid-fetch-options',
+  'no-invalid-remove-event-listener', 'no-lonely-if',
+  'no-magic-array-flat-depth', 'no-named-default', 'no-negated-condition',
+  'no-negation-in-equality-check', 'no-nested-ternary', 'no-new-array',
+  'no-new-buffer', 'no-null', 'no-object-as-default-parameter',
+  'no-process-exit', 'no-single-promise-in-promise-methods',
+  'no-static-only-class', 'no-thenable', 'no-this-assignment',
+  'no-typeof-undefined', 'no-unnecessary-array-flat-depth',
+  'no-unnecessary-array-splice-count', 'no-unnecessary-await',
+  'no-unnecessary-polyfills', 'no-unnecessary-slice-end',
+  'no-unreadable-array-destructuring', 'no-unreadable-iife',
+  'no-unsafe-string-replacement', 'no-useless-collection-argument',
+  'no-useless-error-capture-stack-trace', 'no-useless-fallback-in-spread',
+  'no-useless-iterator-to-array', 'no-useless-length-check',
+  'no-useless-promise-resolve-reject', 'no-useless-spread',
+  'no-useless-switch-case', 'no-useless-undefined', 'no-zero-fractions',
+  'number-literal-case', 'numeric-separators-style',
+  'prefer-add-event-listener', 'prefer-array-find', 'prefer-array-flat',
+  'prefer-array-flat-map', 'prefer-array-index-of', 'prefer-array-some',
+  'prefer-at', 'prefer-bigint-literals', 'prefer-blob-reading-methods',
+  'prefer-class-fields', 'prefer-classlist-toggle', 'prefer-code-point',
+  'prefer-date-now', 'prefer-dom-node-append',
+  'prefer-dom-node-remove', 'prefer-dom-node-text-content',
+  'prefer-event-target', 'prefer-export-from', 'prefer-global-this',
+  'prefer-includes', 'prefer-keyboard-event-key', 'prefer-math-min-max',
+  'prefer-math-trunc', 'prefer-modern-dom-apis', 'prefer-modern-math-apis',
+  'prefer-module', 'prefer-native-coercion-functions', 'prefer-negative-index',
+  'prefer-node-protocol', 'prefer-number-properties',
+  'prefer-object-from-entries', 'prefer-optional-catch-binding',
+  'prefer-prototype-methods', 'prefer-query-selector', 'prefer-reflect-apply',
+  'prefer-regexp-test', 'prefer-response-static-json', 'prefer-set-has',
+  'prefer-set-size', 'prefer-single-call',
+  'prefer-spread', 'prefer-string-raw', 'prefer-string-replace-all',
+  'prefer-string-slice', 'prefer-string-starts-ends-with',
+  'prefer-string-trim-start-end', 'prefer-structured-clone', 'prefer-switch',
+  'prefer-top-level-await', 'prefer-type-error',
+  'relative-url-style', 'require-array-join-separator',
+  'require-module-attributes', 'require-module-specifiers',
+  'require-number-to-fixed-digits-argument', 'switch-case-braces',
+  'switch-case-break-position', 'template-indent',
+  'text-encoding-identifier-case', 'throw-new-error',
+])
+const unadoptedUnicornRules = Object.fromEntries(
+  Object.keys(eslintPluginUnicorn.configs.recommended.rules)
+    .filter((id) => !ADOPTED_UNICORN_RULES.has(id.replace('unicorn/', '')))
+    .map((id) => [id, 'off']),
+)
 
 export default tseslint.config(
   { ignores: ['dist'] },
   {
     files: ['**/*.{ts,tsx}'],
+    //? A disable that no longer suppresses anything fails the lint, so
+    //? disables cannot rot silently.
     linterOptions: {
-      reportUnusedDisableDirectives: false,
+      reportUnusedDisableDirectives: 'error',
     },
     extends: [
       ...tseslint.configs.strictTypeChecked,
@@ -33,10 +104,10 @@ export default tseslint.config(
       js.configs.recommended,
       tseslint.configs.recommended,
       reactX.configs.recommended,
-      eslintPluginUnicorn.configs['flat/recommended'],
+      eslintPluginUnicorn.configs.recommended,
       eslintPluginImportX.flatConfigs.recommended,
       eslintPluginImportX.flatConfigs.typescript,
-      jsxA11y.flatConfigs.recommended,
+      jsxA11y.configs.recommended,
     ],
     languageOptions: {
       ecmaVersion: 'latest',
@@ -62,11 +133,10 @@ export default tseslint.config(
     plugins: {
       'react-hooks': reactHooks,
       'react-refresh': reactRefresh,
-      'react': react,
       'i18next': i18next,
-      'eslint-comments': eslintPluginComments
     },
     rules: {
+      ...unadoptedUnicornRules,
       //? react-hooks 7's `recommended` preset now bundles the new React-Compiler-
       //? adjacent rules (e.g. `react-hooks/set-state-in-effect`) which flag ~25
       //? existing effect sites. Adopting those is a deliberate refactor, not a
@@ -75,7 +145,6 @@ export default tseslint.config(
       //? take on the React-Compiler lint migration.
       'react-hooks/rules-of-hooks': 'error',
       'react-hooks/exhaustive-deps': 'warn',
-      'eslint-comments/no-unused-disable': 'error',
       'react-refresh/only-export-components': [
         'warn',
         {
@@ -112,26 +181,10 @@ export default tseslint.config(
         },
       ],
       'import-x/order': 'off',
-      "react/jsx-no-literals": ["warn", {
-        "noStrings": true,
-        "allowedStrings": [
-          // Original & Punctuation
-          "!", "?", "-", "/", ":", ",", "(", ")", "%", "&",
-          "@", "#", "$", "^", "*", "+", "=", "|", ".", "...",
-
-          // Commonly used single-character literals
-          "0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
-
-          // UI Dividers & Whitespace placeholders
-          " ", " ", " | ", " • ", " » ", " « ", "—", "–",
-
-          // Common Logic/Unit symbols
-          "x", "px", "rem", "em", "ms", "s", "°"
-        ],
-        "ignoreProps": true
-      }],
-      'jsx-a11y/click-events-have-key-events': 'off',
-      'jsx-a11y/no-static-element-interactions': 'off',
+      //? Untranslated JSX text is `luckystack/no-untranslated-jsx-text`
+      //? (eslint.luckystack.config.js), with the same punctuation allow-list.
+      'jsx-a11y-x/click-events-have-key-events': 'off',
+      'jsx-a11y-x/no-static-element-interactions': 'off',
       'no-restricted-syntax': [
         'error',
         {
@@ -191,7 +244,6 @@ export default tseslint.config(
     },
     rules: {
       'react-refresh/only-export-components': 'off',
-      'react/jsx-no-literals': 'off',
       'import-x/default': 'off',
       //? `no-non-null-assertion: 'off'` overlay REMOVED per the strict-typing
       //? policy — server/shared/scripts/config.ts now obey the same rule the

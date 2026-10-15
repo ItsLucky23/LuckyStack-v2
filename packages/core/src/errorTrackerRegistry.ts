@@ -80,7 +80,7 @@ export const sanitizeErrorString = (value: string): string => {
   // redacted key so interpolated secrets (e.g. "token=abc") never reach an adapter.
   for (const key of getRedactedLogKeys()) {
     const { urlParam, logLabel } = buildScrubPattern(key);
-    result = result.replace(urlParam, REDACTED_PLACEHOLDER).replace(logLabel, REDACTED_PLACEHOLDER);
+    result = result.replace(urlParam, () => REDACTED_PLACEHOLDER).replace(logLabel, () => REDACTED_PLACEHOLDER);
   }
   return result;
 };

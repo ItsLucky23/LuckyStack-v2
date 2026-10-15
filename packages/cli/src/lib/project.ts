@@ -285,7 +285,9 @@ export const editFile = (filePath: string, edits: readonly FileEdit[]): void => 
     //? Replace only the FIRST occurrence so a token that appears more than once
     //? in a drifted file does not cause a double-edit (would corrupt the output).
     //? String.prototype.replace with a string needle replaces the first match only.
-    content = content.replace(find, replace);
+    //? A function replacement inserts `replace` verbatim; a string one would
+    //? expand `$&`, `$'`, `$1`… inside the injected code.
+    content = content.replace(find, () => replace);
   }
   if (wasCrlf) content = content.replaceAll('\n', '\r\n');
   fs.writeFileSync(filePath, content);

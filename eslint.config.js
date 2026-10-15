@@ -26,6 +26,14 @@ export default [
       'import-x/no-unresolved': ['error', { ignore: ['^@modelcontextprotocol/sdk/'] }],
     },
   },
+  //? Type-extraction fixtures declare `let x!: SomeType` and return it: only the
+  //? declared type matters to the extractor, the value never runs.
+  {
+    files: ['packages/devkit/src/typeMap/__fixtures__/**/*.ts'],
+    rules: {
+      'no-unassigned-vars': 'off',
+    },
+  },
 ]
 //npx eslint src/**/*.tsx
 

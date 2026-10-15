@@ -5,6 +5,17 @@ All notable changes to `@luckystack/core` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.12.0] - 2026-10-15
+
+### Added
+
+- **ESLint rule `luckystack/no-untranslated-jsx-text`** (`@luckystack/core/eslint`, on as a warning): text in JSX goes through the project translator. It replaces `react/jsx-no-literals` from `eslint-plugin-react`, which stopped at ESLint 9 and was kept for this one rule. Same behaviour as the options the scaffold ran it with: JSX text and string/template literals in a child `{…}` are reported, attribute values are not, and punctuation, digits and units such as `px` are allowed. `allowedStrings` replaces that allow-list. A disable for `react/jsx-no-literals` becomes `luckystack/no-untranslated-jsx-text`.
+
+### Changed
+
+- The optional `eslint` peer accepts ESLint 9 and 10 (`^9.0.0 || ^10.0.0`), so a project already on ESLint 10 installs without a peer conflict. The bundled rules use no API that ESLint 10 removed.
+- Requires Node.js 22.13 or newer (was 20). Node 20 stopped receiving security updates in April 2026, and the scaffold's lint toolchain (ESLint 10) needs 22.13.
+
 ## [0.11.0] - 2026-10-14
 
 ### Changed

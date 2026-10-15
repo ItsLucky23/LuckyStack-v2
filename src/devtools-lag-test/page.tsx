@@ -1,5 +1,5 @@
 // luckystack-allow i18n: dev-only diagnostic stress page, never user-facing
-/* eslint-disable react/jsx-no-literals -- dev-only diagnostic stress page, never user-facing */
+/* eslint-disable luckystack/no-untranslated-jsx-text -- dev-only diagnostic stress page, never user-facing */
 //? intent: dev-only stress page that re-renders a large JSX tree at a fixed rate, to reproduce and measure the DevTools-open lag (React 19 console.createTask per element).
 import { useEffect, useMemo, useState } from 'react';
 

@@ -14,7 +14,6 @@ const escapeRegExp = (value: string): string => value.replaceAll(/[.*+?^${}()|[\
 
 const stripVersionSuffix = (name: string): string => {
   // VERSION_SUFFIX_REGEX is anchored (`$`) so it matches at most once — `.replace` is correct here.
-  // eslint-disable-next-line unicorn/prefer-string-replace-all
   return name.replace(VERSION_SUFFIX_REGEX, '');
 };
 
@@ -89,11 +88,9 @@ export const extractSyncName = (filePath: string): string => {
   if (!match) {
     const basename = path.basename(filePath, '.ts');
     // SYNC_VERSION_TOKEN_REGEX is anchored (`$`) — matches at most once.
-    // eslint-disable-next-line unicorn/prefer-string-replace-all
     return basename.replace(SYNC_VERSION_TOKEN_REGEX, '');
   }
 
-  // eslint-disable-next-line unicorn/prefer-string-replace-all
   return (match[1] ?? '').replace(SYNC_VERSION_TOKEN_REGEX, '');
 };
 

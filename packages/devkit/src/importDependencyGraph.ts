@@ -78,7 +78,7 @@ let scopedFilesCache: { files: Set<string>; expiresAt: number } | null = null;
 const SCOPED_FILES_TTL_MS = 1000;
 
 const extractImportSpecifiers = (filePath: string): string[] => {
-  let mtimeMs = 0;
+  let mtimeMs: number;
   try {
     mtimeMs = fs.statSync(filePath).mtimeMs;
   } catch {

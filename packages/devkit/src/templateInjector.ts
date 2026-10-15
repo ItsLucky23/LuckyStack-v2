@@ -611,7 +611,7 @@ const applyTemplatePlaceholders = (
   const relPath = calculateRelativePath(filePath);
   const pragmaPattern = /\/\/\s*@ts-(?:ignore|expect-error).*\r?\n(.*)\{\{REL_PATH\}\}/g;
   let result = content.replaceAll(pragmaPattern, (_, prefix) => `${prefix}${relPath}`);
-  result = result.replaceAll('{{REL_PATH}}', relPath);
+  result = result.replaceAll('{{REL_PATH}}', () => relPath);
 
   //? Sync templates may carry PAGE_PATH / SYNC_NAME placeholders (paired client
   //? + server). Substitute for any sync file — a no-op when the placeholders
@@ -619,8 +619,8 @@ const applyTemplatePlaceholders = (
   if (fileKind === 'sync_client' || fileKind === 'sync_server') {
     const pagePath = extractSyncPagePath(filePath);
     const syncName = extractSyncName(filePath);
-    result = result.replaceAll('{{PAGE_PATH}}', pagePath);
-    result = result.replaceAll('{{SYNC_NAME}}', syncName);
+    result = result.replaceAll('{{PAGE_PATH}}', () => pagePath);
+    result = result.replaceAll('{{SYNC_NAME}}', () => syncName);
   }
 
   return result;
@@ -1053,7 +1053,7 @@ export const injectServerTemplateWithClientInput = async (
     content = content.replaceAll(pragmaPattern, (_, prefix) => {
       return `${prefix}${relPath}`;
     });
-    content = content.replaceAll('{{REL_PATH}}', relPath);
+    content = content.replaceAll('{{REL_PATH}}', () => relPath);
 
     // Replace the empty clientInput with the provided types.
     // Use a replacer function so `$`-sequences in `clientInputTypes`

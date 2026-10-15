@@ -14,7 +14,7 @@
 //? Double-cast + any-spread disabled file-wide: bridges `Rule.Node` to specific
 //? AST shapes; the spread iterates over `Object.entries(node)` whose values are
 //? typed as `any` because eslint's AST shape varies by node kind.
-/* eslint-disable no-restricted-syntax, @typescript-eslint/no-unsafe-argument */
+/* eslint-disable @typescript-eslint/no-unsafe-argument */
 
 import type { EslintRule } from '../internal/ruleTypes.js';
 

@@ -397,7 +397,7 @@ export const getJoinedRooms = async () => {
 }
 
 export const updateLocationRequest = async ({ location }: { location: { pathName: string, searchParams: Record<string, string> } }) => {
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- this guard is required because deployments can toggle locationProviderEnabled
+  //? This guard is required because deployments can toggle locationProviderEnabled.
   if (!isLocationProviderEnabled) { return null; }
 
   if (!location.pathName) {

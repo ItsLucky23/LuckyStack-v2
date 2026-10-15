@@ -41,7 +41,7 @@ let _warnedResolverMissing = false;
 const warnResolverMissingOnce = (): void => {
   if (_warnedResolverMissing) return;
   _warnedResolverMissing = true;
-  // eslint-disable-next-line no-console -- intentional boot diagnostic; logger not yet available
+  //? Intentional boot diagnostic; the logger is not available yet.
   console.warn(
     '[luckystack:capabilities] import.meta.resolve is unavailable (Node < 20.6). ' +
     'Optional package detection falls back to require.resolve, which cannot resolve ' +

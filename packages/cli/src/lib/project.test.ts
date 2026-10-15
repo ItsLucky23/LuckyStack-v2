@@ -1,5 +1,26 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
 import { describe, expect, it } from 'vitest';
-import { resolveLuckyStackRange } from './project';
+import { editFile, resolveLuckyStackRange } from './project';
+
+//? Regression guard: injected code is inserted verbatim. With a string
+//? replacement, `$'` / `$&` inside the injected code were read as replacement
+//? patterns and spliced other text from the file into it.
+describe('editFile', () => {
+  it.each([`const currency = '$';`, 'const all = "$&";', 'const lit = `$${price}`;'])(
+    'inserts %s verbatim',
+    (injected) => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'luckystack-edit-'));
+      const file = path.join(dir, 'file.ts');
+      fs.writeFileSync(file, 'before\n// ANCHOR\nafter\n');
+      editFile(file, [{ find: '// ANCHOR', replace: injected }]);
+      expect(fs.readFileSync(file, 'utf8')).toBe(`before\n${injected}\nafter\n`);
+      fs.rmSync(dir, { recursive: true, force: true });
+    },
+  );
+});
 
 //? Regression guard for the `add <feature>` version-resolution footgun: the
 //? helper reuses an existing @luckystack dep's range so a newly-added package

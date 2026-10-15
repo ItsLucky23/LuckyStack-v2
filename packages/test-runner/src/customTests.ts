@@ -218,7 +218,7 @@ export interface TestContext {
    * watchers per test are allowed; all are auto-closed when the test
    * case finishes (whether it passes or throws).
    */
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- callsite-documentation use
+  //? TChunk documents the expected chunk type at the call site.
   watchStream: <TChunk extends StreamChunkFrame = StreamChunkFrame>(roomCode: string) => Promise<StreamWatcher<TChunk>>;
   session: {
     login: (user?: { email?: string; id?: string; name?: string }) => Promise<{ token: string; userId: string }>;
@@ -389,7 +389,6 @@ export const buildCallApi = (
     //? `parseResponse` returns `unknown`; TOutput is the caller-supplied expectation.
     //? The runtime shape is unverifiable here — the route's own validator owns that
     //? contract. The cast is required because parseResponse must return `unknown`.
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion, no-restricted-syntax -- parseResponse returns unknown; TOutput is the caller's type contract, verified at the call site
     return await parseResponse(response, state) as TOutput;
   };
 };
@@ -455,7 +454,6 @@ const buildCallSync = (
       }
       state.lastResponse = outcome.payload;
       //? The socket payload is unknown; TOutput is the caller's type contract, verified at the call site
-      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion, no-restricted-syntax -- socket payload is unknown; cast to TOutput is the boundary
       return outcome.payload as TOutput;
     }
 
@@ -478,7 +476,6 @@ const buildCallSync = (
       throw new Error(`callSync ${routePath} failed: ${fetchError?.message ?? 'no response'}`);
     }
     //? parseResponse returns unknown; TOutput is the caller's type contract, verified at the call site
-    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion, no-restricted-syntax -- parseResponse returns unknown; cast to TOutput is the boundary
     return await parseResponse(response, state) as TOutput;
   };
 };

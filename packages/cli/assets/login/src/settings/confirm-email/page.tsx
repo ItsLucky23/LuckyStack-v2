@@ -15,15 +15,11 @@ export default function ConfirmEmailPage() {
   const [params] = useSearchParams();
   const token = useMemo(() => params.get('token') ?? '', [params]);
   const translate = useTranslator();
-  const [status, setStatus] = useState<Status>('loading');
+  const [status, setStatus] = useState<Status>(token ? 'loading' : 'error');
   const [errorKey, setErrorKey] = useState<string>('settings.emailChange.invalidToken');
 
   useEffect(() => {
-    if (!token) {
-      setStatus('error');
-      setErrorKey('settings.emailChange.invalidToken');
-      return;
-    }
+    if (!token) return;
     //? `cancel` is a small mutable holder so the closure stays in sync with
     //? the cleanup function. A plain `let cancelled = false` would be narrowed
     //? to literal `false` by TS and ESLint would flag every read as dead.

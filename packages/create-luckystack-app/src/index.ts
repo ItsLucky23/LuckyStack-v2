@@ -1484,7 +1484,7 @@ export const rewriteFrameworkDocPaths = (content: string, frameworkDocEntries: s
       if (line.includes('docs/luckystack/')) return line;
       let out = line;
       for (const entry of byLongestFirst) {
-        out = out.replaceAll(`docs/${entry}`, `docs/luckystack/${entry}`);
+        out = out.replaceAll(`docs/${entry}`, () => `docs/luckystack/${entry}`);
       }
       return out;
     })
@@ -1694,7 +1694,7 @@ const installAiIndexHook = (targetDir: string): void => {
   let pkg: { name?: string; scripts?: Record<string, string | undefined> };
   try {
     pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as typeof pkg;
-    if (typeof pkg.name !== 'string') throw new Error('package.json missing name field');
+    if (typeof pkg.name !== 'string') throw new TypeError('package.json missing name field');
   } catch {
     console.warn(`[create-luckystack-app] Could not parse ${pkgPath} — skipping prepare script injection.`);
     return;
@@ -1742,7 +1742,7 @@ const injectOptionalDeps = (targetDir: string, choices: ScaffoldChoices, luckyst
   let pkg: { name?: string; dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
   try {
     pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as typeof pkg;
-    if (typeof pkg.name !== 'string') throw new Error('package.json missing name field');
+    if (typeof pkg.name !== 'string') throw new TypeError('package.json missing name field');
   } catch {
     console.warn(`[create-luckystack-app] Could not parse ${pkgPath} — skipping optional dep injection.`);
     return;
@@ -1761,7 +1761,7 @@ const dropDependency = (targetDir: string, depName: string): void => {
   let pkg: { name?: string; dependencies?: Record<string, string> };
   try {
     pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as typeof pkg;
-    if (typeof pkg.name !== 'string') throw new Error('package.json missing name field');
+    if (typeof pkg.name !== 'string') throw new TypeError('package.json missing name field');
   } catch {
     console.warn(`[create-luckystack-app] Could not parse ${pkgPath} — skipping dependency drop for "${depName}".`);
     return;
@@ -1896,7 +1896,7 @@ const wireAiBrowserTooling = (targetDir: string, choices: ScaffoldChoices): void
       let pkg: { name?: string; devDependencies?: Record<string, string> } | undefined;
       try {
         pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as typeof pkg;
-        if (typeof pkg?.name !== 'string') throw new Error('package.json missing name field');
+        if (typeof pkg?.name !== 'string') throw new TypeError('package.json missing name field');
       } catch {
         console.warn(`[create-luckystack-app] Could not parse ${pkgPath} — skipping @playwright/test injection.`);
       }
@@ -1940,7 +1940,9 @@ const editScaffoldFile = (targetDir: string, relPath: string, edits: readonly [s
         `[create-luckystack-app] prune edit failed — token matched ${String(occurrences)}× (expected exactly 1) in ${relPath}:\n${find}`,
       );
     }
-    content = content.replaceAll(find, replace);
+    //? A function replacement inserts `replace` verbatim; a string one would
+    //? expand `$&`, `$'`, `$1`… inside the injected code.
+    content = content.replaceAll(find, () => replace);
   }
   if (wasCrlf) content = content.replaceAll('\n', '\r\n');
   fs.writeFileSync(filePath, content);
@@ -2408,22 +2410,26 @@ const wireSecretManager = (targetDir: string): void => {
     ],
   ]);
   //? Same enable-later block in scripts/prismaWithSecrets.ts — so `prisma:*`
-  //? resolves DATABASE_URL pointers before running prisma. Byte-identical to the
-  //? server/server.ts block above (CLI `removeSecretManager` re-comments both).
-  editScaffoldFile(targetDir, 'scripts/prismaWithSecrets.ts', [
-    [
-      `  // const projectConfig = (await import('../config')).default;
+  //? resolves DATABASE_URL pointers before running prisma — and in a mikro-orm
+  //? scaffold's scripts/mikroOrmSchema.ts (written by applyOrmChoice, which runs
+  //? first). Byte-identical to the server/server.ts block above (CLI
+  //? `removeSecretManager` re-comments all of them). A missing file is a no-op.
+  for (const script of ['scripts/prismaWithSecrets.ts', 'scripts/mikroOrmSchema.ts']) {
+    editScaffoldFile(targetDir, script, [
+      [
+        `  // const projectConfig = (await import('../config')).default;
   // if (projectConfig.secretManager?.url) {
   //   const sm = await import('@luckystack/secret-manager');
   //   await sm.initSecretManager({ ...projectConfig.secretManager, source: 'remote' });
   // }`,
-      `  const projectConfig = (await import('../config')).default;
+        `  const projectConfig = (await import('../config')).default;
   if (projectConfig.secretManager?.url) {
     const sm = await import('@luckystack/secret-manager');
     await sm.initSecretManager({ ...projectConfig.secretManager, source: 'remote' });
   }`,
-    ],
-  ]);
+      ],
+    ]);
+  }
 };
 
 //? Activate @luckystack/presence when opted IN (presence is KEPT, not pruned).
@@ -2468,7 +2474,7 @@ const wirePackageManager = (targetDir: string, choices: ScaffoldChoices): void =
   let pkg: { name?: string; packageManager?: string };
   try {
     pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as typeof pkg;
-    if (typeof pkg.name !== 'string') throw new Error('package.json missing name field');
+    if (typeof pkg.name !== 'string') throw new TypeError('package.json missing name field');
   } catch {
     console.warn(`[create-luckystack-app] Could not parse ${pkgPath} — skipping package-manager wiring.`);
     return;
@@ -2483,7 +2489,7 @@ const wireRouter = (targetDir: string, luckystackVersion: string): void => {
   let pkg: { name?: string; dependencies?: Record<string, string>; scripts?: Record<string, string> };
   try {
     pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as typeof pkg;
-    if (typeof pkg.name !== 'string') throw new Error('package.json missing name field');
+    if (typeof pkg.name !== 'string') throw new TypeError('package.json missing name field');
   } catch {
     console.warn(`[create-luckystack-app] Could not parse ${pkgPath} — skipping router wiring.`);
     return;
@@ -2506,7 +2512,7 @@ const wireGraphMcp = (targetDir: string, luckystackVersion: string): void => {
   if (fs.existsSync(pkgPath)) {
     try {
       const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as { name?: string; devDependencies?: Record<string, string> };
-      if (typeof pkg.name !== 'string') throw new Error('package.json missing name field');
+      if (typeof pkg.name !== 'string') throw new TypeError('package.json missing name field');
       pkg.devDependencies = { ...pkg.devDependencies, '@luckystack/mcp': `^${luckystackVersion}` };
       fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
     } catch {
@@ -2767,7 +2773,9 @@ export { schema };
 `;
   }
   if (dbProvider === 'sqlite') {
-    return `${header}/// <reference types="bun-types" />
+    return `${header}//? Only Bun's SQLite module: the whole \`bun-types\` package would also retype
+//? browser code in this program (e.g. \`import.meta.hot\` as always present).
+/// <reference types="bun-types/sqlite" />
 import * as schema from '../server/db/schema';
 
 const file = (process.env.DATABASE_URL ?? '${databaseUrl}').replace(/^file:/, '');
@@ -2979,17 +2987,15 @@ import { loadEnvFiles, tryCatch } from '@luckystack/core';
 const run = async (): Promise<void> => {
   loadEnvFiles();
 
-  //? Resolve @luckystack/secret-manager pointers into process.env BEFORE the
-  //? ORM reads DATABASE_URL (guarded — no-op without the package / config).
-  const projectConfig = (await import('../config')).default;
-  if (projectConfig.secretManager?.url) {
-    const [error, sm] = await tryCatch(() => import('@luckystack/secret-manager'));
-    if (error || !sm) {
-      console.warn('secretManager.url is set but @luckystack/secret-manager is not installed — using the raw DATABASE_URL.');
-    } else {
-      await sm.initSecretManager({ ...projectConfig.secretManager, source: 'remote' });
-    }
-  }
+  //? Optional @luckystack/secret-manager (opt-in). Resolve \`.env\` pointers
+  //? (NAME=BASE_V<n>) into process.env before the ORM reads DATABASE_URL. Enabled
+  //? by \`luckystack add secret-manager\`; commented out because a project without
+  //? the package has neither the module nor the \`secretManager\` config key.
+  // const projectConfig = (await import('../config')).default;
+  // if (projectConfig.secretManager?.url) {
+  //   const sm = await import('@luckystack/secret-manager');
+  //   await sm.initSecretManager({ ...projectConfig.secretManager, source: 'remote' });
+  // }
 
   const { getOrm } = await import('../functions/db');
   const orm = await getOrm();

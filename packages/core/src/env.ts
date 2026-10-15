@@ -58,7 +58,7 @@ const reportDuplicateEnvKeys = (files: string[]): void => {
   for (const [key, sources] of seenIn) {
     if (sources.length > 1) {
       const winner = sources.at(-1);
-      // eslint-disable-next-line no-console -- runs before the logger registry is wired
+      //? Runs before the logger registry is wired, hence console.
       console.warn(`[env] "${key}" is defined in ${sources.join(' + ')}; "${winner}" wins. Removing it from only one file lets the other file's value resurface.`);
     }
   }
@@ -128,7 +128,7 @@ const warnOnBunEnvAutoload = (files: string[]): void => {
     ? ` Bun also loaded ${shadowed.join(' + ')}, which LuckyStack never loads — those values outrank ${files[0]}.`
     : '';
 
-  // eslint-disable-next-line no-console -- runs before the logger registry is wired
+  //? Runs before the logger registry is wired, hence console.
   console.warn(`[env] Bun appears to have auto-loaded ${preloaded.join(' + ')} before LuckyStack did, so Bun's precedence wins over the framework's own layering.${shadowNote} LUCKYSTACK_ENV_FILES is also no longer ambient-only: a value set inside a .env file now hijacks the file list. Add \`env = false\` to bunfig.toml (Bun >= 1.3.3) to restore Node semantics.`);
 };
 

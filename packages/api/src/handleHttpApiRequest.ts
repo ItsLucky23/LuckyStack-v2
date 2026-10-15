@@ -198,7 +198,7 @@ async function validateHttpApiRequestShape(
       functionsObject: Record<string, unknown>;
     }
 > {
-  // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition -- runtime defense: caller may pass non-string despite types
+  //? Runtime defense: a caller may pass a non-string despite the types.
   if (!name || typeof name !== 'string') {
     return ctx.buildNetworkError({
       response: { status: 'error', errorCode: 'api.invalidName' },

@@ -2,7 +2,6 @@
 //? Node's CJS interop provides one at runtime. ESM named-import trips the
 //? runtime ESM loader. Using namespace-access on the default import is the
 //? canonical CJS-interop pattern that lint-rules also accept.
-// eslint-disable-next-line import-x/default
 import validator from 'validator';
 import { dispatchHook } from '@luckystack/core';
 import { sendEmailChangeConfirmation, verifyPassword } from '@luckystack/login';

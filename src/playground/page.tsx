@@ -1,5 +1,5 @@
 //? intent: Living reference — every framework capability exercised on one page, for developing and demoing LuckyStack itself.
-/* eslint-disable react/jsx-no-literals, luckystack/no-raw-try-catch, luckystack/no-raw-fetch-in-src --
+/* eslint-disable luckystack/no-untranslated-jsx-text, luckystack/no-raw-try-catch --
    In-repo dev playground for exercising the framework's own core features. It
    uses raw fetch + try/catch deliberately to demonstrate fallback patterns and
    exercise transports side-by-side. Do NOT propagate these disables to consumer
@@ -332,6 +332,42 @@ const channelLabel: Record<LogEntry['channel'], { label: string; tone: string }>
   'health': { label: 'health', tone: 'bg-correct/15 text-correct' },
   'offline': { label: 'offline', tone: 'bg-wrong/15 text-wrong' },
   'hook': { label: 'hook', tone: 'bg-wrong/15 text-wrong' },
+};
+
+const handleStackedMenu = () => {
+  void menuHandler.open(
+    <div className="p-6 bg-container1 flex flex-col gap-4">
+      <h2 className="text-lg font-semibold text-title">First menu</h2>
+      <p className="text-sm text-common">
+        Open another menu on top to test stacking + slide animation.
+      </p>
+      <button
+        type="button"
+        className="self-start h-9 px-4 rounded-md bg-primary hover:bg-primary-hover text-white text-sm font-medium transition-colors cursor-pointer"
+        onClick={() => {
+          void menuHandler.open(
+            <div className="p-6 bg-container1 flex flex-col gap-4">
+              <h2 className="text-lg font-semibold text-title">Second menu</h2>
+              <p className="text-sm text-common">
+                Press Escape or click outside to close.
+              </p>
+              <button
+                type="button"
+                className="self-start h-9 px-4 rounded-md bg-container2 hover:bg-container2-hover border border-container2-border text-title text-sm font-medium transition-colors cursor-pointer"
+                onClick={() => { menuHandler.close(); }}
+              >
+                Close this one
+              </button>
+            </div>,
+            { dimBackground: true, size: 'md' },
+          );
+        }}
+      >
+        Open second menu
+      </button>
+    </div>,
+    { dimBackground: true, size: 'md' },
+  );
 };
 
 const handleConfirmBasic = async () => {
@@ -799,42 +835,6 @@ export default function Playground() {
     if (response.status === 'error') {
       log('sync', `syncRequest error`, response);
     }
-  };
-
-  const handleStackedMenu = () => {
-    void menuHandler.open(
-      <div className="p-6 bg-container1 flex flex-col gap-4">
-        <h2 className="text-lg font-semibold text-title">First menu</h2>
-        <p className="text-sm text-common">
-          Open another menu on top to test stacking + slide animation.
-        </p>
-        <button
-          type="button"
-          className="self-start h-9 px-4 rounded-md bg-primary hover:bg-primary-hover text-white text-sm font-medium transition-colors cursor-pointer"
-          onClick={() => {
-            void menuHandler.open(
-              <div className="p-6 bg-container1 flex flex-col gap-4">
-                <h2 className="text-lg font-semibold text-title">Second menu</h2>
-                <p className="text-sm text-common">
-                  Press Escape or click outside to close.
-                </p>
-                <button
-                  type="button"
-                  className="self-start h-9 px-4 rounded-md bg-container2 hover:bg-container2-hover border border-container2-border text-title text-sm font-medium transition-colors cursor-pointer"
-                  onClick={() => { menuHandler.close(); }}
-                >
-                  Close this one
-                </button>
-              </div>,
-              { dimBackground: true, size: 'md' },
-            );
-          }}
-        >
-          Open second menu
-        </button>
-      </div>,
-      { dimBackground: true, size: 'md' },
-    );
   };
 
   const handleErrorPagePreview = () => {

@@ -5,7 +5,6 @@ import { getPrismaClient, setDefaultPrismaResolver } from './clients';
 import tryCatchSync from './tryCatchSync';
 
 declare global {
-  // eslint-disable-next-line no-var
   var __luckystackPrisma: PrismaClient | undefined;
 }
 

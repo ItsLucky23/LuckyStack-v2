@@ -4,6 +4,12 @@ All notable changes to `@luckystack/cron` are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow the
 monorepo's lockstep versioning.
 
+## [0.12.0] - 2026-10-15
+
+### Changed
+
+- Requires Node.js 22.13 or newer (was 20). Node 20 stopped receiving security updates in April 2026, and the scaffold's lint toolchain (ESLint 10) needs 22.13.
+
 ## [0.11.0] - 2026-10-14
 
 ### Changed

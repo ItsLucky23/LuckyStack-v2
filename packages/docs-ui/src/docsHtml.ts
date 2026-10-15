@@ -247,7 +247,7 @@ const renderDocsCss = (accent: string, fontFamily: string): string => `<style>
 //? (so a closing script-tag sequence inside jsonPath can't break out of the block).
 const LT_UNICODE_ESCAPE = String.fromCodePoint(0x5C) + 'u003c';
 const renderDocsScript = (jsonPath: string, tryItOutData: string): string => `<script>
-  const JSON_PATH = ${JSON.stringify(jsonPath).replaceAll('<', LT_UNICODE_ESCAPE)};
+  const JSON_PATH = ${JSON.stringify(jsonPath).replaceAll('<', () => LT_UNICODE_ESCAPE)};
   const ENABLE_TRY_IT_OUT = ${tryItOutData};
   const stateByKey = new Map();
 
