@@ -1563,3 +1563,13 @@ PR #9 kreeg om een verwante reden nooit CI: `pull_request` draait tegen `refs/pu
 **Opgeruimd vóór dit werk:** worktree `eslint-10` + branch `chore/eslint-10` + branch-omgeving + e2e-werkmap verwijderd; `npm ci` in de hoofdcheckout (ESLint 10.12), main-omgeving herstart.
 
 **Files:** `branch-logs/{main,fix--0.12.1,INDEX}.md`. Tag `v0.12.1`.
+
+## 2026-10-15 16:30 — v0.13.0 gepubliceerd
+
+**User prompt (summary):** "privacylek laten en nu go voor pushen naar main en publishen" — batchversturen voor `@luckystack/email` (werk op `feat/email-batch`, zie die log), zodat de andere repo het kan binnenhalen.
+
+**Release.** `56190f1` fast-forward op GitHub `main` (vanaf `da92738`), tag `v0.13.0` → `publish.yml` run 38745629581 en `ci` run 38745626362 groen (Node 22 en 24, ai-records, e2e-scaffold). Registry 17/17 met provenance (na ~13 min propagatie), `latest` = 0.13.0. Tarball-spotcheck `@luckystack/email@0.13.0`: `dist/sendEmailBatch.d.ts`, `dist/renderTokens.d.ts`, exports in `index.d.ts`, `docs/batch.md` aanwezig.
+
+**Bewust gelaten (keuze gebruiker):** een losse `sendEmail` waarvan de adapter een fout gooit, stuurt twee tracker-events; het eerste bevat het e-mailadres onafgeschermd. Batchmail heeft dit niet.
+
+**Files:** `branch-logs/{main,INDEX}.md`. Tag `v0.13.0`.
