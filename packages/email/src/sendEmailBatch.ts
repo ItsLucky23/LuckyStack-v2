@@ -8,14 +8,17 @@ import {
   type EmailDeliveryOutcome,
   type EmailMessage,
   type EmailResult,
+  type EmailSender,
 } from '@luckystack/core';
 
+import { getEmailConfig } from './emailConfig';
 import { htmlToText } from './htmlToText';
 import { renderTokens, type TokenValues } from './renderTokens';
 import {
   normalizeIdempotencyKey,
   resolveSender,
   scrubEmailPii,
+  scrubErrorPii,
   sendEmailWith,
   settle,
   type SendEmailInput,
@@ -26,7 +29,10 @@ type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K>
 /**
  * One fully prepared message (the `messages` form). Same shape as a
  * `sendEmail` input — raw or registered-template — but with a single `to`, so
- * every message has exactly one outcome. The batch owns `signal`.
+ * every message has exactly one outcome. The batch owns `signal`. An own
+ * `idempotencyKey` must be unique per distinct mail (e.g.
+ * `invoice-123:reminder-1`): Resend refuses a reused key with other content
+ * for 24 hours.
  */
 export type BatchMessage = DistributiveOmit<SendEmailInput, 'to' | 'signal'> & { to: string };
 
@@ -39,7 +45,11 @@ export interface BatchRecipient {
   values?: TokenValues;
   /** Sent to this recipient only, after the shared attachments. */
   attachments?: EmailMessage['attachments'];
-  /** Overrides the key derived from the batch key. */
+  /**
+   * Overrides the key derived from the batch key. Must be unique per distinct
+   * mail, not per recipient: Resend refuses a reused key with other content
+   * for 24 hours, so use e.g. `invoice-123:reminder-1`, not `invoice-123`.
+   */
   idempotencyKey?: string;
 }
 
@@ -136,8 +146,18 @@ interface FailureGroup {
   count: number;
   notSent: number;
   unknown: number;
-  cause: unknown;
+  cause: Error | string | undefined;
 }
+
+//? The tracker event carries the first cause of each reason. A provider error
+//? (e.g. nodemailer's) can echo the address, so it is scrubbed like a thrown
+//? send error; a cause of another shape (Resend's error object) is left out,
+//? its text is already in the scrubbed reason.
+const scrubCause = (cause: unknown): Error | string | undefined => {
+  if (cause instanceof Error) return scrubErrorPii(cause);
+  if (typeof cause === 'string') return scrubEmailPii(cause);
+  return undefined;
+};
 
 //? One tracker event per failure reason instead of one per recipient: a batch
 //? of 500 with a bad API key would otherwise send 500 identical events and use
@@ -179,15 +199,30 @@ const compareKeys = (a: string, b: string): number => {
   return a < b ? -1 : 1;
 };
 
+const MAP_TAG = '\u0000Map';
+const SET_TAG = '\u0000Set';
+
 //? JSON with object keys sorted at every level, so equal template data always
 //? yields the same text. BigInt has no JSON form; it is written as a string.
+//? Map and Set would encode as `{}`, so different data would share a key; they
+//? become tagged lists sorted by their encoding, so insertion order does not
+//? matter and an empty Map differs from `{}`.
 const stableStringify = (value: unknown): string =>
   JSON.stringify(value, (_key, nested: unknown) => {
     if (typeof nested === 'bigint') return nested.toString();
+    if (nested instanceof Map) return { [MAP_TAG]: sortByEncoding([...nested.entries()]) };
+    if (nested instanceof Set) return { [SET_TAG]: sortByEncoding([...nested.values()]) };
     if (nested === null || typeof nested !== 'object' || Array.isArray(nested)) return nested;
     if (Object.getPrototypeOf(nested) !== Object.prototype) return nested;
     return Object.fromEntries(Object.entries(nested).toSorted(([a], [b]) => compareKeys(a, b)));
   });
+
+//? Wrapped in an array so `undefined` still encodes to a string.
+const sortByEncoding = (values: unknown[]): unknown[] =>
+  values
+    .map((entry) => ({ entry, encoded: stableStringify([entry]) }))
+    .toSorted((a, b) => compareKeys(a.encoded, b.encoded))
+    .map(({ entry }) => entry);
 
 const attachmentDigest = (attachment: EmailAttachment) => ({
   filename: attachment.filename,
@@ -268,6 +303,11 @@ const buildTokenMessage = (input: TokenBatchInput, recipient: BatchRecipient, in
 
 const waitOrAbort = (ms: number, signal: AbortSignal | undefined): Promise<boolean> =>
   new Promise((resolve) => {
+    //? An already-aborted signal never fires `abort` again.
+    if (signal?.aborted) {
+      resolve(false);
+      return;
+    }
     const onAbort = (): void => {
       clearTimeout(timer);
       resolve(false);
@@ -335,24 +375,45 @@ export const sendEmailBatch = async (input: SendEmailBatchInput): Promise<BatchR
   const failures = new Map<string, FailureGroup>();
   const recordFailure = (reason: string, deliveryOutcome: BatchDeliveryOutcome, cause: unknown): void => {
     const key = scrubEmailPii(reason);
-    const group = failures.get(key) ?? { count: 0, notSent: 0, unknown: 0, cause };
+    const group = failures.get(key) ?? { count: 0, notSent: 0, unknown: 0, cause: scrubCause(cause) };
     group.count += 1;
     if (deliveryOutcome === 'not-sent') group.notSent += 1;
     if (deliveryOutcome === 'unknown') group.unknown += 1;
     failures.set(key, group);
   };
 
-  //? Sender name → the provider code that blocked it. Once a sender reports
-  //? that it refuses all mail (quota used up, key rejected), the rest of its
-  //? mails are skipped instead of each collecting the same refusal; mails
-  //? routed to another sender carry on.
-  const blockedSenders = new Map<string, string>();
+  //? Sender → the provider code that blocked it. Once a sender reports that it
+  //? refuses all mail (quota used up, key rejected), the rest of its mails are
+  //? skipped instead of each collecting the same refusal; mails routed to
+  //? another sender carry on. Keyed by the sender object, not its name: two
+  //? slots can wrap the same adapter with separate accounts.
+  const blockedSenders = new Map<EmailSender, string>();
+  const pace = createPacer(perSecond, signal);
 
   const sendOne = async (index: number): Promise<BatchItemResult> => {
     const message = messageAt(index);
-    const senderName = resolveSender({ ...message, signal })?.name;
-    const blockedBy = senderName === undefined ? undefined : blockedSenders.get(senderName);
-    if (blockedBy !== undefined) return { ...notSent(index, message.to, 'sender-blocked'), code: blockedBy };
+    const sender = resolveSender({ ...message, signal });
+    if (!sender && getEmailConfig().required) {
+      //? `sendEmail` throws here, but nothing was dispatched: a definite
+      //? not-sent, reported once per batch like any other reason.
+      const slot = message.adapter === undefined ? 'no email sender is registered' : `adapter slot '${message.adapter}' is not registered`;
+      recordFailure('no-sender', 'not-sent', new Error(`[email] sendEmailBatch: ${slot}`));
+      return notSent(index, message.to, 'no-sender');
+    }
+    const blocked = (): BatchItemResult | null => {
+      const code = sender ? blockedSenders.get(sender) : undefined;
+      return code === undefined ? null : { ...notSent(index, message.to, 'sender-blocked'), code };
+    };
+    //? Only a mail that will reach a provider waits for a pace slot. Blocking
+    //? is checked before the wait, so a skipped mail uses no slot, and after
+    //? it, since the sender may have been blocked meanwhile.
+    if (sender) {
+      const skipped = blocked();
+      if (skipped) return skipped;
+      if (!(await pace())) return notSent(index, message.to, 'send-aborted');
+      const skippedWhileWaiting = blocked();
+      if (skippedWhileWaiting) return skippedWhileWaiting;
+    }
 
     const idempotencyKey = message.idempotencyKey ?? (batchKey ? deriveKey(batchKey, index, message) : undefined);
     //? An object, not a `let`: the flag flips inside a callback, which control
@@ -368,21 +429,19 @@ export const sendEmailBatch = async (input: SendEmailBatchInput): Promise<BatchR
       },
     }));
     const item = toItem(index, message.to, error, result);
-    //? A throw out of sendEmail (e.g. a required sender that is missing) never
-    //? reached its reporting step; count it here so it is not silent.
+    //? A throw out of sendEmail never reached its reporting step; count it
+    //? here so it is not silent.
     if (!state.reported && error) recordFailure(item.reason ?? 'send-threw', item.deliveryOutcome, error);
     return item;
   };
 
   const items: BatchItemResult[] = Array.from({ length: list.length });
-  const pace = createPacer(perSecond, signal);
   let next = 0;
   const worker = async (): Promise<void> => {
     while (next < list.length) {
       const index = next;
       next += 1;
-      const mayStart = await pace();
-      items[index] = mayStart ? await sendOne(index) : notSent(index, list[index]?.to ?? '', 'send-aborted');
+      items[index] = signal?.aborted ? notSent(index, list[index]?.to ?? '', 'send-aborted') : await sendOne(index);
     }
   };
   await Promise.all(Array.from({ length: Math.min(concurrency, list.length) }, () => worker()));

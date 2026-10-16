@@ -1,7 +1,8 @@
 import { createRequire } from 'node:module';
 
-import { loadPeer, tryCatch, type EmailSender } from '@luckystack/core';
+import { loadPeer, type EmailSender } from '@luckystack/core';
 
+import { settle } from '../sendEmail';
 import { toProviderPayload } from './providerPayload';
 
 interface SmtpSenderOptions {
@@ -36,7 +37,7 @@ export const SmtpSender = (options: SmtpSenderOptions): EmailSender => {
     createTransport?: (config: unknown) => unknown;
   }>(
     'nodemailer',
-    'Run `npm install nodemailer @types/nodemailer`, or remove the SMTP_HOST env var and pick a different EmailSender adapter.',
+    'Run `npm install nodemailer`, or remove the SMTP_HOST env var and pick a different EmailSender adapter.',
     localRequire,
   );
   const factory = mod.default?.createTransport ?? mod.createTransport;
@@ -58,7 +59,10 @@ export const SmtpSender = (options: SmtpSenderOptions): EmailSender => {
         return { ok: false, reason: 'missing-from', deliveryOutcome: 'not-sent' };
       }
 
-      const [error, info] = await tryCatch(() => transporter.sendMail(toProviderPayload(message, fromAddress)));
+      //? `settle`, not `tryCatch`: the failure is returned, and `sendEmail` /
+      //? `sendEmailBatch` report it with the address scrubbed. A capture here
+      //? would add a raw, per-mail tracker event.
+      const [error, info] = await settle(() => transporter.sendMail(toProviderPayload(message, fromAddress)));
       if (error) {
         //? nodemailer puts its own code (`EAUTH`, `ECONNECTION`, …) and the SMTP
         //? reply code on the error. Rejected credentials fail before any message

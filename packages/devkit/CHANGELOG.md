@@ -5,6 +5,12 @@ All notable changes to `@luckystack/devkit` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-10-16
+
+### Fixed
+
+- **Injected route and page files no longer start with a blanket `eslint-disable`.** The dev watcher copied the template's own lint-disable header into each new file, which silenced all lint there and, once the file was clean, failed lint as an unused directive. The header is now dropped on injection, for the bundled templates and for project copies in `.luckystack/templates/`; the template files keep it. Files injected earlier keep their header until you delete those two lines.
+
 ## [0.12.0] - 2026-10-15
 
 ### Changed

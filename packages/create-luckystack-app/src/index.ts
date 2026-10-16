@@ -1713,15 +1713,12 @@ const installAiIndexHook = (targetDir: string): void => {
 const injectOptionalDeps = (targetDir: string, choices: ScaffoldChoices, luckystackVersion: string): void => {
   const monitoringDeps = MONITORING_PROVIDERS.find((spec) => spec.id === choices.monitoringProvider)?.deps ?? {};
   const deps: Record<string, string> = { ...monitoringDeps };
-  const devDeps: Record<string, string> = {};
 
   if (choices.emailProvider !== 'none') {
     deps['@luckystack/email'] = `^${luckystackVersion}`;
     if (choices.emailProvider === 'resend') deps.resend = '^6.0.0';
-    if (choices.emailProvider === 'smtp') {
-      deps.nodemailer = '^6.9.0';
-      devDeps['@types/nodemailer'] = '^6.4.0';
-    }
+    //? nodemailer ships its own types since 10, so no `@types/nodemailer`.
+    if (choices.emailProvider === 'smtp') deps.nodemailer = '^10.0.0';
   }
 
   //? Opt-in @luckystack packages not shipped in the base template. The backend
@@ -1735,11 +1732,11 @@ const injectOptionalDeps = (targetDir: string, choices: ScaffoldChoices, luckyst
   //? no server.ts edit; jobs live in the consumer's luckystack/cron/*.ts).
   if (choices.cron) deps['@luckystack/cron'] = `^${luckystackVersion}`;
 
-  if (Object.keys(deps).length === 0 && Object.keys(devDeps).length === 0) return;
+  if (Object.keys(deps).length === 0) return;
 
   const pkgPath = path.join(targetDir, 'package.json');
   if (!fs.existsSync(pkgPath)) return;
-  let pkg: { name?: string; dependencies?: Record<string, string>; devDependencies?: Record<string, string> };
+  let pkg: { name?: string; dependencies?: Record<string, string> };
   try {
     pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as typeof pkg;
     if (typeof pkg.name !== 'string') throw new TypeError('package.json missing name field');
@@ -1748,9 +1745,6 @@ const injectOptionalDeps = (targetDir: string, choices: ScaffoldChoices, luckyst
     return;
   }
   pkg.dependencies = { ...pkg.dependencies, ...deps };
-  if (Object.keys(devDeps).length > 0) {
-    pkg.devDependencies = { ...pkg.devDependencies, ...devDeps };
-  }
   fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
 };
 

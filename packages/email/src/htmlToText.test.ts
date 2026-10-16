@@ -35,4 +35,25 @@ describe('htmlToText', () => {
   it('leaves unknown or invalid entities as they are', () => {
     expect(htmlToText('&bogus; &#0; &#xFFFFFFF;')).toBe('&bogus; &#0; &#xFFFFFFF;');
   });
+
+  it('decodes common named entities', () => {
+    expect(htmlToText('&euro; 10 &ndash; &copy; &reg; &trade; &mdash; &hellip; &lsquo;a&rsquo; &ldquo;b&rdquo; &laquo;c&raquo; &bull; &middot;'))
+      .toBe('€ 10 – © ® ™ — … ‘a’ “b” «c» • ·');
+  });
+
+  it('separates table cells and drops empty layout cells', () => {
+    expect(htmlToText('<table><tr><th>Invoice</th><th>Amount</th></tr><tr><td>2026-001</td>\n<td>&euro; 10</td><td> </td></tr></table>'))
+      .toBe('Invoice | Amount\n2026-001 | € 10');
+    expect(htmlToText('<table>\n  <tr>\n    <td>\n      Total\n    </td>\n    <td>€ 10</td>\n  </tr>\n</table>')).toBe('Total | € 10');
+    //? An encoded or raw cell marker in the input does not split a cell.
+    expect(htmlToText(`<td>a&#31;b\u001Fc</td>`)).toBe('a\u001Fbc');
+  });
+
+  it('handles unclosed anchors and tags in linear time', () => {
+    const start = performance.now();
+    htmlToText('<a href="x">'.repeat(20_000));
+    htmlToText('<a href="x'.repeat(20_000));
+    expect(performance.now() - start).toBeLessThan(1000);
+    expect(htmlToText('<a href="x">a <a href="y">b</a>')).toBe('a b (y)');
+  });
 });

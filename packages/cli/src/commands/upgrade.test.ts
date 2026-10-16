@@ -25,6 +25,22 @@ describe('buildUpgradePlan', () => {
     expect(plan).toContain('npm view @luckystack/core version');
   });
 
+  it('reaches the consumer steps that only create-luckystack-app published, through the CLI changelog', () => {
+    //? The plan only lists changelogs under node_modules/@luckystack, and a
+    //? project never installs create-luckystack-app. The CLI must ship its
+    //? changelog, and that changelog must carry the 0.12 / 0.12.1 steps.
+    const cliDir = path.resolve(import.meta.dirname, '../..');
+    const pkg = JSON.parse(fs.readFileSync(path.join(cliDir, 'package.json'), 'utf8')) as { files: string[] };
+    expect(pkg.files).toContain('CHANGELOG.md');
+    const changelog = fs.readFileSync(path.join(cliDir, 'CHANGELOG.md'), 'utf8');
+    const start = changelog.indexOf('### Upgrading a project scaffolded before 0.12');
+    expect(start).toBeGreaterThan(-1);
+    const section = changelog.slice(start, changelog.indexOf('\n## [', start));
+    for (const step of ['eslint-plugin-jsx-a11y-x', 'eslint-plugin-eslint-comments', 'luckystack/no-untranslated-jsx-text', 'trustedDependencies']) {
+      expect(section).toContain(step);
+    }
+  });
+
   it('handles zero installed packages gracefully', () => {
     const plan = buildUpgradePlan([], '2026-07-14', false, null);
     expect(plan).toContain('unknown');

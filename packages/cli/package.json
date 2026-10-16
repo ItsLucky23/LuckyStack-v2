@@ -38,7 +38,8 @@
     "assets",
     "README.md",
     "AGENTS.md",
-    "LICENSE"
+    "LICENSE",
+    "CHANGELOG.md"
   ],
   "scripts": {
     "build": "tsup",

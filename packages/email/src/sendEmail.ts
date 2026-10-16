@@ -342,15 +342,19 @@ const sendWithControls = (
   });
 };
 
+export const scrubErrorPii = (error: Error): Error => {
+  error.message = scrubEmailPii(error.message || '');
+  if (typeof error.cause === 'string') {
+    error.cause = scrubEmailPii(error.cause);
+  } else if (error.cause instanceof Error) {
+    error.cause.message = scrubEmailPii(error.cause.message || '');
+  }
+  return error;
+};
+
 const normalizeSendResult = (sendError: Error | null, sendResult: EmailResult | null): EmailResult => {
   if (!sendError) return sendResult ?? { ok: false, reason: 'send-no-result' };
-  const scrubbedMessage = scrubEmailPii(sendError.message || '');
-  sendError.message = scrubbedMessage;
-  if (typeof sendError.cause === 'string') {
-    sendError.cause = scrubEmailPii(sendError.cause);
-  } else if (sendError.cause instanceof Error) {
-    sendError.cause.message = scrubEmailPii(sendError.cause.message || '');
-  }
+  const scrubbedMessage = scrubErrorPii(sendError).message;
   return { ok: false, reason: scrubbedMessage || 'send-threw', cause: sendError };
 };
 
@@ -361,12 +365,13 @@ const normalizeSendResult = (sendError: Error | null, sendResult: EmailResult | 
 //? not reach the server log in plain text. The Sentry capture path already
 //? applied redaction; the logger path was missing it.
 const reportSendOutcome = (
-  senderName: string,
+  sender: EmailSender,
   message: EmailMessage,
   result: EmailResult,
   config: EmailConfigShape,
   internals: SendEmailInternals,
 ): void => {
+  const senderName = sender.name;
   if (result.ok) {
     if (config.logging.sends) {
       getLogger().info(`[email:${senderName}] sent`, { to: redactRecipients(message.to), subject: redactSubject(message.subject), id: result.id });
@@ -375,11 +380,12 @@ const reportSendOutcome = (
   }
 
   if (config.logging.errors) {
-    getLogger().warn(`[email:${senderName}] FAILED`, { to: redactRecipients(message.to), subject: redactSubject(message.subject), reason: result.reason });
+    //? An adapter-returned reason can echo the address (e.g. an SMTP rejection).
+    getLogger().warn(`[email:${senderName}] FAILED`, { to: redactRecipients(message.to), subject: redactSubject(message.subject), reason: scrubEmailPii(result.reason) });
   }
 
   if (internals.onFailure) {
-    internals.onFailure(result, senderName);
+    internals.onFailure(result, sender);
     return;
   }
   captureException(result.cause ?? new Error(`Email send failed: ${result.reason}`), {
@@ -409,9 +415,11 @@ export interface SendEmailInternals {
   /**
    * Receives a failed send instead of the per-mail tracker capture, so
    * `sendEmailBatch` can report one event per failure reason rather than one
-   * per recipient (ADR 0070). Logging is unchanged.
+   * per recipient (ADR 0070). Logging is unchanged. Receives the sender
+   * object, not its name: two slots can wrap the same adapter with
+   * different accounts.
    */
-  onFailure?: (failure: Extract<EmailResult, { ok: false }>, senderName: string) => void;
+  onFailure?: (failure: Extract<EmailResult, { ok: false }>, sender: EmailSender) => void;
 }
 
 //? Like `tryCatch`, but without its automatic tracker capture: in a batch the
@@ -502,7 +510,7 @@ export const sendEmailWith = async (input: SendEmailInput, internals: SendEmailI
     deliveryOutcome: result.ok ? undefined : result.deliveryOutcome,
   });
 
-  reportSendOutcome(sender.name, message, result, config, internals);
+  reportSendOutcome(sender, message, result, config, internals);
 
   return result;
 };

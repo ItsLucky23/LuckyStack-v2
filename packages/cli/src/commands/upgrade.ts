@@ -53,7 +53,9 @@ export const buildUpgradePlan = (
   const core = installed.find((p) => p.name === '@luckystack/core');
   const installedVersion = core?.version ?? '(unknown — @luckystack/core not in node_modules; run `npm install` first)';
   const changelogs = installed.filter((p) => p.changelog !== null);
-  const priority = ['@luckystack/core', '@luckystack/server', '@luckystack/cli', 'create-luckystack-app', '@luckystack/login'];
+  //? `create-luckystack-app` is never installed in a project, so its consumer
+  //? upgrade steps are repeated in the @luckystack/cli CHANGELOG.
+  const priority = ['@luckystack/core', '@luckystack/server', '@luckystack/cli', '@luckystack/login'];
   const orderedChangelogs = [
     ...priority.map((n) => changelogs.find((p) => p.name === n)).filter((p): p is InstalledPackage => p !== undefined),
     ...changelogs.filter((p) => !priority.includes(p.name)),

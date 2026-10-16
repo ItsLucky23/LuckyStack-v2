@@ -598,10 +598,18 @@ const checkPagePlacement = (filePath: string, srcRelativePath: string | null): s
   return null;
 };
 
+//? Template files open with a blanket `eslint-disable` so the placeholder source
+//? itself lints clean. The header must not reach the route file: there it would
+//? silence all lint, and once the file is clean ESLint reports it as an unused
+//? directive. Only these leading lines go; a disable further down is kept.
+const TEMPLATE_LINT_HEADER = /^(?:\/\* eslint-disable(?: unicorn\/no-abusive-eslint-disable)? \*\/[^\S\r\n]*\r?\n)+(?:[^\S\r\n]*\r?\n)?/;
+const stripTemplateLintHeader = (content: string): string => content.replace(TEMPLATE_LINT_HEADER, '');
+
 /**
  * Substitutes `{{REL_PATH}}`, `{{PAGE_PATH}}`, and `{{SYNC_NAME}}` placeholders
  * in a raw template string. Also strips `@ts-ignore`/`@ts-expect-error` pragma
- * lines that guard `{{REL_PATH}}` imports in built-in templates.
+ * lines that guard `{{REL_PATH}}` imports in built-in templates, and the
+ * template's leading lint-disable header.
  */
 const applyTemplatePlaceholders = (
   content: string,
@@ -610,7 +618,7 @@ const applyTemplatePlaceholders = (
 ): string => {
   const relPath = calculateRelativePath(filePath);
   const pragmaPattern = /\/\/\s*@ts-(?:ignore|expect-error).*\r?\n(.*)\{\{REL_PATH\}\}/g;
-  let result = content.replaceAll(pragmaPattern, (_, prefix) => `${prefix}${relPath}`);
+  let result = stripTemplateLintHeader(content).replaceAll(pragmaPattern, (_, prefix) => `${prefix}${relPath}`);
   result = result.replaceAll('{{REL_PATH}}', () => relPath);
 
   //? Sync templates may carry PAGE_PATH / SYNC_NAME placeholders (paired client
@@ -1041,11 +1049,12 @@ export const injectServerTemplateWithClientInput = async (
 
     //? Honor consumer overrides for the sync_server kind here too (consumer
     //? file -> registered override -> bundled), then fill in the clientInput.
-    let content = resolveTemplateContent('sync_server');
-    if (content === null) {
+    const rawContent = resolveTemplateContent('sync_server');
+    if (rawContent === null) {
       console.error(`[TemplateInjector] No sync_server template content available for: ${serverFilePath}`);
       return false;
     }
+    let content = stripTemplateLintHeader(rawContent);
 
     //? Replace placeholders — same pragma union + literal-fallback pattern
     //? as `getTemplate` above. Keep these two regexes in sync.

@@ -69,6 +69,29 @@ describe('ResendSender', () => {
     );
   });
 
+  it('maps attachments to the field names and content types the Resend SDK reads', async () => {
+    sendMock.mockResolvedValue({ data: { id: 'x' }, error: null });
+    const sender = ResendSender({ apiKey: 'rk_123' });
+    await sender.send({
+      ...message,
+      attachments: [
+        { filename: 'logo.png', content: new Uint8Array([1, 2, 3]), contentType: 'image/png', cid: 'logo' },
+        { filename: 'terms.pdf', href: 'https://cdn.acme.test/terms.pdf' },
+        { filename: 'legacy.pdf', path: 'https://cdn.acme.test/legacy.pdf' },
+        { filename: 'note.txt', content: 'aGk=' },
+      ],
+    });
+
+    const payload = sendMock.mock.calls[0]?.[0] as { attachments: Record<string, unknown>[] };
+    expect(payload.attachments).toEqual([
+      { filename: 'logo.png', content: Buffer.from([1, 2, 3]), contentType: 'image/png', contentId: 'logo' },
+      { filename: 'terms.pdf', path: 'https://cdn.acme.test/terms.pdf' },
+      { filename: 'legacy.pdf', path: 'https://cdn.acme.test/legacy.pdf' },
+      { filename: 'note.txt', content: 'aGk=' },
+    ]);
+    expect(Buffer.isBuffer(payload.attachments[0]?.content)).toBe(true);
+  });
+
   it('uses the constructor default `from` when the message omits it', async () => {
     sendMock.mockResolvedValue({ data: { id: 'x' }, error: null });
     const sender = ResendSender({ apiKey: 'rk_123', from: 'default@acme.test' });

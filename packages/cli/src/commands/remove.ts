@@ -54,20 +54,26 @@ const DOCS_PAGE = 'src/docs/page.tsx';
 
 //? Legacy scaffold README paragraphs retained for safe package removal from
 //? older consumers. New READMEs are choice-neutral and need no prose pruning.
+//? `anchor` is a phrase of the paragraph that survives light editing: a README
+//? without it never had the paragraph, so a miss there is not a hand edit.
 const LOGIN_DOC_EDITS = [
   {
+    anchor: "you'll also find the auth UI under",
     find: "If you selected an **auth** mode (`credentials` / `credentials+oauth`), you'll also find the auth UI under `src/`: `login/page.tsx`, `register/page.tsx`, `reset-password/page.tsx`, and an account-management `settings/page.tsx`. Scaffolded with `auth: 'none'`? Add them later with `npx luckystack add login`.",
     replace: "Want auth (login / register / account pages)? This project has none yet — add it anytime with `npx luckystack add login`.",
   },
   {
+    anchor: 'also adds the auth-related API handlers',
     find: "Selecting an **auth** mode also adds the auth-related API handlers — e.g. `logout_v1`, the `reset-password/_api/*` reset flow, and the `settings/_api/*` session / password / profile / account handlers. These ship alongside the auth pages above (and arrive together via `npx luckystack add login`).\n\n",
     replace: '',
   },
   {
+    anchor: 'the credentials + OAuth form used by',
     find: "If you selected an **auth** mode, `LoginForm.tsx` (the credentials + OAuth form used by `/login` and `/register`) is here too.\n\n",
     replace: '',
   },
   {
+    anchor: 'OAuth providers auto-wire from env at boot',
     find: "With an **auth** mode selected, OAuth providers auto-wire from env at boot (set the vars in `.env.local`; no file needed), the user adapter self-wires via `defaultPrismaUserAdapter` (override with `registerUserAdapter()` in `luckystack/server/index.ts`), and `server/hooks/notifications.ts` wires the transactional new-sign-in / password-change emails.\n\n",
     replace: '',
   },
@@ -75,19 +81,20 @@ const LOGIN_DOC_EDITS = [
 
 //? Best-effort: strip each login section from the consumer's README, applying the
 //? edits one at a time so a paragraph the user hand-edited (token miss = editFile
-//? throws) is skipped + reported rather than aborting the whole removal. Doc
-//? cleanup must never be able to fail a package removal.
+//? throws) is skipped + reported rather than aborting the whole removal. A
+//? paragraph the README never had is skipped silently. Doc cleanup must never
+//? be able to fail a package removal.
 export const pruneLoginDocs = (root: string): void => {
   const readmePath = path.join(root, README);
   if (!fs.existsSync(readmePath)) return;
   let stripped = 0;
   let missed = 0;
-  for (const edit of LOGIN_DOC_EDITS) {
+  for (const { anchor, find, replace } of LOGIN_DOC_EDITS) {
     try {
-      editFile(readmePath, [edit]);
+      editFile(readmePath, [{ find, replace }]);
       stripped += 1;
     } catch {
-      missed += 1;
+      if (fs.readFileSync(readmePath, 'utf8').includes(anchor)) missed += 1;
     }
   }
   if (stripped > 0) console.log(`• removed ${String(stripped)} login section(s) from README.md`);

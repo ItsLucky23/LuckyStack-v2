@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 
-import { ensurePeerDepInstalled, type EmailSender } from '@luckystack/core';
+import { ensurePeerDepInstalled, type EmailAttachment, type EmailSender } from '@luckystack/core';
 
 import { toProviderPayload } from './providerPayload';
 
@@ -20,6 +20,22 @@ interface ResendClient {
 }
 
 const localRequire = createRequire(import.meta.url);
+
+//? The Resend SDK reads `contentId` (not `cid`) and `path` as a hosted URL
+//? (our `href`), and JSON-encodes the body: a Buffer survives, a plain
+//? Uint8Array becomes an object of numbered keys. `path` stays the fallback
+//? for projects that already pass a URL there.
+const toResendAttachment = (attachment: EmailAttachment): Record<string, unknown> => {
+  const { content } = attachment;
+  const path = attachment.href ?? attachment.path;
+  return {
+    filename: attachment.filename,
+    ...(content === undefined ? {} : { content: typeof content === 'string' || Buffer.isBuffer(content) ? content : Buffer.from(content) }),
+    ...(path === undefined ? {} : { path }),
+    ...(attachment.contentType === undefined ? {} : { contentType: attachment.contentType }),
+    ...(attachment.cid === undefined ? {} : { contentId: attachment.cid }),
+  };
+};
 
 //? Resend error names after which no mail can go out until an operator acts.
 //? `rate_limit_exceeded` is absent on purpose: it clears within a second.
@@ -85,7 +101,10 @@ export const ResendSender = (options: ResendSenderOptions): EmailSender => {
       }
 
       const { data, error } = await client.emails.send(
-        toProviderPayload(message, fromAddress),
+        {
+          ...toProviderPayload(message, fromAddress),
+          ...(message.attachments !== undefined && { attachments: message.attachments.map((attachment) => toResendAttachment(attachment)) }),
+        },
         context?.idempotencyKey ? { idempotencyKey: context.idempotencyKey } : undefined,
       );
 

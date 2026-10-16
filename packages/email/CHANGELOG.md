@@ -17,6 +17,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Derived batch keys follow address and content, not position.** The per-mail key now comes from the batch key, the address and what the recipient reads (rendered subject/HTML/text, or template and data, plus attachment digests). Reordering or removing rows no longer moves keys onto other recipients. Two identical mails to one address share a key; changing the shared content between attempts changes every key. A batch interrupted on 0.13 and retried on 0.14 derives different keys, so finish such a retry before upgrading or give recipients their own keys.
 - **Resend and SMTP pass the provider's error code and status through.** Resend also marks a rejected API key as `not-sent` (it is refused before any mail is accepted), and SMTP marks a rejected login (`EAUTH`) as `not-sent`.
+- **nodemailer 7 to 10 are accepted.** The optional `nodemailer` peer range was `^6.9.0`, so installing the current nodemailer failed with ERESOLVE. New SMTP scaffolds get nodemailer 10, which ships its own types, so `@types/nodemailer` is no longer added.
+
+### Fixed
+
+- **An SMTP failure no longer reaches the error tracker on its own.** The SMTP adapter sent every failed mail to the tracker itself, with the raw address in the error, before `sendEmail` or the batch reported it. Now only the redacted report remains, and the failure reason in the server log is redacted too.
+- **Abort stops a paced batch at once.** With `perSecond` set, mails after an abort each waited out their slot before ending as `send-aborted`.
+- **Skipped mails no longer wait for pace slots.** Mails skipped because their sender was blocked used to take a `perSecond` slot each.
+- **A blocked sender only blocks its own slot.** Two slots with separate accounts of the same adapter (two Resend keys) blocked each other, because blocking went by adapter name.
+- **The batch tracker event no longer carries an unredacted provider error.** The error attached to the grouped event is redacted like the reason; a provider error object of another shape is left out.
+- **A missing required sender in a batch is `not-sent` / `no-sender`.** It was `unknown`, although nothing was sent.
+- **Generated plain text handles unclosed links in linear time.** Thousands of unclosed `<a href>` tags took seconds.
+- **Generated plain text keeps table cells apart and decodes common entities.** Cells of one row are joined with ` | ` (empty cells dropped), rows stay on consecutive lines, and line breaks in the HTML source count as spaces, as in a browser. `&euro;`, `&copy;`, `&ndash;`, `&hellip;`, curly quotes and similar entities are decoded.
+- **Derived batch keys tell Map and Set data apart.** Template data holding a Map or Set encoded as `{}`, so different data shared one key.
+- **Resend attachments keep `cid`, `href` and binary content.** `cid` is now sent as Resend's `contentId`, `href` as its `path`, and `Uint8Array` content as a Buffer instead of an object of numbered keys.
 
 ## [0.13.0] - 2026-10-15
 

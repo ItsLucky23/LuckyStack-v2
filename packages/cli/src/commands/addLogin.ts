@@ -302,6 +302,8 @@ const adaptAuthToDataLayer = (project: ConsumerProject, orm: string): void => {
   );
 };
 
+const CONFIRM_EMAIL_PAGE = 'src/settings/confirm-email/page.tsx';
+
 //? The asset-bundle paths that are Prisma-bound (see adaptAuthToDataLayer) —
 //? on a non-Prisma layer they are removed from the copy again so `add login`
 //? never leaves the consumer with code that cannot compile.
@@ -351,6 +353,13 @@ export const addLogin = (project: ConsumerProject, options: AddOptions): Result<
     console.log(`• copied ${String(written.length)} auth file(s) into the project (pages + _api + LoginForm + functions/session.ts${orm === 'prisma' ? ' + server/hooks/notifications.ts' : ' — Prisma-bound settings/notifications skipped'})`);
   } else {
     console.log('• auth files already present — skipped copy (kept your edits).');
+  }
+  //? These keys reached the scaffold's locales in 0.12.1 and cannot be merged
+  //? from here (the CLI ships no locale files), so name them instead.
+  if (written.some((file) => path.relative(project.root, file).replaceAll('\\', '/') === CONFIRM_EMAIL_PAGE)) {
+    console.log(`• ${CONFIRM_EMAIL_PAGE} uses the locale keys settings.emailChange.confirmPrompt and`);
+    console.log('  settings.emailChange.confirmButton. A project scaffolded before 0.12.1 lacks them and shows the raw');
+    console.log('  keys: add both to every locale file, then run `npx luckystack check-i18n` to find any other missing key.');
   }
 
   const range = resolveLuckyStackRange(project.pkg, options.cliVersion);

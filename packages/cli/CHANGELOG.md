@@ -5,6 +5,29 @@ All notable changes to `@luckystack/cli` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-10-16
+
+### Fixed
+
+- **`luckystack upgrade` lists this changelog.** The package did not ship it, so the upgrade plan never showed it. The consumer steps for 0.12 and 0.12.1 were published only in the `create-luckystack-app` changelog, which a project never installs, so they never reached the plan either; they are repeated below. Without them, `luckystack update` writes the 0.12 ESLint config and `npm run lint` fails on a missing plugin.
+- **`luckystack add login` names the locale keys the email-change confirmation page needs.** The page uses `settings.emailChange.confirmPrompt` and `settings.emailChange.confirmButton`; a project scaffolded before 0.12.1 lacks them and shows the raw keys. The command now says so and points to `npx luckystack check-i18n`.
+- **`luckystack remove login` no longer reports hand-edited README sections on an untouched README.** It looked for login paragraphs that current READMEs no longer have and counted each as hand-edited. Only a paragraph that is still recognisable but was changed is reported now.
+
+### Upgrading a project scaffolded before 0.12
+
+From `create-luckystack-app` 0.12.0:
+
+1. Use Node.js 22.13 or newer.
+2. `package.json` is never touched by `luckystack update`; edit the devDependencies by hand: `"eslint": "^10.12.0"`, `"@eslint/js": "^10.0.1"`, `"eslint-plugin-unicorn": "^78.0.0"`, `"eslint-plugin-jsx-a11y-x": "^0.2.0"`, `"eslint-plugin-react-hooks": "^7.1.1"`, `"eslint-plugin-react-refresh": "^0.5.7"`, `"eslint-plugin-react-x": "^5.27.1"`, `"eslint-plugin-import-x": "^4.17.1"`, `"globals": "^17.13.0"`; remove `eslint-plugin-jsx-a11y`, `eslint-plugin-react` and `eslint-plugin-eslint-comments`. If `npm install` then reports `ERESOLVE` over the `eslint@9` still recorded in the lockfile, run `npm install --force` once and confirm that a following `npm ci` succeeds without it.
+3. `npx luckystack update` delivers `eslint.official.config.js`; an edited copy gets a `.new` sidecar to merge by hand.
+4. Rename suppressions in your code: `react/jsx-no-literals` → `luckystack/no-untranslated-jsx-text`, `jsx-a11y/…` → `jsx-a11y-x/…`.
+5. Run `npm run lint`. Disables that no longer apply now fail; `npx eslint . --fix --fix-type directive` removes them (keep any reason they carried as a normal comment). `npx luckystack update --app` brings the template's own cleaned copies. Then run `npm run verify`.
+
+From `create-luckystack-app` 0.12.1:
+
+6. With login: `npx luckystack update --app` brings the new `src/settings/confirm-email/page.tsx` and the locale files; a locale file you edited gets a `.new` sidecar — copy the two `settings.emailChange` keys from it.
+7. Bun + SQLite: add `"better-sqlite3"` to `trustedDependencies` in `package.json`, then run `bun install`.
+
 ## [0.12.1] - 2026-10-15
 
 ### Fixed

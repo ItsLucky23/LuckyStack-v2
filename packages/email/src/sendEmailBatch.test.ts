@@ -44,6 +44,8 @@ const delay = (ms: number) => new Promise((resolve) => { setTimeout(resolve, ms)
 
 interface TrackerEvent {
   message: string;
+  /** The attached cause, as text. */
+  cause?: unknown;
   context?: Record<string, unknown>;
 }
 
@@ -53,7 +55,12 @@ const recordingTracker = (): TrackerEvent[] => {
   registerErrorTracker({
     name: 'recording',
     captureException: (error, context) => {
-      events.push({ message: error instanceof Error ? error.message : String(error), context });
+      const cause = error instanceof Error ? error.cause : undefined;
+      events.push({
+        message: error instanceof Error ? error.message : String(error),
+        cause: cause instanceof Error ? cause.message : cause,
+        context,
+      });
     },
     captureMessage: () => { /* not used by email */ },
     setUser: () => { /* not used by email */ },
@@ -224,6 +231,35 @@ describe('sendEmailBatch', () => {
     }
   });
 
+  it('stops a paced batch promptly on abort instead of waiting out each slot', async () => {
+    const controller = new AbortController();
+    recordingSender(() => {
+      controller.abort();
+      return { ok: true, id: 'ok' };
+    });
+
+    const begin = Date.now();
+    //? 100 ms slots: waiting them out would take seconds.
+    const result = await sendEmailBatch({ subject: 's', html: 'h', recipients: recipients(30), concurrency: 2, perSecond: 10, signal: controller.signal });
+
+    expect(Date.now() - begin).toBeLessThan(500);
+    expect(result.items.slice(1).map((item) => [item.deliveryOutcome, item.reason])).toEqual(
+      Array.from({ length: 29 }, () => ['not-sent', 'send-aborted']),
+    );
+  });
+
+  it('does not spend pace slots on mails skipped for a blocked sender', async () => {
+    const sent = recordingSender(() => ({ ok: false, reason: 'quota', code: 'daily_quota_exceeded', blocksSender: true, deliveryOutcome: 'not-sent' }));
+
+    const begin = Date.now();
+    //? 200 ms slots: nine skipped mails each taking a slot would take ~1.8 s.
+    const result = await sendEmailBatch({ subject: 's', html: 'h', recipients: recipients(10), concurrency: 1, perSecond: 5 });
+
+    expect(Date.now() - begin).toBeLessThan(500);
+    expect(sent).toHaveLength(1);
+    expect(result.counts).toMatchObject({ notSent: 10 });
+  });
+
   describe('derived keys', () => {
     const keysByAddress = (sent: Sent[]) =>
       Object.fromEntries(sent.map((entry) => [String(entry.message.to), entry.context?.idempotencyKey]));
@@ -291,6 +327,28 @@ describe('sendEmailBatch', () => {
       expect(keys[2]).not.toBe(keys[0]);
     });
 
+    it('tells Map and Set data apart and ignores their insertion order', async () => {
+      registerEmailTemplate('t', { subject: () => 's', render: () => ({ html: 'h', text: 't' }) });
+      const sent = recordingSender();
+      await sendEmailBatch({
+        idempotencyKey: 'k',
+        messages: [
+          { to: 'a@example.com', template: 't', data: { m: new Map([['x', 1], ['y', 2]]) } },
+          { to: 'a@example.com', template: 't', data: { m: new Map([['y', 2], ['x', 1]]) } },
+          { to: 'a@example.com', template: 't', data: { m: new Map([['x', 9]]) } },
+          { to: 'a@example.com', template: 't', data: { m: new Set(['p', 'q']) } },
+          { to: 'a@example.com', template: 't', data: { m: new Set(['q', 'p']) } },
+          { to: 'a@example.com', template: 't', data: { m: new Set(['r']) } },
+          { to: 'a@example.com', template: 't', data: { m: new Map() } },
+          { to: 'a@example.com', template: 't', data: { m: {} } },
+        ],
+      });
+      const [map, mapReordered, otherMap, set, setReordered, otherSet, emptyMap, emptyObject] = sent.map((entry) => entry.context?.idempotencyKey);
+      expect(mapReordered).toBe(map);
+      expect(setReordered).toBe(set);
+      expect(new Set([map, otherMap, set, otherSet, emptyMap, emptyObject]).size).toBe(6);
+    });
+
     it('lets a recipient key win over the derived one', async () => {
       const sent = recordingSender();
       await sendEmailBatch({ subject: 's', html: 'h', idempotencyKey: 'k', recipients: [{ to: 'a@example.com', idempotencyKey: 'invoice-123' }] });
@@ -351,6 +409,26 @@ describe('sendEmailBatch', () => {
     });
 
     expect(result.items.map((item) => item.reason ?? item.deliveryOutcome)).toEqual(['quota', 'sender-blocked', 'sent']);
+  });
+
+  it('blocks only the failing slot when two slots wrap the same adapter', async () => {
+    //? Two Resend accounts: same adapter name, separate quotas.
+    registerEmailSenders({
+      default: { name: 'resend', send: async () => ({ ok: false, reason: 'quota', code: 'daily_quota_exceeded', blocksSender: true, deliveryOutcome: 'not-sent' }) },
+      second_account: { name: 'resend', send: async () => ({ ok: true, id: 'b' }) },
+    });
+
+    const result = await sendEmailBatch({
+      concurrency: 1,
+      messages: [
+        { to: 'a@example.com', subject: 's', html: 'h' },
+        { to: 'b@example.com', subject: 's', html: 'h' },
+        { to: 'c@example.com', subject: 's', html: 'h', adapter: 'second_account' },
+        { to: 'd@example.com', subject: 's', html: 'h', adapter: 'second_account' },
+      ],
+    });
+
+    expect(result.items.map((item) => item.reason ?? item.deliveryOutcome)).toEqual(['quota', 'sender-blocked', 'sent', 'sent']);
   });
 
   it('sends no key when the batch has none', async () => {
@@ -424,17 +502,44 @@ describe('sendEmailBatch', () => {
       expect(events.map((event) => event.message)).toEqual(['[email] batch: socket hang up (4×)']);
     });
 
-    it('reports a throw from sendEmail itself (required sender missing) once', async () => {
+    it('scrubs the address from the provider error attached to the grouped event', async () => {
       const events = recordingTracker();
-      recordingSender();
+      recordingSender((message) => {
+        const text = `550 rejected <${String(message.to)}>`;
+        return { ok: false, reason: text, cause: new Error(text), deliveryOutcome: 'not-sent' };
+      });
+
+      await sendEmailBatch({ subject: 's', html: 'h', recipients: recipients(2) });
+
+      expect(events).toHaveLength(1);
+      expect(events[0]?.cause).toBe('550 rejected <[redacted-email]>');
+      expect(JSON.stringify(events)).not.toContain('@example.com');
+    });
+
+    it('leaves a provider cause of another shape out of the grouped event', async () => {
+      const events = recordingTracker();
+      recordingSender((message) => ({ ok: false, reason: 'refused', cause: { message: `bad ${String(message.to)}` } }));
+
+      await sendEmailBatch({ subject: 's', html: 'h', recipients: recipients(1) });
+
+      expect(events).toHaveLength(1);
+      expect(events[0]?.cause).toBeUndefined();
+    });
+
+    it('reports a missing required sender once, as not-sent', async () => {
+      const events = recordingTracker();
+      const sent = recordingSender();
       registerEmailConfig({ ...DEFAULT_EMAIL_CONFIG, required: true });
 
-      //? An explicit slot that is not registered throws when a sender is required.
+      //? A single sendEmail throws for an unregistered slot when a sender is
+      //? required; nothing was dispatched, so the batch says not-sent.
       const result = await sendEmailBatch({ subject: 's', html: 'h', recipients: recipients(2), adapter: 'billing' });
 
-      expect(result.counts).toMatchObject({ total: 2, unknown: 2 });
-      expect(events).toHaveLength(1);
-      expect(events[0]?.message).toMatch(/\(2×\)$/);
+      expect(result.counts).toMatchObject({ total: 2, notSent: 2, unknown: 0 });
+      expect(result.items.map((item) => item.reason)).toEqual(['no-sender', 'no-sender']);
+      expect(sent).toHaveLength(0);
+      expect(events.map((event) => event.message)).toEqual(['[email] batch: no-sender (2×)']);
+      expect(events[0]?.context).toMatchObject({ notSent: 2, unknown: 0 });
     });
 
     it('caps distinct reasons at ten events plus one summary', async () => {
