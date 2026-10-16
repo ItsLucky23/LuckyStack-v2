@@ -192,14 +192,15 @@ const buildMessage = (input: SendEmailInput, config: EmailConfigShape): BuildMes
     const [renderError, rendered] = tryCatchSync(() => template.render(data));
     if (renderError || !rendered) {
       if (config.logging.errors) {
-        getLogger().warn(`[email] template '${input.template}' render threw`, { error: renderError?.message ?? 'unknown' });
+        //? Template errors can quote their data, which may hold an address.
+        getLogger().warn(`[email] template '${input.template}' render threw`, { error: scrubEmailPii(renderError?.message ?? 'unknown') });
       }
       return { failure: { ok: false, reason: 'template-render-failed', deliveryOutcome: 'not-sent' } };
     }
     const [subjectError, resolvedSubject] = tryCatchSync(() => template.subject(data));
     if (subjectError || typeof resolvedSubject !== 'string') {
       if (config.logging.errors) {
-        getLogger().warn(`[email] template '${input.template}' subject threw`, { error: subjectError?.message ?? 'unknown' });
+        getLogger().warn(`[email] template '${input.template}' subject threw`, { error: scrubEmailPii(subjectError?.message ?? 'unknown') });
       }
       return { failure: { ok: false, reason: 'template-render-failed', deliveryOutcome: 'not-sent' } };
     }
@@ -352,6 +353,30 @@ export const scrubErrorPii = (error: Error): Error => {
   return error;
 };
 
+const SAFE_CAUSE_FIELDS = ['code', 'responseCode', 'statusCode', 'status'] as const;
+
+//? A provider or hook error can carry the address beyond its message —
+//? nodemailer adds `response`, `rejected`, `rejectedErrors` and `command`, and
+//? the stack header repeats the message — and tracker SDKs serialise own
+//? properties. So the tracker gets a fresh Error with the scrubbed message, the
+//? same name, only scalar code/status fields and the original call frames. A
+//? cause of another shape (Resend's error object) is left out; its text is
+//? already in the scrubbed reason.
+export const toTrackerCause = (cause: unknown): Error | string | undefined => {
+  if (typeof cause === 'string') return scrubEmailPii(cause);
+  if (!(cause instanceof Error)) return undefined;
+  const safe = new Error(scrubEmailPii(cause.message || ''));
+  safe.name = cause.name;
+  for (const field of SAFE_CAUSE_FIELDS) {
+    const value: unknown = Reflect.get(cause, field);
+    if (typeof value === 'number') Reflect.set(safe, field, value);
+    if (typeof value === 'string') Reflect.set(safe, field, scrubEmailPii(value));
+  }
+  const frames = (cause.stack ?? '').split('\n').filter((line) => /^\s+at /.test(line));
+  safe.stack = [`${safe.name}: ${safe.message}`, ...frames].join('\n');
+  return safe;
+};
+
 const normalizeSendResult = (sendError: Error | null, sendResult: EmailResult | null): EmailResult => {
   if (!sendError) return sendResult ?? { ok: false, reason: 'send-no-result' };
   const scrubbedMessage = scrubErrorPii(sendError).message;
@@ -388,14 +413,16 @@ const reportSendOutcome = (
     internals.onFailure(result, sender);
     return;
   }
-  captureException(result.cause ?? new Error(`Email send failed: ${result.reason}`), {
+  const reason = scrubEmailPii(result.reason);
+  const cause = toTrackerCause(result.cause);
+  captureException(cause instanceof Error ? cause : new Error(`Email send failed: ${reason}`), {
     fn: 'sendEmail',
     senderName,
     to: redactRecipients(message.to),
     cc: redactRecipients(message.cc),
     bcc: redactRecipients(message.bcc),
     subject: redactSubject(message.subject),
-    reason: result.reason,
+    reason,
     deliveryOutcome: result.deliveryOutcome,
   });
 };
@@ -420,7 +447,25 @@ export interface SendEmailInternals {
    * different accounts.
    */
   onFailure?: (failure: Extract<EmailResult, { ok: false }>, sender: EmailSender) => void;
+  /**
+   * Receives a throwing `preEmailSend`/`postEmailSend` handler's error, already
+   * address-scrubbed, instead of the per-mail tracker capture. Logging is
+   * unchanged.
+   */
+  onHookError?: (hook: EmailHookName, error: Error) => void;
 }
+
+type EmailHookName = 'preEmailSend' | 'postEmailSend';
+
+//? Core's default hook-error report logs and captures the raw error, and a
+//? handler error can quote the message's address. This one scrubs it first.
+const hookErrorReporter = (hook: EmailHookName, internals: SendEmailInternals) => (thrown: unknown): void => {
+  const safe = toTrackerCause(thrown);
+  const error = safe instanceof Error ? safe : new Error(safe ?? `${hook} handler threw a non-Error value`);
+  getLogger().error(`hook: handler for "${hook}" threw`, error, { hook });
+  if (internals.onHookError) internals.onHookError(hook, error);
+  else captureException(error, { hook });
+};
 
 //? Like `tryCatch`, but without its automatic tracker capture: in a batch the
 //? caller aggregates failures, and a capture per thrown error would still
@@ -485,7 +530,7 @@ export const sendEmailWith = async (input: SendEmailInput, internals: SendEmailI
   const preSend = await dispatchHook('preEmailSend', {
     message,
     adapter: sender.name,
-  });
+  }, { onError: hookErrorReporter('preEmailSend', internals) });
   if (preSend.stopped) {
     return { ok: false, reason: preSend.signal.errorCode || 'email.suppressed', deliveryOutcome: 'not-sent' };
   }
@@ -508,7 +553,7 @@ export const sendEmailWith = async (input: SendEmailInput, internals: SendEmailI
     messageId: result.ok ? result.id : undefined,
     reason: result.ok ? undefined : result.reason,
     deliveryOutcome: result.ok ? undefined : result.deliveryOutcome,
-  });
+  }, { onError: hookErrorReporter('postEmailSend', internals) });
 
   reportSendOutcome(sender, message, result, config, internals);
 

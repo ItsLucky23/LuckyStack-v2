@@ -86,6 +86,19 @@ describe('Change.apply — email & monitoring deps + env', () => {
     expect(readLocal()).toContain('RESEND_API_KEY=');
   });
 
+  it('email transport switches add and drop the transport package the adapter loads', () => {
+    applyOne(planChanges(cfg(), cfg({ email: 'smtp' })), 'Email: none → smtp');
+    expect(readPkg().dependencies).toMatchObject({ nodemailer: '^10.0.0' });
+
+    applyOne(planChanges(cfg({ email: 'smtp' }), cfg({ email: 'resend' })), 'Email: smtp → resend');
+    expect(readPkg().dependencies).toMatchObject({ resend: '^6.0.0' });
+    expect(readPkg().dependencies?.nodemailer).toBeUndefined();
+
+    applyOne(planChanges(cfg({ email: 'resend' }), cfg({ email: 'none' })), 'Email: resend → none');
+    expect(readPkg().dependencies?.resend).toBeUndefined();
+    expect(readPkg().dependencies?.['@luckystack/email']).toBeUndefined();
+  });
+
   it('monitoring none → sentry adds error-tracking + @sentry/node + DSN placeholder', () => {
     applyOne(planChanges(cfg(), cfg({ monitoring: 'sentry' })), 'Monitoring: none → sentry');
     const deps = readPkg().dependencies ?? {};

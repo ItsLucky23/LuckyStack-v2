@@ -20,7 +20,7 @@ Some failures say nothing about the mail and everything about the sender: a used
 
 ## Retrying safely
 
-Give the batch a stable key for the logical send, store it, and reuse it when retrying. Each mail's key is derived from that key, the address and what the recipient reads (subject, body, attachments — or template and data), not from its position, so reordering or removing rows leaves the other keys intact. Two identical mails to one address share a key and go out once. Changing the shared content between attempts changes every key, so a retry after such an edit sends the new version to everyone again; where that matters, give each recipient its own key. That key must be unique per distinct mail, not per recipient: Resend refuses a key reused for a different mail within 24 hours, and the mail ends as unknown. So a reminder for invoice 123 needs `invoice-123:reminder-1`, not the `invoice-123` the invoice itself used. Only providers with native de-duplication (Resend) skip mails that already went out; SMTP and the console sender ignore keys, so a retry there mails every recipient again. Resend also forgets keys after a day.
+Give the batch a stable key for the logical send, store it, and reuse it when retrying. Each mail's key is derived from that key, the address and everything the mail carries (subject and body, or template and data, plus sender, reply-to, copies, custom headers and attachments), not from its position, so reordering or removing rows leaves the other keys intact. Two identical mails to one address share a key and go out once. Changing the shared content between attempts changes every key, so a retry after such an edit sends the new version to everyone again; where that matters, give each recipient its own key. That key must be unique per distinct mail, not per recipient: Resend refuses a key reused for a different mail within 24 hours, and the mail ends as unknown. So a reminder for invoice 123 needs `invoice-123:reminder-1`, not the `invoice-123` the invoice itself used. Only providers with native de-duplication (Resend) skip mails that already went out; SMTP and the console sender ignore keys, so a retry there mails every recipient again. Resend also forgets keys after a day.
 
 ## What stays with the project
 
@@ -30,7 +30,7 @@ Concurrency bounds mails in flight; providers also limit requests per second, so
 
 ## Error reports
 
-A batch sends the error tracker one event per failure reason, with the number of recipients it hit, instead of one event per failed mail. A wrong API key in a batch of 500 is one event saying so 500 times, not 500 events that exhaust the tracker quota and bury other errors. Reasons that differ only by an echoed address are grouped, and the address never reaches the tracker. The server log still has one redacted line per failed mail, and the batch result names each recipient's reason.
+A batch sends the error tracker one event per failure reason, with the number of recipients it hit, instead of one event per failed mail. A wrong API key in a batch of 500 is one event saying so 500 times, not 500 events that exhaust the tracker quota and bury other errors. Reasons that differ only by an echoed address are grouped, and the address never reaches the tracker. A throwing `preEmailSend`/`postEmailSend` handler is grouped the same way; it does not change the mail's outcome. The server log still has one redacted line per failed mail, and the batch result names each recipient's reason.
 
 ## Tokens
 

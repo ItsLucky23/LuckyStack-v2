@@ -6,7 +6,6 @@
 //? sane default — adjust the role check or remove the middleware if this
 //? page is public.
 
-//@ts-ignore We replace {{REL_PATH}} with the relative path to the project root at scaffold time.
 import type { PageMiddleware } from '@luckystack/core/client';
 //@ts-ignore We replace {{REL_PATH}} with the relative path to the project root at scaffold time.
 import type { SessionLayout } from '{{REL_PATH}}config';
@@ -20,12 +19,9 @@ export const middleware: PageMiddleware<SessionLayout> = ({ session }) => {
   return { success: true };
 };
 
-interface PageProps {
-  params: Record<string, string | undefined>;
-  searchParams: Record<string, string>;
-}
-
-export default function Page({ params, searchParams }: PageProps) {
+//? Route and query values arrive as props when the page needs them:
+//?   ({ params, searchParams }: { params: Record<string, string | undefined>; searchParams: Record<string, string> })
+export default function Page() {
   return (
     <div className='flex flex-col gap-4 p-6 w-full h-full'>
       <h1 className='text-2xl font-semibold text-title'>{/* TODO: page title */}</h1>

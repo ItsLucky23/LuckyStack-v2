@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`EmailResult` failures can carry `code`, `status` and `blocksSender`.** `code` is the provider's own error name (Resend `daily_quota_exceeded`, nodemailer `EAUTH`), `status` the HTTP status or SMTP reply code, and `blocksSender: true` says the sender refuses every message until an operator acts. All three are optional; a custom adapter that sets none behaves as before.
+- **`dispatchHook` takes an optional `onError`** (third argument, type `DispatchHookOptions`). A throwing handler's error then goes to it instead of the default log line and tracker capture, so a caller can redact it or report many dispatches as one event; `@luckystack/email` uses it to keep addresses out of hook-error reports. Without it nothing changes; an `onError` that throws is ignored, like a failing reporter.
 
 ## [0.12.1] - 2026-10-15
 

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **An SMTP scaffold installs a current nodemailer.** `--email=smtp` added `nodemailer` `^6.9.0` and `@types/nodemailer`; it now adds `nodemailer` `^10.0.0`, which ships its own types. `@luckystack/email` 0.14.0 accepts nodemailer 6.9 to 10.
+- **Route and page files injected from `.luckystack/templates/` pass `npm run lint`.** The template copies match devkit 0.14.0's lint-clean bundled templates, and `eslint.official.config.js` allows the empty `{}` input/output shapes in `src/**/_api` and `src/**/_sync` files, which the type generator reads as "no input yet". Empty interfaces stay flagged.
 - The 0.12.0 and 0.12.1 upgrade steps below are repeated in the `@luckystack/cli` changelog, because `luckystack upgrade` reads installed packages only and a project never installs this one.
 
 ## [0.12.1] - 2026-10-15

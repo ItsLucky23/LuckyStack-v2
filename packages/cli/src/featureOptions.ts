@@ -132,3 +132,13 @@ export const monitoringDeps: Readonly<Record<MonitoringProvider, Readonly<Record
   posthog: { 'posthog-node': '^4.0.0' },
   datadog: { 'dd-trace': '^5.0.0', 'hot-shots': '^10.0.0' },
 };
+
+//? The transport package an email adapter loads at boot (beyond
+//? @luckystack/email); without it the server stops at startup. Mirrors the
+//? scaffolder's email deps.
+export const emailDeps: Readonly<Record<EmailProvider, Readonly<Record<string, string>>>> = {
+  none: {},
+  console: {},
+  resend: { resend: '^6.0.0' },
+  smtp: { nodemailer: '^10.0.0' },
+};

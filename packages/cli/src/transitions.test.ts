@@ -116,6 +116,13 @@ describe('planChanges — toggles', () => {
 });
 
 describe('planChanges — preview ↔ apply parity (effects content)', () => {
+  it('email resend → smtp previews swapping resend for nodemailer', () => {
+    const effects = planChanges(cfg({ email: 'resend' }), cfg({ email: 'smtp' }))[0]?.effects ?? [];
+    expect(effects).toEqual(expect.arrayContaining(['- resend', '+ nodemailer']));
+    expect(planChanges(cfg({ email: 'smtp' }), cfg({ email: 'none' }))[0]?.effects).toContain('- nodemailer');
+    expect(planChanges(cfg(), cfg({ email: 'console' }))[0]?.effects.some((effect) => effect.startsWith('+ nodemailer') || effect.startsWith('+ resend'))).toBe(false);
+  });
+
   it('email resend → smtp previews dropping the old resend block + adding smtp keys', () => {
     const effects = planChanges(cfg({ email: 'resend' }), cfg({ email: 'smtp' }))[0]?.effects.join(' | ') ?? '';
     expect(effects).toContain('resend placeholder block');

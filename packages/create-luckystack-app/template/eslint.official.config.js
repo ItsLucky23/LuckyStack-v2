@@ -179,4 +179,13 @@ export default tseslint.config(
       'unicorn/prefer-top-level-await': 'off',
     },
   },
+  {
+    //? A route with no input or output yet declares its shape as `{}`; the
+    //? type generator reads that literal and the dev tooling rewrites it when
+    //? a sync gains or loses its server file. Empty interfaces stay flagged.
+    files: ['src/**/_api/**/*.ts', 'src/**/_sync/**/*.ts'],
+    rules: {
+      '@typescript-eslint/no-empty-object-type': ['error', { allowObjectTypes: 'always' }],
+    },
+  },
 )

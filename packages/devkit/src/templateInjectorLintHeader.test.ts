@@ -76,4 +76,16 @@ describe('template injection drops the template lint header', () => {
     //? The template files themselves keep the header, so they stay lint-clean.
     expect(fs.readFileSync(path.join(consumerDir, 'api.template.ts'), 'utf8')).toMatch(/^\/\* eslint-disable/);
   });
+
+  it('for a consumer template saved with a byte-order mark', async () => {
+    const consumerFile = path.join(ROOT, '.luckystack', 'templates', 'api.template.ts');
+    fs.mkdirSync(path.dirname(consumerFile), { recursive: true });
+    const byteOrderMark = String.fromCodePoint(0xFE_FF);
+    fs.writeFileSync(consumerFile, `${byteOrderMark}/* eslint-disable */\r\n\r\nexport const main = () => ({ status: 'success' });\r\n`);
+
+    const file = emptyFile('bom', '_api', 'getThing_v1.ts');
+    expect(await injectTemplate(file)).toBe(true);
+    expectNoLintHeader(file);
+    expect(fs.readFileSync(file, 'utf8')).toBe('export const main = () => ({ status: \'success\' });\r\n');
+  });
 });

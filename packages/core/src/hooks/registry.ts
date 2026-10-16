@@ -41,9 +41,18 @@ export const registerHook = <TName extends HookName>(
   };
 };
 
+export interface DispatchHookOptions {
+  /**
+   * Receives a throwing handler's error instead of the default log line and
+   * tracker capture, e.g. to redact it or to report many dispatches at once.
+   */
+  onError?: (error: unknown) => void;
+}
+
 export const dispatchHook = async <TName extends HookName>(
   name: TName,
   payload: HookPayloads[TName],
+  options: DispatchHookOptions = {},
 ): Promise<DispatchResult> => {
   const handlers = hookHandlers.get(name) ?? [];
 
@@ -59,6 +68,10 @@ export const dispatchHook = async <TName extends HookName>(
       //? tracker throws (misconfigured adapter, serialisation error), we must
       //? not propagate out of `dispatchHook` — that would surface as an
       //? unhandled rejection on the caller and undo the isolation guarantee.
+      if (options.onError) {
+        try { options.onError(error); } catch { /* luckystack-allow: reporter must not break hook isolation */ }
+        continue;
+      }
       try { getLogger().error(`hook: handler for "${name}" threw`, error, { hook: name }); } catch { /* luckystack-allow: reporter must not break hook isolation */ }
       try { captureException(error, { hook: name }); } catch { /* luckystack-allow */ }
       continue;

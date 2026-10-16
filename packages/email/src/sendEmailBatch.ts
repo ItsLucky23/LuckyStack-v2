@@ -18,9 +18,9 @@ import {
   normalizeIdempotencyKey,
   resolveSender,
   scrubEmailPii,
-  scrubErrorPii,
   sendEmailWith,
   settle,
+  toTrackerCause,
   type SendEmailInput,
 } from './sendEmail';
 
@@ -146,18 +146,9 @@ interface FailureGroup {
   count: number;
   notSent: number;
   unknown: number;
+  //? The first cause of the reason, made safe for the tracker.
   cause: Error | string | undefined;
 }
-
-//? The tracker event carries the first cause of each reason. A provider error
-//? (e.g. nodemailer's) can echo the address, so it is scrubbed like a thrown
-//? send error; a cause of another shape (Resend's error object) is left out,
-//? its text is already in the scrubbed reason.
-const scrubCause = (cause: unknown): Error | string | undefined => {
-  if (cause instanceof Error) return scrubErrorPii(cause);
-  if (typeof cause === 'string') return scrubEmailPii(cause);
-  return undefined;
-};
 
 //? One tracker event per failure reason instead of one per recipient: a batch
 //? of 500 with a bad API key would otherwise send 500 identical events and use
@@ -227,19 +218,35 @@ const sortByEncoding = (values: unknown[]): unknown[] =>
 const attachmentDigest = (attachment: EmailAttachment) => ({
   filename: attachment.filename,
   path: attachment.path,
+  href: attachment.href,
+  cid: attachment.cid,
+  contentType: attachment.contentType,
   content: attachment.content === undefined ? undefined : sha256(attachment.content),
 });
 
+const normalizeAddress = (address: string): string => address.trim().toLowerCase();
+
+const normalizeAddresses = (value: string | string[] | undefined): string | string[] | undefined => {
+  if (value === undefined) return undefined;
+  return Array.isArray(value) ? value.map((address) => normalizeAddress(address)) : normalizeAddress(value);
+};
+
 //? What makes this mail this mail: address plus everything the recipient
-//? reads. Position is left out on purpose — a key tied to the position moves
-//? to another recipient when the list is reordered or shortened (ADR 0070).
+//? receives — content, sender, copies, headers and attachments. Position is
+//? left out on purpose — a key tied to the position moves to another
+//? recipient when the list is reordered or shortened (ADR 0070).
 const messageFingerprint = (message: BatchMessage): string => {
   const content = 'template' in message && message.template !== undefined
     ? { template: message.template, data: message.data }
     : { subject: message.subject, html: message.html, text: message.text };
   return stableStringify({
-    to: message.to.trim().toLowerCase(),
+    to: normalizeAddress(message.to),
     ...content,
+    from: normalizeAddresses(message.from),
+    replyTo: normalizeAddresses(message.replyTo),
+    cc: normalizeAddresses(message.cc),
+    bcc: normalizeAddresses(message.bcc),
+    headers: message.headers,
     attachments: message.attachments?.map((attachment) => attachmentDigest(attachment)),
   });
 };
@@ -301,36 +308,46 @@ const buildTokenMessage = (input: TokenBatchInput, recipient: BatchRecipient, in
   };
 };
 
-const waitOrAbort = (ms: number, signal: AbortSignal | undefined): Promise<boolean> =>
-  new Promise((resolve) => {
-    //? An already-aborted signal never fires `abort` again.
-    if (signal?.aborted) {
-      resolve(false);
-      return;
-    }
-    const onAbort = (): void => {
-      clearTimeout(timer);
-      resolve(false);
-    };
-    const timer = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve(true);
-    }, ms);
-    signal?.addEventListener('abort', onAbort, { once: true });
-  });
+interface Waiter {
+  skip: () => boolean;
+  start: () => void;
+}
 
 //? Spaces mail starts evenly instead of in bursts, because providers count
-//? requests per second regardless of how many are in flight. Resolves false
-//? when the batch is aborted while waiting for a slot.
+//? requests per second regardless of how many are in flight. A slot goes to
+//? the first waiting mail only once it is due, so a mail that stopped needing
+//? one meanwhile (its sender got blocked, the batch was aborted) leaves the
+//? queue without using it. `wait` also resolves for such a mail; the caller
+//? checks which case it is.
 const createPacer = (perSecond: number | undefined, signal: AbortSignal | undefined) => {
-  if (perSecond === undefined) return (): Promise<boolean> => Promise.resolve(!signal?.aborted);
+  if (perSecond === undefined) return { wait: (): Promise<void> => Promise.resolve(), close: (): void => { /* nothing held */ } };
   const interval = 1000 / perSecond;
   let nextSlot = 0;
-  return (): Promise<boolean> => {
-    const now = Date.now();
-    const slot = Math.max(now, nextSlot);
-    nextSlot = slot + interval;
-    return slot > now ? waitOrAbort(slot - now, signal) : Promise.resolve(!signal?.aborted);
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const waiting: Waiter[] = [];
+  const release = (): void => {
+    clearTimeout(timer);
+    timer = undefined;
+    for (let head = waiting[0]; head !== undefined; head = waiting[0]) {
+      const now = Date.now();
+      if (!signal?.aborted && !head.skip()) {
+        if (nextSlot > now) {
+          timer = setTimeout(release, nextSlot - now);
+          return;
+        }
+        nextSlot = now + interval;
+      }
+      waiting.shift();
+      head.start();
+    }
+  };
+  signal?.addEventListener('abort', release);
+  return {
+    wait: (skip: () => boolean): Promise<void> => new Promise((start) => {
+      waiting.push({ skip, start });
+      if (timer === undefined) release();
+    }),
+    close: (): void => { signal?.removeEventListener('abort', release); },
   };
 };
 
@@ -373,9 +390,9 @@ export const sendEmailBatch = async (input: SendEmailBatchInput): Promise<BatchR
   };
 
   const failures = new Map<string, FailureGroup>();
-  const recordFailure = (reason: string, deliveryOutcome: BatchDeliveryOutcome, cause: unknown): void => {
+  const recordFailure = (reason: string, deliveryOutcome: BatchDeliveryOutcome | undefined, cause: unknown): void => {
     const key = scrubEmailPii(reason);
-    const group = failures.get(key) ?? { count: 0, notSent: 0, unknown: 0, cause: scrubCause(cause) };
+    const group = failures.get(key) ?? { count: 0, notSent: 0, unknown: 0, cause: toTrackerCause(cause) };
     group.count += 1;
     if (deliveryOutcome === 'not-sent') group.notSent += 1;
     if (deliveryOutcome === 'unknown') group.unknown += 1;
@@ -388,7 +405,7 @@ export const sendEmailBatch = async (input: SendEmailBatchInput): Promise<BatchR
   //? another sender carry on. Keyed by the sender object, not its name: two
   //? slots can wrap the same adapter with separate accounts.
   const blockedSenders = new Map<EmailSender, string>();
-  const pace = createPacer(perSecond, signal);
+  const pacer = createPacer(perSecond, signal);
 
   const sendOne = async (index: number): Promise<BatchItemResult> => {
     const message = messageAt(index);
@@ -405,12 +422,13 @@ export const sendEmailBatch = async (input: SendEmailBatchInput): Promise<BatchR
       return code === undefined ? null : { ...notSent(index, message.to, 'sender-blocked'), code };
     };
     //? Only a mail that will reach a provider waits for a pace slot. Blocking
-    //? is checked before the wait, so a skipped mail uses no slot, and after
-    //? it, since the sender may have been blocked meanwhile.
+    //? is checked before the wait and again after it: a sender blocked while
+    //? the mail waited releases it without using a slot.
     if (sender) {
       const skipped = blocked();
       if (skipped) return skipped;
-      if (!(await pace())) return notSent(index, message.to, 'send-aborted');
+      await pacer.wait(() => blocked() !== null);
+      if (signal?.aborted) return notSent(index, message.to, 'send-aborted');
       const skippedWhileWaiting = blocked();
       if (skippedWhileWaiting) return skippedWhileWaiting;
     }
@@ -427,6 +445,9 @@ export const sendEmailBatch = async (input: SendEmailBatchInput): Promise<BatchR
           blockedSenders.set(failedSender, failure.code ?? failure.reason);
         }
       },
+      //? A throwing hook does not change the mail's outcome, so it counts as
+      //? neither not-sent nor unknown; it is grouped like a failure reason.
+      onHookError: (hook, hookError) => { recordFailure(`${hook} hook threw: ${hookError.message}`, undefined, hookError); },
     }));
     const item = toItem(index, message.to, error, result);
     //? A throw out of sendEmail never reached its reporting step; count it
@@ -444,7 +465,8 @@ export const sendEmailBatch = async (input: SendEmailBatchInput): Promise<BatchR
       items[index] = signal?.aborted ? notSent(index, list[index]?.to ?? '', 'send-aborted') : await sendOne(index);
     }
   };
-  await Promise.all(Array.from({ length: Math.min(concurrency, list.length) }, () => worker()));
+  await Promise.all(Array.from({ length: Math.min(concurrency, list.length) }, () => worker()))
+    .finally(() => { pacer.close(); });
   reportFailures(failures, list.length);
 
   return { ok: true, items, counts: countItems(items) };

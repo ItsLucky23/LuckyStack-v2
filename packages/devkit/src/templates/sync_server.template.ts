@@ -38,7 +38,8 @@ export interface SyncParams {
   flushPressure: (options?: { thresholdBytes?: number }) => Promise<void>;
 }
 
-export const main = ({  }: SyncParams): MaybePromise<SyncServerResponse> => {
+// Take what you need from the parameters, e.g. ({ clientInput, user, functions }: SyncParams)
+export const main = (): MaybePromise<SyncServerResponse> => {
   // THIS FILE RUNS JUST ONCE ON THE SERVER
 
   // Stream payload types are generated from your stream(...) calls.

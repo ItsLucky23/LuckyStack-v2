@@ -2,7 +2,7 @@
 /* eslint-disable */
 
 //@ts-ignore We replace {{REL_PATH}} with the relative path to the project root at scaffold time.
-import { Functions, SyncClientResponse, SyncClientStreamEmitter } from '{{REL_PATH}}src/_sockets/apiTypes.generated';
+import { Functions, SyncClientResponse, MaybePromise, SyncClientStreamEmitter } from '{{REL_PATH}}src/_sockets/apiTypes.generated';
 
 
 export interface SyncParams {
@@ -20,7 +20,8 @@ export interface SyncParams {
   stream: SyncClientStreamEmitter;
 }
 
-export const main = async ({  }: SyncParams): Promise<SyncClientResponse> => {
+// Take what you need from the parameters, e.g. ({ clientInput, serverOutput, token, functions }: SyncParams)
+export const main = (): MaybePromise<SyncClientResponse> => {
   // THIS FILE RUNS ON THE SERVER AND IT EXECUTES FOR EVERY CLIENT THAT IS IN THE GIVEN ROOM
   // stream payload types are generated from your stream(...) calls in this file
   // Use functions.session.getSession(token) when you need session data for this target client.

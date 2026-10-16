@@ -17,7 +17,8 @@ export interface SyncParams {
   stream: SyncClientStreamEmitter;
 }
 
-export const main = ({  }: SyncParams): MaybePromise<SyncClientResponse> => {
+// Take what you need from the parameters, e.g. ({ clientInput, serverOutput, token, functions }: SyncParams)
+export const main = (): MaybePromise<SyncClientResponse> => {
   // PAIRED SYNC: Types are shared with the _server_v{number}.ts file
   // clientInput type comes from _server_v{number}.ts SyncParams
   // serverOutput type is inferred from _server_v{number}.ts return value

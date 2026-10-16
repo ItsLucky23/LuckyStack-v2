@@ -47,6 +47,38 @@ const decodeEntities = (text: string): string =>
 //? scanning to the end of the text once per `<`.
 const stripTags = (html: string): string => html.replaceAll(/<[^<>]*>/g, '');
 
+//? Drops comments and `<head>`, `<style>` and `<script>` elements in one pass.
+//? A lazy `[\s\S]*?` regex rescans to the end of the text for every unclosed
+//? opener; here a closer missing after one opener is missing after every later
+//? one too, so each kind is searched to the end at most once.
+const dropHiddenBlocks = (html: string): string => {
+  const closers: Readonly<Record<string, RegExp | undefined>> = {
+    comment: /-->/g,
+    head: /<\/head\s*>/gi,
+    style: /<\/style\s*>/gi,
+    script: /<\/script\s*>/gi,
+  };
+  const opener = /<!--|<(head|style|script)\b[^<>]*>/gi;
+  const unclosed = new Set<string>();
+  let kept = '';
+  let copiedUpTo = 0;
+  for (let open = opener.exec(html); open !== null; open = opener.exec(html)) {
+    const kind = open[1]?.toLowerCase() ?? 'comment';
+    const closer = closers[kind];
+    if (closer === undefined || unclosed.has(kind)) continue;
+    closer.lastIndex = opener.lastIndex;
+    const close = closer.exec(html);
+    if (close === null) {
+      unclosed.add(kind);
+      continue;
+    }
+    kept += html.slice(copiedUpTo, open.index);
+    copiedUpTo = close.index + close[0].length;
+    opener.lastIndex = copiedUpTo;
+  }
+  return kept + html.slice(copiedUpTo);
+};
+
 /**
  * Turn mail HTML into readable plain text: drops `<head>`, `<style>` and
  * `<script>`, turns breaks and block ends into newlines, list items into
@@ -55,34 +87,34 @@ const stripTags = (html: string): string => html.replaceAll(/<[^<>]*>/g, '');
  * are dropped.
  */
 export const htmlToText = (html: string): string => {
-  const text = html
-    .replaceAll(CELL_END, '')
-    //? A line break in the source is whitespace, as in a browser; lines come
-    //? from tags only. Otherwise cells written on separate source lines would
-    //? never share a text line.
-    .replaceAll(/[\r\n]+/g, ' ')
-    .replaceAll(/<(head|style|script)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
-    .replaceAll(/<!--[\s\S]*?-->/g, '')
+  //? A line break in the source is whitespace, as in a browser; lines come
+  //? from tags only. Otherwise cells written on separate source lines would
+  //? never share a text line.
+  const text = dropHiddenBlocks(html.replaceAll(CELL_END, '').replaceAll(/[\r\n]+/g, ' '))
     //? Every part is bounded by the next `<`, `>`, quote or anchor tag, so
     //? unclosed anchors cost linear time: the label cannot run past another
     //? `<a`, and the attributes and href cannot run past a tag boundary.
     .replaceAll(
       /<a\b[^<>]*?\bhref\s*=\s*(?:"([^"<>]*)"|'([^'<>]*)')[^<>]*>([^<]*(?:<(?!\/?a\b)[^<]*)*)<\/a\s*>/gi,
       (_match, doubleQuoted: string | undefined, singleQuoted: string | undefined, inner: string) => {
-        const label = decodeEntities(stripTags(inner)).trim();
-        const url = decodeEntities(doubleQuoted ?? singleQuoted ?? '').trim();
-        if (label.length === 0) return url;
-        return label === url || url.length === 0 || url.startsWith('#') ? label : `${label} (${url})`;
+        //? Label and URL stay encoded: every entity is decoded once, below.
+        //? The decoded forms are only compared.
+        const label = stripTags(inner).trim();
+        const url = (doubleQuoted ?? singleQuoted ?? '').trim();
+        const shownLabel = decodeEntities(label).trim();
+        const shownUrl = decodeEntities(url).trim();
+        if (shownLabel.length === 0) return url;
+        return shownLabel === shownUrl || shownUrl.length === 0 || shownUrl.startsWith('#') ? label : `${label} (${url})`;
       },
     )
     .replaceAll(/<br\s*\/?>/gi, '\n')
-    .replaceAll(/<li\b[^>]*>/gi, '\n- ')
+    .replaceAll(/<li\b[^<>]*>/gi, '\n- ')
     .replaceAll(/<\/t[dh]\s*>/gi, () => CELL_END)
     //? No `</li>`: the next `<li>` already starts a new line.
     .replaceAll(/<\/(p|div|h[1-6]|tr|table|ul|ol|blockquote|section|header|footer)\s*>/gi, '\n')
     //? No `<tr>`: the previous `</tr>` already ends the row, so rows stay on
     //? consecutive lines.
-    .replaceAll(/<(p|div|h[1-6]|table|blockquote)\b[^>]*>/gi, '\n');
+    .replaceAll(/<(p|div|h[1-6]|table|blockquote)\b[^<>]*>/gi, '\n');
 
   return stripTags(text)
     .split('\n')

@@ -364,7 +364,7 @@ export type { OneTimeTokenHandle } from './oneTimeToken';
 // project code (notify → TranslationProvider.tsx) that must not be pulled
 // into server compilation via this server-safe barrel.
 export { registerHook, dispatchHook, clearAllHooks, registerSyncHook, dispatchSyncHook } from './hooks/registry';
-export type { DispatchResult } from './hooks/registry';
+export type { DispatchHookOptions, DispatchResult } from './hooks/registry';
 export type {
   HookSessionShape,
   HookStopSignal,

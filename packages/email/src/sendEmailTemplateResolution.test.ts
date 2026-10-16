@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 
-import { registerEmailSender, type EmailMessage, type EmailSender } from '@luckystack/core';
+import { registerEmailSender, registerLogger, resetLoggerForTests, type EmailMessage, type EmailSender } from '@luckystack/core';
 
 import { sendEmail } from './sendEmail';
 import { registerEmailTemplate, resetEmailTemplatesForTests } from './templates';
@@ -76,5 +76,22 @@ describe('sendEmail template resolution', () => {
 
     expect(result).toEqual({ ok: false, reason: 'no-template', deliveryOutcome: 'not-sent' });
     expect(captured).toBeNull();
+  });
+
+  it('logs a throwing template render or subject without the address it quotes', async () => {
+    const warnings: unknown[] = [];
+    registerLogger({ debug: () => undefined, info: () => undefined, error: () => undefined, warn: (message, context) => { warnings.push([message, context]); } });
+    registerEmailTemplate('render-throws', { subject: () => 's', render: () => { throw new Error('no name for ann@example.com'); } });
+    registerEmailTemplate('subject-throws', { subject: () => { throw new Error('no name for ann@example.com'); }, render: () => ({ html: 'h', text: 't' }) });
+
+    const results = [
+      await sendEmail({ to: 'x@test.dev', template: 'render-throws' }),
+      await sendEmail({ to: 'x@test.dev', template: 'subject-throws' }),
+    ];
+    resetLoggerForTests();
+
+    expect(results.map((result) => result.ok ? 'sent' : result.reason)).toEqual(['template-render-failed', 'template-render-failed']);
+    expect(JSON.stringify(warnings)).toContain('no name for [redacted-email]');
+    expect(JSON.stringify(warnings)).not.toContain('ann@example.com');
   });
 });

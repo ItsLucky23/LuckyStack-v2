@@ -32,6 +32,7 @@ import {
   OAUTH_ORIGINS,
   oauthIdKeys,
   oauthEnvLines,
+  emailDeps,
   emailEnvLines,
   emailKeys,
   monitoringEnvLines,
@@ -279,8 +280,10 @@ const planEmail = (current: DesiredConfig, desired: DesiredConfig): Change[] => 
 
   //? effects start empty — the summary already carries the "Email: x → y" headline.
   const effects: string[] = [];
+  //? `from !== to` here, so the previous adapter's transport package always goes.
+  const droppedDeps = Object.keys(emailDeps[from]).map((dep) => `- ${dep}`);
   if (to === 'none') {
-    effects.push(`- ${EMAIL_PKG}`);
+    effects.push(`- ${EMAIL_PKG}`, ...droppedDeps);
     //? Only resend/smtp ever wrote a CLI block; console has no env keys.
     if (from === 'resend' || from === 'smtp') effects.push(`- the ${from} placeholder block from .env.local (if CLI-written)`);
   } else {
@@ -289,7 +292,7 @@ const planEmail = (current: DesiredConfig, desired: DesiredConfig): Change[] => 
     if ((from === 'resend' || from === 'smtp') && from !== to) {
       effects.push(`- the ${from} placeholder block from .env.local (if CLI-written)`);
     }
-    effects.push(`+ ${EMAIL_PKG}${from === 'none' ? '' : ' (already present)'}`);
+    effects.push(...droppedDeps, `+ ${EMAIL_PKG}${from === 'none' ? '' : ' (already present)'}`, ...Object.keys(emailDeps[to]).map((dep) => `+ ${dep}`));
     if (to === 'console') effects.push('console (dev) sender — emails log to the terminal; set Resend/SMTP for real delivery');
     else effects.push(`+ ${to} placeholder keys in .env.local (fill the values)`);
   }
@@ -301,11 +304,13 @@ const planEmail = (current: DesiredConfig, desired: DesiredConfig): Change[] => 
       //? Drop only the PREVIOUS adapter's CLI block (only resend/smtp ever wrote
       //? one) — scoped to `from` so apply matches the preview exactly.
       if (from === 'resend' || from === 'smtp') dropEnvBlock(ctx.project.root, `email:${from}`, blockPlaceholderDefaults(`email:${from}`));
+      for (const dep of Object.keys(emailDeps[from])) dropDependency(ctx.project, dep);
       if (to === 'none') {
         dropDependency(ctx.project, EMAIL_PKG);
         return;
       }
       addDependency(ctx.project, EMAIL_PKG, lsRange(ctx));
+      for (const [dep, range] of Object.entries(emailDeps[to])) addDependency(ctx.project, dep, range);
       if (to === 'resend' || to === 'smtp') {
         upsertEnvBlock(ctx.project.root, `email:${to}`, emailEnvLines(to), ctx.declaredKeys, [...emailKeys[to]]);
       }

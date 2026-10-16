@@ -37,7 +37,8 @@ export interface ApiParams {
   flushPressure: (options?: { thresholdBytes?: number }) => Promise<void>;
 }
 
-export const main = ({  }: ApiParams): MaybePromise<ApiResponse> => {
+// Take what you need from the parameters, e.g. ({ data, user, functions }: ApiParams)
+export const main = (): MaybePromise<ApiResponse> => {
   // Stream payload types are generated from your stream(...) calls.
   // stream({ phase: 'started', progress: 0 });
   // stream({ phase: 'done', progress: 100, done: true });

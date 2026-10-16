@@ -56,4 +56,24 @@ describe('htmlToText', () => {
     expect(performance.now() - start).toBeLessThan(1000);
     expect(htmlToText('<a href="x">a <a href="y">b</a>')).toBe('a b (y)');
   });
+
+  it.each(['<li ', '<p ', '<div x', '<table ', '<h1 ', '<style>', '<script>', '<head>', '<!--'])(
+    'handles 20 000 unclosed %j in linear time',
+    (opener) => {
+      const start = performance.now();
+      htmlToText(opener.repeat(20_000));
+      expect(performance.now() - start).toBeLessThan(100);
+    },
+  );
+
+  it('still drops hidden blocks that close after unclosed or nested openers', () => {
+    expect(htmlToText('<style>a<style>b</style>Hi')).toBe('Hi');
+    expect(htmlToText('<!-- <style> -->Hi</style>')).toBe('Hi');
+    expect(htmlToText('<STYLE type="x">a</Style ><p>Hi</p><script>unclosed')).toBe('Hi\nunclosed');
+  });
+
+  it('decodes a link label and target once', () => {
+    expect(htmlToText('<a href="https://app.test/?q=&amp;lt;">a &amp;lt; b</a>')).toBe('a &lt; b (https://app.test/?q=&lt;)');
+    expect(htmlToText('<a href="https://app.test">&lt;br&gt;</a>')).toBe('<br> (https://app.test)');
+  });
 });

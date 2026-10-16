@@ -17,7 +17,8 @@ export interface SyncParams {
   stream: SyncClientStreamEmitter;
 }
 
-export const main = ({  }: SyncParams): MaybePromise<SyncClientResponse> => {
+// Take what you need from the parameters, e.g. ({ clientInput, token, functions }: SyncParams)
+export const main = (): MaybePromise<SyncClientResponse> => {
   // CLIENT-ONLY SYNC: No server processing, runs for each client in the room
   // stream payload types are generated from your stream(...) calls in this file
   // Use functions.session.getSession(token) when you need session data for this target client.

@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`luckystack upgrade` lists this changelog.** The package did not ship it, so the upgrade plan never showed it. The consumer steps for 0.12 and 0.12.1 were published only in the `create-luckystack-app` changelog, which a project never installs, so they never reached the plan either; they are repeated below. Without them, `luckystack update` writes the 0.12 ESLint config and `npm run lint` fails on a missing plugin.
 - **`luckystack add login` names the locale keys the email-change confirmation page needs.** The page uses `settings.emailChange.confirmPrompt` and `settings.emailChange.confirmButton`; a project scaffolded before 0.12.1 lacks them and shows the raw keys. The command now says so and points to `npx luckystack check-i18n`.
+- **Switching email to SMTP or Resend adds the transport package.** `luckystack manage` added `@luckystack/email` and the env placeholders but not `nodemailer` or `resend`, so the server stopped at startup asking to install it. It now adds `nodemailer` `^10.0.0` or `resend` `^6.0.0` (the ranges a new scaffold gets), removes the previous adapter's package when switching away, and lists both in the preview.
 - **`luckystack remove login` no longer reports hand-edited README sections on an untouched README.** It looked for login paragraphs that current READMEs no longer have and counted each as hand-edited. Only a paragraph that is still recognisable but was changed is reported now.
 
 ### Upgrading a project scaffolded before 0.12

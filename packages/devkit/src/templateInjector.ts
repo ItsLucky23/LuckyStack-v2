@@ -603,7 +603,13 @@ const checkPagePlacement = (filePath: string, srcRelativePath: string | null): s
 //? silence all lint, and once the file is clean ESLint reports it as an unused
 //? directive. Only these leading lines go; a disable further down is kept.
 const TEMPLATE_LINT_HEADER = /^(?:\/\* eslint-disable(?: unicorn\/no-abusive-eslint-disable)? \*\/[^\S\r\n]*\r?\n)+(?:[^\S\r\n]*\r?\n)?/;
-const stripTemplateLintHeader = (content: string): string => content.replace(TEMPLATE_LINT_HEADER, '');
+const BYTE_ORDER_MARK = String.fromCodePoint(0xFE_FF);
+const stripTemplateLintHeader = (content: string): string => {
+  //? An editor may save a consumer template with a byte-order mark before the
+  //? header; it goes with the header.
+  const unmarked = content.startsWith(BYTE_ORDER_MARK) ? content.slice(1) : content;
+  return TEMPLATE_LINT_HEADER.test(unmarked) ? unmarked.replace(TEMPLATE_LINT_HEADER, '') : content;
+};
 
 /**
  * Substitutes `{{REL_PATH}}`, `{{PAGE_PATH}}`, and `{{SYNC_NAME}}` placeholders

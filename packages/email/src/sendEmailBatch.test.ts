@@ -7,6 +7,8 @@ import {
   registerErrorTracker,
   registerErrorTrackers,
   registerHook,
+  registerLogger,
+  resetLoggerForTests,
   type EmailMessage,
   type EmailResult,
   type EmailSendContext,
@@ -260,6 +262,41 @@ describe('sendEmailBatch', () => {
     expect(result.counts).toMatchObject({ notSent: 10 });
   });
 
+  it('gives a slot reserved by a mail of a sender blocked meanwhile to the next mail', async () => {
+    const starts: number[] = [];
+    registerEmailSenders({
+      default: { name: 'main', send: async () => ({ ok: false, reason: 'quota', code: 'daily_quota_exceeded', blocksSender: true, deliveryOutcome: 'not-sent' }) },
+      secondary: {
+        name: 'secondary',
+        send: async () => {
+          starts.push(Date.now());
+          return { ok: true, id: 'b' };
+        },
+      },
+    });
+
+    const begin = Date.now();
+    //? 100 ms slots. The five waiting mails of the blocked sender used to keep
+    //? their slots, so the other sender's mails started at 600 and 700 ms.
+    const result = await sendEmailBatch({
+      concurrency: 6,
+      perSecond: 10,
+      messages: [
+        ...Array.from({ length: 6 }, (_, index) => ({ to: `a${String(index)}@example.com`, subject: 's', html: 'h' })),
+        { to: 'b0@example.com', subject: 's', html: 'h', adapter: 'secondary' },
+        { to: 'b1@example.com', subject: 's', html: 'h', adapter: 'secondary' },
+      ],
+    });
+
+    expect(result.items.map((item) => item.reason ?? item.deliveryOutcome)).toEqual([
+      'quota', ...Array.from({ length: 5 }, () => 'sender-blocked'), 'sent', 'sent',
+    ]);
+    const [first = 0, second = 0] = starts.map((start) => start - begin);
+    expect(first).toBeGreaterThanOrEqual(99);
+    expect(second - first).toBeGreaterThanOrEqual(99);
+    expect(second).toBeLessThan(450);
+  });
+
   describe('derived keys', () => {
     const keysByAddress = (sent: Sent[]) =>
       Object.fromEntries(sent.map((entry) => [String(entry.message.to), entry.context?.idempotencyKey]));
@@ -309,6 +346,31 @@ describe('sendEmailBatch', () => {
         ],
       });
       expect(sent[0]?.context?.idempotencyKey).not.toBe(sent[1]?.context?.idempotencyKey);
+    });
+
+    it('distinguishes mails that differ only in sender, copies, a header or an attachment field', async () => {
+      const sent = recordingSender();
+      const logo = { filename: 'logo.png', href: 'https://cdn.test/a.png', cid: 'logo', contentType: 'image/png' };
+      const base = { to: 'a@example.com', subject: 's', html: 'h', attachments: [logo] };
+      await sendEmailBatch({
+        idempotencyKey: 'k',
+        concurrency: 1,
+        messages: [
+          base,
+          { ...base, attachments: [{ ...logo }] },
+          { ...base, attachments: [{ ...logo, href: 'https://cdn.test/b.png' }] },
+          { ...base, attachments: [{ ...logo, cid: 'other' }] },
+          { ...base, attachments: [{ ...logo, contentType: 'image/gif' }] },
+          { ...base, headers: { 'X-Campaign': 'one' } },
+          { ...base, from: 'billing@example.com' },
+          { ...base, replyTo: 'help@example.com' },
+          { ...base, cc: 'boss@example.com' },
+          { ...base, bcc: ['audit@example.com'] },
+        ],
+      });
+      const [first, identical, ...variants] = sent.map((entry) => entry.context?.idempotencyKey);
+      expect(identical).toBe(first);
+      expect(new Set([first, ...variants]).size).toBe(variants.length + 1);
     });
 
     it('keys template messages by template and data, independent of key order', async () => {
@@ -562,6 +624,37 @@ describe('sendEmailBatch', () => {
       await sendEmailBatch({ subject: 's', html: 'h', recipients: recipients(3), signal: controller.signal });
 
       expect(events).toHaveLength(0);
+    });
+
+    it('groups a throwing hook into one event per reason, without the address', async () => {
+      const events = recordingTracker();
+      recordingSender();
+      registerLogger({ debug: () => undefined, info: () => undefined, warn: () => undefined, error: () => undefined });
+      registerHook('preEmailSend', (payload) => { throw new Error(`lookup failed for ${String(payload.message.to)}`); });
+
+      const result = await sendEmailBatch({ subject: 's', html: 'h', recipients: recipients(50) });
+      resetLoggerForTests();
+
+      //? Hook errors never stop a mail.
+      expect(result.counts.sent).toBe(50);
+      expect(events.map((event) => event.message)).toEqual(['[email] batch: preEmailSend hook threw: lookup failed for [redacted-email] (50×)']);
+      expect(events[0]?.context).toMatchObject({ count: 50, notSent: 0, unknown: 0 });
+      expect(JSON.stringify(events)).not.toContain('@example.com');
+    });
+
+    it('scrubs the address from a single send’s hook error report', async () => {
+      const events = recordingTracker();
+      const logged: unknown[] = [];
+      recordingSender();
+      registerLogger({ debug: () => undefined, info: () => undefined, warn: () => undefined, error: (message, error) => { logged.push([message, error instanceof Error ? error.message : error]); } });
+      registerHook('postEmailSend', (payload) => { throw new Error(`audit failed for ${String(payload.message.to)}`); });
+
+      const result = await sendEmail({ to: 'a@example.com', subject: 's', html: 'h' });
+      resetLoggerForTests();
+
+      expect(result.ok).toBe(true);
+      expect(events).toEqual([{ message: 'audit failed for [redacted-email]', cause: undefined, context: { hook: 'postEmailSend' } }]);
+      expect(logged).toEqual([['hook: handler for "postEmailSend" threw', 'audit failed for [redacted-email]']]);
     });
 
     it('leaves a single sendEmail reporting its own failure as before', async () => {

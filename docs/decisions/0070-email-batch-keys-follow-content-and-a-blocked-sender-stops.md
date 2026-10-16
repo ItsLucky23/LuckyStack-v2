@@ -31,8 +31,9 @@ rejected key count as refusals, and any failure without that statement is
 `unknown`. Each failed item carries the provider's error code and status.
 
 A batch key derives one key per message from the address and everything the
-recipient reads — rendered subject, HTML and text, or template and data, plus
-attachment digests — never from the position. A project's own key per
+mail carries — rendered subject, HTML and text, or template and data, plus
+sender, reply-to, copies, custom headers and attachment details and digests —
+never from the position. A project's own key per
 recipient still wins.
 
 When an adapter reports that its sender refuses all mail until an operator
