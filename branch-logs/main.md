@@ -1573,3 +1573,11 @@ PR #9 kreeg om een verwante reden nooit CI: `pull_request` draait tegen `refs/pu
 **Bewust gelaten (keuze gebruiker):** een losse `sendEmail` waarvan de adapter een fout gooit, stuurt twee tracker-events; het eerste bevat het e-mailadres onafgeschermd. Batchmail heeft dit niet.
 
 **Files:** `branch-logs/{main,INDEX}.md`. Tag `v0.13.0`.
+
+## 2026-10-16 18:20 — v0.14.0 gepubliceerd
+
+**User prompt (summary):** "1. jouw advies. 2. ja graag melden zodra 0.14 live staat … voordat je pushed … 2 opus 5.5 AIs een review ronde … fixed met 1 opus 5.5 agent en dit 2x" (werk op `feat/email-batch-0.14`, zie die log).
+
+**Release.** `c11c356` fast-forward op GitHub `main` (vanaf `69e5264`), tag `v0.14.0` → `publish.yml` run 38928667343 en `ci` run 38928662726 groen. Registry 17/17 met provenance, `latest` = 0.14.0. Vooraf: e2e-matrix 4/4 groen (prisma+sqlite op Node én Bun, bun+drizzle op beide runtimes, mongodb+resend met alle opties, auth none), `pack:dry` 18/18, `publish:dry` 17, consumentproef met strenge `tsc` (incl. `exactOptionalPropertyTypes`) en een run tegen de tarballs. Tarball-spotcheck: cli bevat `CHANGELOG.md`, email-dist bevat `sender-blocked`, `nodemailer`-peer 6–10.
+
+**Files:** `branch-logs/{main,INDEX}.md`. Tag `v0.14.0`.
