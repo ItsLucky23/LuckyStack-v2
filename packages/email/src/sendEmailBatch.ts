@@ -1,11 +1,20 @@
-//? @adr 0069
+//? @adr 0070
 import { createHash } from 'node:crypto';
 
-import { captureException, type EmailDeliveryOutcome, type EmailMessage, type EmailResult } from '@luckystack/core';
+import {
+  captureException,
+  tryCatchSync,
+  type EmailAttachment,
+  type EmailDeliveryOutcome,
+  type EmailMessage,
+  type EmailResult,
+} from '@luckystack/core';
 
+import { htmlToText } from './htmlToText';
 import { renderTokens, type TokenValues } from './renderTokens';
 import {
   normalizeIdempotencyKey,
+  resolveSender,
   scrubEmailPii,
   sendEmailWith,
   settle,
@@ -43,9 +52,10 @@ interface BatchControls {
   signal?: AbortSignal;
   /**
    * Stable key for this logical batch. Each message gets a key derived from it,
-   * its position and its address. Retry an interrupted batch with the same key
-   * and the same list; only providers with native idempotency (Resend) then
-   * skip the mails that already went out.
+   * its address and its content, so reordering or removing recipients keeps
+   * the other keys. Retry an interrupted batch with the same key; only
+   * providers with native idempotency (Resend) then skip the mails that
+   * already went out. Two identical mails to one address share a key.
    */
   idempotencyKey?: string;
   /** Larger batches are refused without sending anything. Default 500. */
@@ -56,6 +66,7 @@ interface BatchControls {
 export interface TokenBatchInput extends BatchControls {
   subject: string;
   html: string;
+  /** Plain-text body with tokens. When omitted, one is generated from each rendered HTML body. */
   text?: string;
   recipients: readonly BatchRecipient[];
   from?: string;
@@ -87,6 +98,14 @@ export interface BatchItemResult {
   ok: boolean;
   messageId?: string;
   reason?: string;
+  /**
+   * Provider error code (e.g. `daily_quota_exceeded`). A mail skipped because
+   * its sender was blocked earlier in the batch has reason `sender-blocked`
+   * and the code that blocked the sender.
+   */
+  code?: string;
+  /** Provider status: HTTP status for an API provider, SMTP reply code for SMTP. */
+  status?: number;
   deliveryOutcome: BatchDeliveryOutcome;
 }
 
@@ -122,7 +141,7 @@ interface FailureGroup {
 
 //? One tracker event per failure reason instead of one per recipient: a batch
 //? of 500 with a bad API key would otherwise send 500 identical events and use
-//? up the tracker quota (ADR 0069). The server log keeps one redacted line per
+//? up the tracker quota (ADR 0070). The server log keeps one redacted line per
 //? mail. Reasons are scrubbed because adapter-returned text can echo an address.
 const reportFailures = (groups: ReadonlyMap<string, FailureGroup>, total: number): void => {
   const entries = [...groups.entries()];
@@ -152,8 +171,50 @@ const isTokenBatch = (input: SendEmailBatchInput): input is TokenBatchInput => '
 
 const isPositiveInteger = (value: number): boolean => Number.isInteger(value) && value >= 1;
 
-const deriveKey = (batchKey: string, index: number, to: string): string =>
-  createHash('sha256').update(`${batchKey}:${String(index)}:${to.trim().toLowerCase()}`).digest('hex');
+const sha256 = (value: string | Uint8Array): string => createHash('sha256').update(value).digest('hex');
+
+//? Code-unit order, not `localeCompare`: the key must not depend on the locale.
+const compareKeys = (a: string, b: string): number => {
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
+};
+
+//? JSON with object keys sorted at every level, so equal template data always
+//? yields the same text. BigInt has no JSON form; it is written as a string.
+const stableStringify = (value: unknown): string =>
+  JSON.stringify(value, (_key, nested: unknown) => {
+    if (typeof nested === 'bigint') return nested.toString();
+    if (nested === null || typeof nested !== 'object' || Array.isArray(nested)) return nested;
+    if (Object.getPrototypeOf(nested) !== Object.prototype) return nested;
+    return Object.fromEntries(Object.entries(nested).toSorted(([a], [b]) => compareKeys(a, b)));
+  });
+
+const attachmentDigest = (attachment: EmailAttachment) => ({
+  filename: attachment.filename,
+  path: attachment.path,
+  content: attachment.content === undefined ? undefined : sha256(attachment.content),
+});
+
+//? What makes this mail this mail: address plus everything the recipient
+//? reads. Position is left out on purpose — a key tied to the position moves
+//? to another recipient when the list is reordered or shortened (ADR 0070).
+const messageFingerprint = (message: BatchMessage): string => {
+  const content = 'template' in message && message.template !== undefined
+    ? { template: message.template, data: message.data }
+    : { subject: message.subject, html: message.html, text: message.text };
+  return stableStringify({
+    to: message.to.trim().toLowerCase(),
+    ...content,
+    attachments: message.attachments?.map((attachment) => attachmentDigest(attachment)),
+  });
+};
+
+const deriveKey = (batchKey: string, index: number, message: BatchMessage): string => {
+  //? Template data that cannot be serialised (a cycle) falls back to the
+  //? position, which is still stable for an unchanged list.
+  const [error, fingerprint] = tryCatchSync(() => messageFingerprint(message));
+  return sha256(`${batchKey}:${error || fingerprint === null ? `#${String(index)}:${message.to}` : fingerprint}`);
+};
 
 const countItems = (items: readonly BatchItemResult[]): BatchCounts => ({
   total: items.length,
@@ -174,17 +235,26 @@ const toItem = (index: number, to: string, error: Error | null, result: EmailRes
     return { index, to, ok: false, reason, deliveryOutcome: 'unknown' };
   }
   if (result.ok) return { index, to, ok: true, messageId: result.id, deliveryOutcome: 'sent' };
-  return { index, to, ok: false, reason: result.reason, deliveryOutcome: result.deliveryOutcome ?? 'unknown' };
+  return {
+    index,
+    to,
+    ok: false,
+    reason: result.reason,
+    ...(result.code === undefined ? {} : { code: result.code }),
+    ...(result.status === undefined ? {} : { status: result.status }),
+    deliveryOutcome: result.deliveryOutcome ?? 'unknown',
+  };
 };
 
 const buildTokenMessage = (input: TokenBatchInput, recipient: BatchRecipient, index: number): BatchMessage => {
   const values = recipient.values ?? {};
   const attachments = [...(input.attachments ?? []), ...(recipient.attachments ?? [])];
+  const html = renderTokens(input.html, values);
   return {
     to: recipient.to,
     subject: renderTokens(recipient.subject ?? input.subject, values, { escape: 'none' }),
-    html: renderTokens(input.html, values),
-    text: input.text === undefined ? undefined : renderTokens(input.text, values, { escape: 'none' }),
+    html,
+    text: input.text === undefined ? htmlToText(html) : renderTokens(input.text, values, { escape: 'none' }),
     from: input.from,
     replyTo: input.replyTo,
     cc: index === 0 ? input.cc : undefined,
@@ -272,16 +342,29 @@ export const sendEmailBatch = async (input: SendEmailBatchInput): Promise<BatchR
     failures.set(key, group);
   };
 
+  //? Sender name → the provider code that blocked it. Once a sender reports
+  //? that it refuses all mail (quota used up, key rejected), the rest of its
+  //? mails are skipped instead of each collecting the same refusal; mails
+  //? routed to another sender carry on.
+  const blockedSenders = new Map<string, string>();
+
   const sendOne = async (index: number): Promise<BatchItemResult> => {
     const message = messageAt(index);
-    const idempotencyKey = message.idempotencyKey ?? (batchKey ? deriveKey(batchKey, index, message.to) : undefined);
+    const senderName = resolveSender({ ...message, signal })?.name;
+    const blockedBy = senderName === undefined ? undefined : blockedSenders.get(senderName);
+    if (blockedBy !== undefined) return { ...notSent(index, message.to, 'sender-blocked'), code: blockedBy };
+
+    const idempotencyKey = message.idempotencyKey ?? (batchKey ? deriveKey(batchKey, index, message) : undefined);
     //? An object, not a `let`: the flag flips inside a callback, which control
     //? flow analysis cannot see.
     const state = { reported: false };
     const [error, result] = await settle(() => sendEmailWith({ ...message, signal, idempotencyKey }, {
-      onFailure: (failure) => {
+      onFailure: (failure, failedSender) => {
         state.reported = true;
         recordFailure(failure.reason, failure.deliveryOutcome ?? 'unknown', failure.cause);
+        if (failure.blocksSender === true && !blockedSenders.has(failedSender)) {
+          blockedSenders.set(failedSender, failure.code ?? failure.reason);
+        }
       },
     }));
     const item = toItem(index, message.to, error, result);

@@ -1,4 +1,4 @@
-//? `{{token}}` substitution for batch mail (ADR 0069). Deliberately not a
+//? `{{token}}` substitution for batch mail (ADR 0070). Deliberately not a
 //? template language: no conditionals, loops or nested lookups. Projects that
 //? need logic register an `EmailTemplate` and pass `data` instead.
 

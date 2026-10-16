@@ -104,7 +104,7 @@ export type SendEmailInput =
 //? returns `{ ok: false, reason: 'no-sender' }`. Silently routing to a
 //? different adapter (e.g. the default) would be a confused-deputy: security
 //? mail (e.g. GDPR notifications) must go through the intended sender or fail.
-const resolveSender = (input: SendEmailInput) => {
+export const resolveSender = (input: SendEmailInput) => {
   if (input.adapter) {
     const named = getEmailSenderByName(input.adapter);
     if (named) return named;
@@ -379,7 +379,7 @@ const reportSendOutcome = (
   }
 
   if (internals.onFailure) {
-    internals.onFailure(result);
+    internals.onFailure(result, senderName);
     return;
   }
   captureException(result.cause ?? new Error(`Email send failed: ${result.reason}`), {
@@ -409,9 +409,9 @@ export interface SendEmailInternals {
   /**
    * Receives a failed send instead of the per-mail tracker capture, so
    * `sendEmailBatch` can report one event per failure reason rather than one
-   * per recipient (ADR 0069). Logging is unchanged.
+   * per recipient (ADR 0070). Logging is unchanged.
    */
-  onFailure?: (failure: Extract<EmailResult, { ok: false }>) => void;
+  onFailure?: (failure: Extract<EmailResult, { ok: false }>, senderName: string) => void;
 }
 
 //? Like `tryCatch`, but without its automatic tracker capture: in a batch the
@@ -449,7 +449,7 @@ export const sendEmailWith = async (input: SendEmailInput, internals: SendEmailI
     }
 
     //? Every failure returned before `sender.send` is definitively not-sent;
-    //? `sendEmailBatch` reads a missing outcome as `unknown` (ADR 0069).
+    //? `sendEmailBatch` reads a missing outcome as `unknown` (ADR 0070).
     return { ok: false, reason: 'no-sender', deliveryOutcome: 'not-sent' };
   }
 

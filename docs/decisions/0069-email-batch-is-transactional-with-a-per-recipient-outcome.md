@@ -1,7 +1,7 @@
 ---
 name: email-batch-is-transactional-with-a-per-recipient-outcome
 title: Batch email is transactional mail sent one message at a time, with an outcome per recipient
-status: accepted
+status: superseded
 date: 2026-10-15
 deciders: [ItsLucky23]
 tags: [email, reliability, idempotency, scope]

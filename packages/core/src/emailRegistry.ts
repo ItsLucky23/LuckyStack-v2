@@ -96,6 +96,16 @@ export type EmailResult =
        * whose delivery semantics are adapter-specific.
        */
       deliveryOutcome?: EmailDeliveryOutcome;
+      /** The provider's own error code, e.g. Resend `daily_quota_exceeded` or nodemailer `EAUTH`. */
+      code?: string;
+      /** HTTP status for an API provider, SMTP reply code for SMTP. */
+      status?: number;
+      /**
+       * The sender refuses every message until an operator acts (quota used up,
+       * credentials rejected); retrying the next message is pointless.
+       * `sendEmailBatch` stops at the first such failure.
+       */
+      blocksSender?: boolean;
     };
 
 export interface EmailSendContext {

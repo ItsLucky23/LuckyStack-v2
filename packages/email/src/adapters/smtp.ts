@@ -60,10 +60,19 @@ export const SmtpSender = (options: SmtpSenderOptions): EmailSender => {
 
       const [error, info] = await tryCatch(() => transporter.sendMail(toProviderPayload(message, fromAddress)));
       if (error) {
+        //? nodemailer puts its own code (`EAUTH`, `ECONNECTION`, …) and the SMTP
+        //? reply code on the error. Rejected credentials fail before any message
+        //? data is sent and fail every following mail the same way.
+        const code = 'code' in error && typeof error.code === 'string' ? error.code : undefined;
+        const status = 'responseCode' in error && typeof error.responseCode === 'number' ? error.responseCode : undefined;
+        const blocksSender = code === 'EAUTH';
         return {
           ok: false,
           reason: error.message || 'smtp-error',
           cause: error,
+          ...(code === undefined ? {} : { code }),
+          ...(status === undefined ? {} : { status }),
+          ...(blocksSender ? { blocksSender: true, deliveryOutcome: 'not-sent' as const } : {}),
         };
       }
       return { ok: true, id: String(info?.messageId ?? `smtp-${String(Date.now())}`) };

@@ -5,6 +5,19 @@ All notable changes to `@luckystack/email` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.14.0] - 2026-10-16
+
+### Added
+
+- **Error code and status per batch item.** `BatchItemResult` now has `code` and `status` when the adapter supplies them, so a project can tell a used-up quota from a rejected address.
+- **A blocked sender stops its part of the batch.** When a mail fails with `blocksSender` (Resend: daily or monthly quota used up, missing/invalid/restricted API key; SMTP: rejected login), the remaining mails for that sender are skipped as `not-sent` with reason `sender-blocked` and the code that blocked it, instead of each collecting the same refusal. Mails routed to another sender continue. A per-second rate limit does not block.
+- **Generated plain text.** A token batch without `text` gets a plain-text body generated from each rendered HTML body (links keep their target). Pass `text` to keep your own.
+
+### Changed
+
+- **Derived batch keys follow address and content, not position.** The per-mail key now comes from the batch key, the address and what the recipient reads (rendered subject/HTML/text, or template and data, plus attachment digests). Reordering or removing rows no longer moves keys onto other recipients. Two identical mails to one address share a key; changing the shared content between attempts changes every key. A batch interrupted on 0.13 and retried on 0.14 derives different keys, so finish such a retry before upgrading or give recipients their own keys.
+- **Resend and SMTP pass the provider's error code and status through.** Resend also marks a rejected API key as `not-sent` (it is refused before any mail is accepted), and SMTP marks a rejected login (`EAUTH`) as `not-sent`.
+
 ## [0.13.0] - 2026-10-15
 
 ### Added

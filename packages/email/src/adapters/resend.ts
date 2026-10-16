@@ -14,12 +14,22 @@ interface ResendClient {
   emails: {
     send: (input: Record<string, unknown>, options?: { idempotencyKey?: string }) => Promise<{
       data: { id: string } | null;
-      error: { message?: string; statusCode?: number | null } | null;
+      error: { message?: string; statusCode?: number | null; name?: string } | null;
     }>;
   };
 }
 
 const localRequire = createRequire(import.meta.url);
+
+//? Resend error names after which no mail can go out until an operator acts.
+//? `rate_limit_exceeded` is absent on purpose: it clears within a second.
+const SENDER_BLOCKING_CODES = new Set([
+  'daily_quota_exceeded',
+  'monthly_quota_exceeded',
+  'invalid_api_key',
+  'missing_api_key',
+  'restricted_api_key',
+]);
 
 //? Wraps the official `resend` npm package. Imported dynamically so projects
 //? that don't use this adapter don't need `resend` installed. Returns
@@ -80,11 +90,23 @@ export const ResendSender = (options: ResendSenderOptions): EmailSender => {
       );
 
       if (error) {
-        //? 429 (rate limit or daily/monthly quota) is a refusal before Resend
-        //? accepted the mail, so it is definitively not-sent. Other errors keep
-        //? no outcome: a 5xx or dropped connection may still have been accepted.
-        const rejected = error.statusCode === 429 ? { deliveryOutcome: 'not-sent' as const } : {};
-        return { ok: false, reason: error.message || 'resend-error', cause: error, ...rejected }; // eslint-disable-line @typescript-eslint/prefer-nullish-coalescing -- empty `message` should fall back too
+        const status = typeof error.statusCode === 'number' ? error.statusCode : undefined;
+        //? A used-up quota or a rejected key refuses every following mail too.
+        const blocksSender = error.name !== undefined && SENDER_BLOCKING_CODES.has(error.name);
+        //? 429 (rate limit or quota) and a rejected key are refusals before
+        //? Resend accepted the mail, so they are definitively not-sent. Other
+        //? errors keep no outcome: a 5xx or dropped connection may still have
+        //? been accepted.
+        const refused = status === 429 || blocksSender;
+        return {
+          ok: false,
+          reason: error.message || 'resend-error', // eslint-disable-line @typescript-eslint/prefer-nullish-coalescing -- empty `message` should fall back too
+          cause: error,
+          ...(error.name === undefined ? {} : { code: error.name }),
+          ...(status === undefined ? {} : { status }),
+          ...(refused ? { deliveryOutcome: 'not-sent' as const } : {}),
+          ...(blocksSender ? { blocksSender: true } : {}),
+        };
       }
       if (!data) {
         return { ok: false, reason: 'no-response-data' };

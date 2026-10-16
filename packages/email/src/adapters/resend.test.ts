@@ -114,10 +114,40 @@ describe('ResendSender', () => {
   });
 
   it('leaves a 5xx without an outcome, since Resend may have accepted the mail', async () => {
-    sendMock.mockResolvedValue({ data: null, error: { message: 'Internal error', statusCode: 500 } });
+    sendMock.mockResolvedValue({ data: null, error: { message: 'Internal error', statusCode: 500, name: 'internal_server_error' } });
     const sender = ResendSender({ apiKey: 'rk_123' });
     const result = await sender.send(message);
-    if (!result.ok) expect(result.deliveryOutcome).toBeUndefined();
+    expect(result).toMatchObject({ ok: false, code: 'internal_server_error', status: 500 });
+    if (!result.ok) {
+      expect(result.deliveryOutcome).toBeUndefined();
+      expect(result.blocksSender).toBeUndefined();
+    }
+  });
+
+  it('passes the Resend error name and status through as code and status', async () => {
+    sendMock.mockResolvedValue({ data: null, error: { message: 'Invalid `to`', statusCode: 422, name: 'validation_error' } });
+    const sender = ResendSender({ apiKey: 'rk_123' });
+    expect(await sender.send(message)).toMatchObject({ ok: false, code: 'validation_error', status: 422 });
+  });
+
+  it.each([
+    ['daily_quota_exceeded', 429],
+    ['monthly_quota_exceeded', 429],
+    ['invalid_api_key', 403],
+    ['restricted_api_key', 401],
+    ['missing_api_key', 401],
+  ])('marks %s as blocking the sender and not-sent', async (name, statusCode) => {
+    sendMock.mockResolvedValue({ data: null, error: { message: 'refused', statusCode, name } });
+    const sender = ResendSender({ apiKey: 'rk_123' });
+    expect(await sender.send(message)).toMatchObject({ ok: false, code: name, status: statusCode, blocksSender: true, deliveryOutcome: 'not-sent' });
+  });
+
+  it('does not block the sender on a per-second rate limit', async () => {
+    sendMock.mockResolvedValue({ data: null, error: { message: 'Too many requests', statusCode: 429, name: 'rate_limit_exceeded' } });
+    const sender = ResendSender({ apiKey: 'rk_123' });
+    const result = await sender.send(message);
+    expect(result).toMatchObject({ ok: false, deliveryOutcome: 'not-sent' });
+    if (!result.ok) expect(result.blocksSender).toBeUndefined();
   });
 
   it('falls back to a generic reason when the provider error has no message', async () => {

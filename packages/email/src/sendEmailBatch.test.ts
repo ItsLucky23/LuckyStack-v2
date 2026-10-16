@@ -1,10 +1,9 @@
-import { createHash } from 'node:crypto';
-
 import { beforeEach, describe, expect, it } from 'vitest';
 
 import {
   clearAllHooks,
   registerEmailSender,
+  registerEmailSenders,
   registerErrorTracker,
   registerErrorTrackers,
   registerHook,
@@ -225,18 +224,133 @@ describe('sendEmailBatch', () => {
     }
   });
 
-  it('derives a stable key per message from the batch key, position and address', async () => {
-    const sent = recordingSender();
-    const run = () => sendEmailBatch({
-      subject: 's', html: 'h', idempotencyKey: 'invoices:2026-10', concurrency: 1,
-      recipients: [{ to: 'A@Example.com' }, { to: 'b@example.com', idempotencyKey: 'own-key' }],
+  describe('derived keys', () => {
+    const keysByAddress = (sent: Sent[]) =>
+      Object.fromEntries(sent.map((entry) => [String(entry.message.to), entry.context?.idempotencyKey]));
+    const invoices = [
+      { to: 'a@example.com', values: { amount: 10 } },
+      { to: 'b@example.com', values: { amount: 20 } },
+      { to: 'c@example.com', values: { amount: 30 } },
+    ];
+    const run = (recipients: typeof invoices) =>
+      sendEmailBatch({ subject: 'Invoice', html: '<p>{{amount}}</p>', idempotencyKey: 'invoices:2026-10', recipients });
+
+    it('keeps every key when the list is reordered or shortened', async () => {
+      const first = recordingSender();
+      await run(invoices);
+      const second = recordingSender();
+      await run([invoices[2], invoices[0]].filter((entry) => entry !== undefined));
+
+      const before = keysByAddress(first);
+      expect(keysByAddress(second)).toEqual({ 'c@example.com': before['c@example.com'], 'a@example.com': before['a@example.com'] });
+      expect(new Set(Object.values(before)).size).toBe(3);
+      for (const key of Object.values(before)) expect(key).toMatch(/^[0-9a-f]{64}$/);
     });
 
-    await run();
-    await run();
+    it('changes the key when the content for that address changes, and ignores address case', async () => {
+      const first = recordingSender();
+      await run(invoices);
+      const second = recordingSender();
+      await run([{ to: 'A@Example.com', values: { amount: 10 } }, { to: 'b@example.com', values: { amount: 99 } }]);
 
-    const expected = createHash('sha256').update('invoices:2026-10:0:a@example.com').digest('hex');
-    expect(sent.map((entry) => entry.context?.idempotencyKey)).toEqual([expected, 'own-key', expected, 'own-key']);
+      expect(keysByAddress(second)['A@Example.com']).toBe(keysByAddress(first)['a@example.com']);
+      expect(keysByAddress(second)['b@example.com']).not.toBe(keysByAddress(first)['b@example.com']);
+    });
+
+    it('gives two identical mails to one address the same key', async () => {
+      const sent = recordingSender();
+      await run([invoices[0], invoices[0]].filter((entry) => entry !== undefined));
+      expect(sent[0]?.context?.idempotencyKey).toBe(sent[1]?.context?.idempotencyKey);
+    });
+
+    it('distinguishes mails that differ only in an attachment', async () => {
+      const sent = recordingSender();
+      await sendEmailBatch({
+        subject: 's', html: 'h', idempotencyKey: 'k',
+        recipients: [
+          { to: 'a@example.com', attachments: [{ filename: 'invoice.pdf', content: 'one' }] },
+          { to: 'a@example.com', attachments: [{ filename: 'invoice.pdf', content: 'two' }] },
+        ],
+      });
+      expect(sent[0]?.context?.idempotencyKey).not.toBe(sent[1]?.context?.idempotencyKey);
+    });
+
+    it('keys template messages by template and data, independent of key order', async () => {
+      registerEmailTemplate('t', { subject: () => 's', render: () => ({ html: 'h', text: 't' }) });
+      const sent = recordingSender();
+      await sendEmailBatch({
+        idempotencyKey: 'k',
+        messages: [
+          { to: 'a@example.com', template: 't', data: { x: 1, y: { b: 2, a: 1n } } },
+          { to: 'a@example.com', template: 't', data: { y: { a: 1n, b: 2 }, x: 1 } },
+          { to: 'a@example.com', template: 't', data: { x: 2 } },
+        ],
+      });
+      const keys = sent.map((entry) => entry.context?.idempotencyKey);
+      expect(keys[0]).toBe(keys[1]);
+      expect(keys[2]).not.toBe(keys[0]);
+    });
+
+    it('lets a recipient key win over the derived one', async () => {
+      const sent = recordingSender();
+      await sendEmailBatch({ subject: 's', html: 'h', idempotencyKey: 'k', recipients: [{ to: 'a@example.com', idempotencyKey: 'invoice-123' }] });
+      expect(sent[0]?.context?.idempotencyKey).toBe('invoice-123');
+    });
+  });
+
+  it('generates a plain-text body from the rendered HTML when no text is given', async () => {
+    const sent = recordingSender();
+    await sendEmailBatch({
+      subject: 's', html: '<p>Hi {{name}},</p><p><a href="https://app.test/i/{{id}}">Open</a></p>',
+      recipients: [{ to: 'a@example.com', values: { name: '<Ann>', id: 7 } }],
+    });
+    expect(sent[0]?.message.text).toBe('Hi <Ann>,\n\nOpen (https://app.test/i/7)');
+  });
+
+  it('keeps an explicit text body instead of generating one', async () => {
+    const sent = recordingSender();
+    await sendEmailBatch({ subject: 's', html: '<p>x</p>', text: 'Own {{n}}', recipients: [{ to: 'a@example.com', values: { n: 1 } }] });
+    expect(sent[0]?.message.text).toBe('Own 1');
+  });
+
+  it('carries the provider code and status on each failed item', async () => {
+    recordingSender(() => ({ ok: false, reason: 'Too many requests', code: 'rate_limit_exceeded', status: 429, deliveryOutcome: 'not-sent' }));
+    const result = await sendEmailBatch({ subject: 's', html: 'h', recipients: recipients(1) });
+    expect(result.items[0]).toMatchObject({ code: 'rate_limit_exceeded', status: 429, deliveryOutcome: 'not-sent' });
+  });
+
+  it('skips the rest of a blocked sender’s mails instead of trying each one', async () => {
+    const sent = recordingSender(() => ({
+      ok: false, reason: 'You have reached your daily quota', code: 'daily_quota_exceeded', status: 429,
+      deliveryOutcome: 'not-sent', blocksSender: true,
+    }));
+
+    const result = await sendEmailBatch({ subject: 's', html: 'h', recipients: recipients(5), concurrency: 1 });
+
+    expect(sent).toHaveLength(1);
+    expect(result.items[0]).toMatchObject({ code: 'daily_quota_exceeded', deliveryOutcome: 'not-sent' });
+    expect(result.items.slice(1).map((item) => [item.reason, item.code, item.deliveryOutcome])).toEqual(
+      Array.from({ length: 4 }, () => ['sender-blocked', 'daily_quota_exceeded', 'not-sent']),
+    );
+    expect(result.counts).toMatchObject({ notSent: 5, unknown: 0 });
+  });
+
+  it('keeps sending through other senders when one is blocked', async () => {
+    registerEmailSenders({
+      default: { name: 'main', send: async () => ({ ok: false, reason: 'quota', code: 'daily_quota_exceeded', blocksSender: true, deliveryOutcome: 'not-sent' }) },
+      secondary: { name: 'secondary', send: async () => ({ ok: true, id: 'b' }) },
+    });
+
+    const result = await sendEmailBatch({
+      concurrency: 1,
+      messages: [
+        { to: 'a@example.com', subject: 's', html: 'h' },
+        { to: 'b@example.com', subject: 's', html: 'h' },
+        { to: 'c@example.com', subject: 's', html: 'h', adapter: 'secondary' },
+      ],
+    });
+
+    expect(result.items.map((item) => item.reason ?? item.deliveryOutcome)).toEqual(['quota', 'sender-blocked', 'sent']);
   });
 
   it('sends no key when the batch has none', async () => {
