@@ -96,6 +96,39 @@ describe('publish.yml — a green ci run gates the real publish (sweep 113)', ()
   it('has permission to read workflow runs', () => {
     expect(publishYml).toMatch(/permissions:[\s\S]*?\n\s+actions: read/);
   });
+
+  //? Review 1 finding 8: one transient `gh api` error ended the step (the shell
+  //? exits on the first failing command), and a run that a later push cancelled
+  //? was reported without saying so.
+  const gateStep = (): string => publishYml.slice(stepIndex(publishYml, gate), stepIndex(publishYml, 'Ensure provenance-capable npm'));
+
+  it('retries a failed gh api call instead of ending the step', () => {
+    expect(gateStep()).toMatch(/if runs=\$\(gh api /);
+    expect(gateStep()).toContain('retrying');
+  });
+
+  it('names a cancelled run and how to recover', () => {
+    expect(gateStep()).toContain('was cancelled or failed');
+    expect(gateStep()).toContain('Re-run ci for this commit');
+  });
+
+  const jq = spawnSync('jq', ['--version']).status === 0;
+  const runVerdict = (runs: { status: string; conclusion: string | null }[]): string => {
+    const program = /verdict='([^']+)'/.exec(gateStep())?.[1];
+    if (!program) throw new Error('verdict program not found in publish.yml');
+    const result = spawnSync('jq', ['-r', program], { input: JSON.stringify(runs), encoding: 'utf8' });
+    return result.stdout.trim();
+  };
+
+  it.skipIf(!jq).each([
+    ['success', [{ status: 'completed', conclusion: 'failure' }, { status: 'completed', conclusion: 'success' }]],
+    ['failed', [{ status: 'completed', conclusion: 'failure' }]],
+    ['failed', [{ status: 'completed', conclusion: 'cancelled' }]],
+    ['none', []],
+    ['pending', [{ status: 'in_progress', conclusion: null }, { status: 'completed', conclusion: 'cancelled' }]],
+  ] as const)('decides %s for %j', (expected, runs) => {
+    expect(runVerdict([...runs])).toBe(expected);
+  });
 });
 
 describe('workflow npm scripts exist (sweep 115)', () => {

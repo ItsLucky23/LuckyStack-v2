@@ -103,22 +103,35 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # One verdict per poll; scripts/releaseWorkflows.test.ts runs this
+          # exact program on fixture run lists.
+          verdict='if any(.[]; .conclusion == "success") then "success" elif length > 0 and all(.[]; .status == "completed") then "failed" elif length == 0 then "none" else "pending" end'
           started=$(date +%s)
           while :; do
-            runs=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${GITHUB_SHA}&per_page=50" \
-              --jq '[.workflow_runs[] | {status, conclusion}]')
             elapsed=$(( $(date +%s) - started ))
-            if echo "$runs" | jq -e 'any(.[]; .conclusion == "success")' > /dev/null; then
-              echo "ci succeeded for ${GITHUB_SHA}."
-              exit 0
-            fi
-            if echo "$runs" | jq -e 'length > 0 and all(.[]; .status == "completed")' > /dev/null; then
-              echo "::error::No successful ci run for ${GITHUB_SHA}: ${runs}. Fix ci, re-run it, then re-run this workflow."
-              exit 1
-            fi
-            if echo "$runs" | jq -e 'length == 0' > /dev/null && [ "$elapsed" -ge 600 ]; then
-              echo "::error::No ci run exists for ${GITHUB_SHA}. Push the commit to main or a pull request before tagging it."
-              exit 1
+            # The step shell exits on the first failing command, so one
+            # transient API error used to fail a correct release. Retry it.
+            if runs=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${GITHUB_SHA}&per_page=50" \
+              --jq '[.workflow_runs[] | {status, conclusion}]'); then
+              case "$(echo "$runs" | jq -r "$verdict")" in
+                success)
+                  echo "ci succeeded for ${GITHUB_SHA}."
+                  exit 0
+                  ;;
+                failed)
+                  # ci.yml cancels a run when a later push reaches the same ref.
+                  echo "::error::ci for ${GITHUB_SHA} was cancelled or failed: ${runs}. Re-run ci for this commit, then re-run this workflow."
+                  exit 1
+                  ;;
+                none)
+                  if [ "$elapsed" -ge 600 ]; then
+                    echo "::error::No ci run exists for ${GITHUB_SHA}. Push the commit to main or a pull request before tagging it."
+                    exit 1
+                  fi
+                  ;;
+              esac
+            else
+              echo "::warning::Reading the ci runs for ${GITHUB_SHA} failed; retrying."
             fi
             if [ "$elapsed" -ge 3000 ]; then
               echo "::error::Timed out waiting for ci on ${GITHUB_SHA}: ${runs}"
