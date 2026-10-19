@@ -61,7 +61,10 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
     //? property checks against `BaseSessionLayout` — `preferences` lives on
     //? the project's extended `SessionLayout`, not the framework shape.
     const merged = { ...user, preferences: updated.preferences };
-    await functions.session.saveSession(user.token, merged);
+    //? `onlyIfExists`: a logout or revoke that lands during the DB write above
+    //? must not be undone by writing back the session this request read.
+    const saved = await functions.session.saveSession(user.token, merged, undefined, { onlyIfExists: true });
+    if (!saved.ok) return { status: 'error', errorCode: saved.errorCode };
   }
 
   return { status: 'success', result: { preferences: sanitized } };

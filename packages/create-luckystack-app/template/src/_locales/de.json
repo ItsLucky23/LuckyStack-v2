@@ -234,7 +234,8 @@
     "invalidFormat": "Ungültiges Avatar-Format."
   },
   "session": {
-    "invalid": "Sitzung ist ungültig."
+    "invalid": "Sitzung ist ungültig.",
+    "notFound": "Deine Sitzung wurde beendet. Melde dich erneut an."
   },
   "docs": {
     "documentation": "Dokumentation",

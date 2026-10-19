@@ -232,7 +232,8 @@
     "invalidFormat": "Invalid avatar format."
   },
   "session": {
-    "invalid": "Session is invalid."
+    "invalid": "Session is invalid.",
+    "notFound": "Your session has ended. Sign in again."
   },
   "docs": {
     "documentation": "Documentation",

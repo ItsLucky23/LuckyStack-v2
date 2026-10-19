@@ -234,7 +234,8 @@
     "invalidFormat": "Format d'avatar invalide."
   },
   "session": {
-    "invalid": "Session invalide."
+    "invalid": "Session invalide.",
+    "notFound": "Votre session a pris fin. Reconnectez-vous."
   },
   "docs": {
     "documentation": "Documentation",

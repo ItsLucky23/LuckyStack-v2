@@ -106,7 +106,10 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
     data: newData
   })
 
-  await functions.session.saveSession(user.token, { ...user, ...newData });
+  //? `onlyIfExists`: a logout or revoke that lands during the DB write above
+  //? must not be undone by writing back the session this request read.
+  const saved = await functions.session.saveSession(user.token, { ...user, ...newData }, undefined, { onlyIfExists: true });
+  if (!saved.ok) return { status: 'error', errorCode: saved.errorCode };
 
   return { status: 'success', result: {} }
 };
