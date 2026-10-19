@@ -130,3 +130,27 @@ describe('runGracefulShutdown — isolation + bounded timeout', () => {
     expect(spies.subQuit).toHaveBeenCalledOnce();
   });
 });
+
+describe('runGracefulShutdown — real http + socket.io server (finding 086)', () => {
+  it('a normal shutdown logs no io-close failure (io.close re-closing the http server is expected)', async () => {
+    const { createServer } = await import('node:http');
+    const { Server } = await import('socket.io');
+    const httpServer = createServer();
+    const ioServer = new Server(httpServer);
+    await new Promise<void>((resolve) => { httpServer.listen(0, '127.0.0.1', resolve); });
+    const { deps } = makeDeps();
+
+    await runGracefulShutdown({ ...deps, httpServer, ioServer }, { timeoutMs: 2000 });
+
+    expect(mocks.logger.warn).not.toHaveBeenCalled();
+    expect(httpServer.listening).toBe(false);
+  });
+
+  it('other io.close errors are still surfaced', async () => {
+    const { deps } = makeDeps({ ioClose: (cb) => { (cb as (err: Error) => void)(new Error('engine boom')); } });
+
+    await runGracefulShutdown(deps, { timeoutMs: 2000 });
+
+    expect(mocks.logger.warn).toHaveBeenCalledWith('[shutdown] step "io-close" failed: engine boom');
+  });
+});

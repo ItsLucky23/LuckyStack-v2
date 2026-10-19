@@ -77,7 +77,10 @@ export const handleStaticAndSpaFallback: HttpRouteHandler = async ({
       res.end('Not Found');
       return true;
     }
-    await options.serveFile(req, res);
+    //? Rewrite to the query-less path like the other branches: a raw
+    //? `/logo.png?v=2` made a consumer's `path.extname(req.url)` read `.png?v=2`
+    //? and 404 a file that exists.
+    await serveWithRewrittenUrl(options.serveFile, req, res, routePath);
     return true;
   }
 

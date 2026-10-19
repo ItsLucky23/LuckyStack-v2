@@ -63,7 +63,13 @@ const closeIoServer = (ioServer: SocketIOServer): Promise<void> =>
     //? completion off the callback, so explicitly ignore the returned promise.
     //? Surface the callback error (forwarded from the underlying http close) so
     //? the caller's `withTimeout` tryCatch logs it instead of swallowing it.
-    void ioServer.close((error) => { if (error) reject(error); else resolve(); });
+    //? Except ERR_SERVER_NOT_RUNNING: `io.close()` re-closes the attached HTTP
+    //? server, which `runGracefulShutdown` already closed first — so that error
+    //? is the expected outcome of every normal shutdown, not a failed step.
+    void ioServer.close((error) => {
+      if (error && (error as NodeJS.ErrnoException).code !== 'ERR_SERVER_NOT_RUNNING') reject(error);
+      else resolve();
+    });
   });
 
 const quitRedisClient = async (client: RedisClient): Promise<void> => {

@@ -157,6 +157,11 @@ export const listenLuckyStackServer = (
 
     const tryListen = (attemptPort: number): void => {
       const onError = (err: NodeJS.ErrnoException): void => {
+        //? The failed attempt's 'listening' handler must go: a listen that fails
+        //? with EADDRINUSE leaves it registered, so on a later successful hop
+        //? every earlier attempt's handler would fire too (consumer callback and
+        //? success log run once per failed port + 1).
+        httpServer.off('listening', onListening);
         if (err.code !== 'EADDRINUSE') {
           reject(err);
           return;
@@ -190,8 +195,8 @@ export const listenLuckyStackServer = (
         reject(err);
       };
 
-      httpServer.once('error', onError);
-      httpServer.listen(attemptPort, ip, () => {
+      //? A function declaration (hoisted) so `onError` above can unregister it.
+      function onListening(): void {
         httpServer.off('error', onError);
         const address = httpServer.address();
         const boundPort = typeof address === 'object' && address !== null
@@ -240,7 +245,11 @@ export const listenLuckyStackServer = (
         }
         callback?.();
         resolve(httpServer);
-      });
+      }
+
+      httpServer.once('error', onError);
+      httpServer.once('listening', onListening);
+      httpServer.listen(attemptPort, ip);
     };
 
     tryListen(startPort);

@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { registerLogger, resetLoggerForTests } from '@luckystack/core';
 import { createProdRuntimeMapsProvider } from './runtimeMapsLoader';
 
 afterEach(() => {
@@ -103,5 +104,38 @@ describe('createProdRuntimeMapsProvider composed presets', () => {
     await expect(provider.getRuntimeApiMaps()).rejects.toThrow(
       'api key collision: "api/system/session/v1" present in both preset "system" and preset "admin"',
     );
+  });
+});
+
+describe('createProdRuntimeMapsProvider failed preset load (finding 085)', () => {
+  afterEach(() => {
+    resetLoggerForTests();
+  });
+
+  it('logs the real cause once and retries the load on the next request', async () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    const logger = { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() };
+    registerLogger(logger);
+    const cause = new Error('Cannot find module ./generated/billing');
+    const loadGenerated = vi.fn()
+      .mockRejectedValueOnce(cause)
+      .mockRejectedValueOnce(cause)
+      .mockResolvedValue({ apis: { 'api/billing/pay/v1': { main: vi.fn() } }, syncs: {}, functions: {} });
+    const provider = createProdRuntimeMapsProvider({ preset: ['billing'], loadGenerated });
+
+    expect(Object.keys((await provider.getRuntimeApiMaps()).apisObject)).toEqual([]);
+    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('preset "billing" failed to load'), cause);
+
+    //? Second request retries (not cached) and does not repeat the error log.
+    expect(Object.keys((await provider.getRuntimeApiMaps()).apisObject)).toEqual([]);
+    expect(logger.error).toHaveBeenCalledTimes(1);
+
+    //? Third request: the module now resolves and its routes are served.
+    expect(Object.keys((await provider.getRuntimeApiMaps()).apisObject)).toEqual(['api/billing/pay/v1']);
+    expect(loadGenerated).toHaveBeenCalledTimes(3);
+
+    //? A fully successful load is cached.
+    await provider.getRuntimeApiMaps();
+    expect(loadGenerated).toHaveBeenCalledTimes(3);
   });
 });

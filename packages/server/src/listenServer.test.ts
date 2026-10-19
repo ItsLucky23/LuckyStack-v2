@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { Server as HttpServer } from 'node:http';
+import { createServer, type Server as HttpServer } from 'node:http';
 
 //? Characterization tests pinning the behaviour of the `listen` logic
 //? extracted out of `createLuckyStackServer` into `listenLuckyStackServer`.
@@ -46,8 +46,10 @@ import { listenLuckyStackServer } from './createServer';
 //? Minimal fake mirroring the bits of http.Server the listen path uses.
 class FakeHttpServer {
   private errorHandlers: ((err: NodeJS.ErrnoException) => void)[] = [];
+  //? Like node:http, a failed listen does NOT drop 'listening' handlers.
+  private listeningHandlers: (() => void)[] = [];
   public listenCalls: { port: number; ip: string }[] = [];
-  //? Configure how each `.listen()` resolves: 'success' fires the callback;
+  //? Configure how each `.listen()` resolves: 'success' fires 'listening';
   //? an error code emits to the registered `'error'` handler.
   public mode: 'success' | NodeJS.ErrnoException['code'] = 'success';
   //? When set, the Nth listen attempt (0-based) succeeds; earlier ones EADDRINUSE.
@@ -59,15 +61,17 @@ class FakeHttpServer {
 
   once(event: string, handler: (err: NodeJS.ErrnoException) => void): this {
     if (event === 'error') this.errorHandlers.push(handler);
+    if (event === 'listening') this.listeningHandlers.push(handler as () => void);
     return this;
   }
 
   off(event: string, handler: (err: NodeJS.ErrnoException) => void): this {
     if (event === 'error') this.errorHandlers = this.errorHandlers.filter((h) => h !== handler);
+    if (event === 'listening') this.listeningHandlers = this.listeningHandlers.filter((h) => h !== handler);
     return this;
   }
 
-  listen(port: number, ip: string, cb: () => void): this {
+  listen(port: number, ip: string): this {
     this.listenCalls.push({ port, ip });
     const current = this.attempt;
     this.attempt += 1;
@@ -77,7 +81,9 @@ class FakeHttpServer {
         : this.mode === 'success';
       if (shouldSucceed) {
         this.boundPort = this.reportedPort ?? port;
-        cb();
+        const handlers = this.listeningHandlers;
+        this.listeningHandlers = [];
+        for (const h of handlers) h();
       } else {
         const code = this.succeedOnAttempt !== null ? 'EADDRINUSE' : this.mode;
         const err = Object.assign(new Error(`listen ${String(code)}`), { code }) as NodeJS.ErrnoException;
@@ -205,6 +211,36 @@ describe('listenLuckyStackServer — EADDRINUSE with auto-increment', () => {
     expect(fake.listenCalls.map((c) => c.port)).toEqual([8080, 8081, 8082]);
     expect(loggerMock.warn).toHaveBeenCalledTimes(2);
     expect(loggerMock.info).toHaveBeenCalledWith('Server is running on http://127.0.0.1:8082/');
+  });
+
+  it('runs the callback and success log once after hopping past busy ports (finding 042)', async () => {
+    process.env.SERVER_PORT_AUTO_INCREMENT = '1';
+    const fake = new FakeHttpServer();
+    fake.succeedOnAttempt = 2;
+    const cb = vi.fn();
+    await listenLuckyStackServer(asServer(fake), '127.0.0.1', 8080, cb);
+    expect(cb).toHaveBeenCalledOnce();
+    expect(loggerMock.info).toHaveBeenCalledOnce();
+    expect(registerBoundAddressMock).toHaveBeenCalledOnce();
+  });
+
+  it('real http.Server: a hop past a busy port runs the callback once (finding 042)', async () => {
+    process.env.SERVER_PORT_AUTO_INCREMENT = '1';
+    const blocker = createServer();
+    await new Promise<void>((resolve) => { blocker.listen(0, '127.0.0.1', resolve); });
+    const address = blocker.address();
+    const busyPort = typeof address === 'object' && address !== null ? address.port : 0;
+    const server = createServer();
+    const cb = vi.fn();
+
+    await listenLuckyStackServer(server, '127.0.0.1', busyPort, cb);
+    //? Let any stray (leaked) 'listening' handlers run before asserting.
+    await new Promise((resolve) => { setImmediate(resolve); });
+
+    expect(cb).toHaveBeenCalledOnce();
+    expect(loggerMock.info).toHaveBeenCalledOnce();
+    await new Promise((resolve) => { server.close(resolve); });
+    await new Promise((resolve) => { blocker.close(resolve); });
   });
 
   it('rejects cleanly instead of retrying beyond TCP port 65535', async () => {
