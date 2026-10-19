@@ -220,7 +220,7 @@ export const switchOrm = (project: ConsumerProject, input: SwitchOrmInput): Resu
   });
   if (!render) {
     return err(toError(new Error(
-      `could not render a fresh scaffold via npx create-luckystack-app@${input.cliVersion} — check network/registry access.`,
+      `could not render a fresh scaffold via npx create-luckystack-app@${input.cliVersion} — the reason is printed above.`,
     )));
   }
 
