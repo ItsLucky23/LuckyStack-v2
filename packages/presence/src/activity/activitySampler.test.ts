@@ -71,7 +71,20 @@ describe('getRoomPresence room-name formatter', () => {
 
     await getRoomPresence('room-1', { io: ioStub as never });
 
-    expect(lastInRoom).toBe('tenant-A:presence:room-1');
+    expect(lastInRoom).toBe('tenant-A:broadcast:room-1');
+  });
+
+  //? 029 — sockets join content rooms under the canonical 'broadcast' purpose,
+  //? so a formatter that gives 'presence' its own family must not empty the
+  //? snapshot.
+  it('queries the room the sockets joined under a presence-branching formatter (029)', async () => {
+    const familyFormatter: RoomNameFormatter = (raw, { purpose, userId }) =>
+      purpose === 'presence' ? `p:${userId ?? '-'}:${raw}` : `t:${raw}`;
+    registerRoomNameFormatter(familyFormatter);
+
+    await getRoomPresence('room-1', { io: ioStub as never });
+
+    expect(lastInRoom).toBe('t:room-1');
   });
 });
 

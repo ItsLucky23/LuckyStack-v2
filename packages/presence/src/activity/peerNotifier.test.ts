@@ -78,8 +78,29 @@ describe('peerNotifier room-name formatter + userLeft', () => {
 
       await informRoomPeers({ token: 'tok', io: ioStub as never, event: socketEventNames.userBack });
 
-      expect(lastInRoom).toBe('tenant-A:presence:room-1');
+      expect(lastInRoom).toBe('tenant-A:broadcast:room-1');
       expect(peer.emit).toHaveBeenCalledWith('userBack', { userId: 'u1' });
+    });
+
+    //? 029 — a formatter that follows the core contract and gives 'presence' its
+    //? own family must still reach the content room the peers joined (the server
+    //? joins under the canonical 'broadcast' purpose).
+    it('reaches peers in the joined content room under a presence-branching formatter (029)', async () => {
+      const familyFormatter: RoomNameFormatter = (raw, { purpose, userId }) =>
+        purpose === 'presence' ? `p:${userId ?? '-'}:${raw}` : `t:${raw}`;
+      registerRoomNameFormatter(familyFormatter);
+      readSessionMock.mockResolvedValue({ id: 'u1', roomCodes: ['room-1'] });
+      const peer = makePeer('s2');
+      fetchSocketsByRoom = { 't:room-1': [peer] };
+      extractTokenFromSocketMock.mockReturnValue('other');
+
+      await informRoomPeers({ token: 'tok', io: ioStub as never, event: socketEventNames.userAfk });
+
+      expect(peer.emit).toHaveBeenCalledWith('userAfk', expect.objectContaining({ userId: 'u1' }));
+      expect(dispatchHookMock).toHaveBeenLastCalledWith(
+        'postPresenceUpdate',
+        expect.objectContaining({ recipientCount: 1 }),
+      );
     });
 
     it('emits to a peer present in multiple rooms only once (cross-room dedup)', async () => {

@@ -1,16 +1,8 @@
 import { Server } from 'socket.io';
 import type { RemoteSocket, DefaultEventsMap } from 'socket.io';
 
-import { dispatchHook, extractTokenFromSocket, formatRoomName, getRoomNameFormatter, defaultRoomNameFormatter, getIoInstance, getLogger, socketEventNames, readSession } from '@luckystack/core';
+import { dispatchHook, extractTokenFromSocket, formatRoomName, getIoInstance, getLogger, socketEventNames, readSession } from '@luckystack/core';
 import { ensureIo } from './state';
-
-//? Warn once when a non-identity room-name formatter is active alongside
-//? @luckystack/presence — the broadcast/snapshot side applies it but the join
-//? sites in @luckystack/server currently use raw room codes, so fan-out targets
-//? a room nobody joined → presence reaches 0 recipients. See peer-notifier.md
-//? "Known asymmetry" for the workaround (raw tenant-prefixed codes + identity
-//? formatter). This is a one-time boot-path warning, not a per-call warning.
-let nonIdentityFormatterWarned = false;
 
 //? A peer socket as returned by `io.in(room).fetchSockets()` — adapter-aware, so
 //? this is a `RemoteSocket` (which also covers locally-connected sockets).
@@ -43,26 +35,17 @@ const forEachRoomPeer = async ({
   userId: string | null,
   onPeer: (peerSocket: RoomPeerSocket) => void,
 }): Promise<void> => {
-  //? Hard startup warning: if the active formatter is non-identity, the
-  //? broadcast targets formatted physical rooms while @luckystack/server's join
-  //? sites use raw room codes → presence fan-out reaches 0 recipients. Until
-  //? the join sites are reconciled, use raw tenant-prefixed codes (identity
-  //? formatter). See peer-notifier.md §Edge cases / "Known asymmetry".
-  if (!nonIdentityFormatterWarned && getRoomNameFormatter() !== defaultRoomNameFormatter) {
-    nonIdentityFormatterWarned = true;
-    getLogger().warn(
-      'presence: a non-identity room-name formatter is registered but the join sites in @luckystack/server still use raw room codes — presence fan-out will target physical rooms that no socket has joined and reach 0 recipients. Use raw tenant-prefixed room codes with the identity formatter until the join sites are updated. See packages/presence/docs/peer-notifier.md "Known asymmetry".',
-    );
-  }
-
   const handledSockets = new Set<string>();
 
   for (const room of roomCodes) {
     //? Route the raw room code through the core room-name formatter (default
     //? identity) so a multi-tenant consumer's prefix applies here exactly as it
     //? does at the join/leave sites — otherwise two tenants sharing a room-code
-    //? string would share presence fan-out (M2/D4).
-    const physicalRoom = formatRoomName(room, { purpose: 'presence', userId });
+    //? string would share presence fan-out (M2/D4). Canonical content-room
+    //? purpose `'broadcast'` (M5): these are the content rooms the sockets
+    //? joined under `'broadcast'`, so a formatter branching on `'presence'`
+    //? would otherwise address rooms no socket is in (0 recipients).
+    const physicalRoom = formatRoomName(room, { purpose: 'broadcast', userId });
     //? `fetchSockets()` is adapter-aware: with the Redis adapter attached it
     //? returns RemoteSockets for peers on OTHER instances too, so presence
     //? broadcasts cross the instance boundary. A plain
