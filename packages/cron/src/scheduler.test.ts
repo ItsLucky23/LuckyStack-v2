@@ -5,7 +5,7 @@ const mocks = vi.hoisted(() => {
   return {
     logger,
     acquireLease: vi.fn(),
-    renewLease: vi.fn(async () => true),
+    renewLease: vi.fn(async (_name: string, _token: string, _ttlMs: number) => true),
     releaseLease: vi.fn(async () => true),
     dispatchHook: vi.fn<
       (name: string, payload?: unknown) => Promise<{ stopped: boolean; signal?: unknown }>
@@ -15,6 +15,10 @@ const mocks = vi.hoisted(() => {
       hset: vi.fn(async () => 1),
       hincrby: vi.fn(async () => 1),
       hgetall: vi.fn(async () => ({})),
+      //? Interval anchor reads (031): no last run, the NX claim wins → "now".
+      hget: vi.fn(async (): Promise<string | null> => null),
+      set: vi.fn(async (): Promise<string | null> => 'OK'),
+      get: vi.fn(async (): Promise<string | null> => null),
     },
   };
 });
@@ -96,6 +100,9 @@ beforeEach(() => {
   mocks.renewLease.mockImplementation(async () => true);
   mocks.releaseLease.mockImplementation(async () => true);
   mocks.dispatchHook.mockImplementation(async () => ({ stopped: false as const }));
+  mocks.redis.hget.mockImplementation(async () => null);
+  mocks.redis.set.mockImplementation(async () => 'OK');
+  mocks.redis.get.mockImplementation(async () => null);
 });
 
 afterEach(() => {
@@ -325,6 +332,123 @@ describe('run behavior', () => {
     );
     releaseHandler();
     await vi.advanceTimersByTimeAsync(1);
+  });
+});
+
+//? 026 — config registered AFTER the first job (overlay files load
+//? alphabetically, so `billing.ts` runs before `config.ts`).
+describe('late registerCronConfig', () => {
+  //? A real TTL lease: renewal fails once the TTL has lapsed.
+  const useTtlLease = (): void => {
+    let expiresAt = 0;
+    mocks.acquireLease.mockImplementation(async (name: string, ttlMs: number) => {
+      if (name.startsWith('cron-run:')) return `run-token-${name}`;
+      if (Date.now() < expiresAt) return null;
+      expiresAt = Date.now() + ttlMs;
+      return 'leader-token';
+    });
+    mocks.renewLease.mockImplementation(async (name: string, _token: string, ttlMs: number) => {
+      if (name.startsWith('cron-run:')) return true;
+      if (Date.now() >= expiresAt) return false;
+      expiresAt = Date.now() + ttlMs;
+      return true;
+    });
+  };
+
+  it('re-arms the renew loop so a shorter lease does not flap leadership', async () => {
+    useTtlLease();
+    const handler = vi.fn();
+    registerCronJob({ name: 'billing', schedule: { everyMs: 60_000 }, handler });
+    registerCronConfig({ leaseTtlMs: 5000, renewIntervalMs: 1500 });
+
+    await vi.advanceTimersByTimeAsync(10 * 60_000 + 500);
+
+    expect(mocks.logger.warn).not.toHaveBeenCalledWith(expect.stringContaining('lost scheduler leadership'));
+    expect(handler).toHaveBeenCalledTimes(10);
+  });
+
+  it('re-arms the tick loop at a new tickIntervalMs', async () => {
+    const handler = vi.fn();
+    registerCronJob({ name: 'job-a', schedule: { everyMs: 1000 }, handler });
+    registerCronConfig({ tickIntervalMs: 60_000 });
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(handler).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('rejects a renew interval that is not below the lease TTL', () => {
+    expect(() => registerCronConfig({ leaseTtlMs: 5000 })).toThrow(/renewIntervalMs/);
+    expect(() => registerCronConfig({ leaseTtlMs: 5000, renewIntervalMs: 5000 })).toThrow(/renewIntervalMs/);
+    expect(() => registerCronConfig({ leaseTtlMs: 5000, renewIntervalMs: 1500 })).not.toThrow();
+  });
+});
+
+//? 031 — interval jobs resume from the persisted anchor after a restart or a
+//? leader change instead of restarting their period at "now".
+describe('interval resume after restart / leader change', () => {
+  const DAY = 24 * 3600_000;
+
+  it('runs an overdue interval job once straight away, then follows the period', async () => {
+    mocks.redis.hget.mockImplementation(async () => String(Date.now() - 2 * DAY));
+    const handler = vi.fn();
+    registerCronJob({ name: 'nightly', schedule: { everyMs: DAY }, handler });
+
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(handler).toHaveBeenCalledTimes(1);
+
+    //? No backlog replay: the two missed periods do not fire again.
+    await vi.advanceTimersByTimeAsync(DAY - 2000);
+    expect(handler).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(handler).toHaveBeenCalledTimes(2);
+  });
+
+  it('keeps the remaining period of a job that is not yet due', async () => {
+    mocks.redis.hget.mockImplementation(async () => String(Date.now() - DAY / 2));
+    const handler = vi.fn();
+    registerCronJob({ name: 'nightly', schedule: { everyMs: DAY }, handler });
+
+    await vi.advanceTimersByTimeAsync(DAY / 2 - 1000);
+    expect(handler).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('counts a never-run job from its stored first-scheduled anchor', async () => {
+    const firstScheduledAt = Date.now() - DAY - 1000;
+    mocks.redis.set.mockImplementation(async () => null); // NX lost: anchor exists
+    mocks.redis.get.mockImplementation(async () => String(firstScheduledAt));
+    const handler = vi.fn();
+    registerCronJob({ name: 'nightly', schedule: { everyMs: DAY }, handler });
+
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(handler).toHaveBeenCalledTimes(1);
+  });
+
+  it('resumes a job registered after this instance already leads', async () => {
+    registerCronJob({ name: 'anchor', schedule: '0 3 * * *', handler: vi.fn() });
+    await vi.advanceTimersByTimeAsync(1);
+    expect(isCronLeader()).toBe(true);
+
+    mocks.redis.hget.mockImplementation(async () => String(Date.now() - 2 * DAY));
+    const lateHandler = vi.fn();
+    registerCronJob({ name: 'late-nightly', schedule: { everyMs: DAY }, handler: lateHandler });
+    await vi.advanceTimersByTimeAsync(1100);
+
+    expect(lateHandler).toHaveBeenCalledTimes(1);
+  });
+
+  it('falls back to counting from now when Redis is unreachable', async () => {
+    mocks.redis.hget.mockRejectedValue(new Error('redis down'));
+    const handler = vi.fn();
+    registerCronJob({ name: 'job-a', schedule: { everyMs: 10_000 }, handler });
+
+    await vi.advanceTimersByTimeAsync(9000);
+    expect(handler).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(2000);
+    expect(handler).toHaveBeenCalledTimes(1);
   });
 });
 

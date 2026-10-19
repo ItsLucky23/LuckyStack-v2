@@ -6,7 +6,7 @@
 import { getLogger } from '@luckystack/core';
 import { getCronConfig } from './cronConfig';
 import { computeNextRun, normalizeSchedule } from './schedule';
-import { ensureCronSchedulerStarted } from './scheduler';
+import { ensureCronSchedulerStarted, resumeJobRegisteredWhileLeader } from './scheduler';
 import { jobRuntimes } from './state';
 import type { CronJobDefinition } from './types';
 
@@ -51,6 +51,7 @@ export const registerCronJob = <TTenant = unknown>(
     ranOnStart: false,
   });
   ensureCronSchedulerStarted();
+  resumeJobRegisteredWhileLeader(def.name);
   return () => {
     unregisterCronJob(def.name);
   };
