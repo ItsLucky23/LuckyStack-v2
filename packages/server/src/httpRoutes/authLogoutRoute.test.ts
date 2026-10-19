@@ -9,9 +9,18 @@ vi.mock('../capabilities', () => ({
   getLogin: () => Promise.resolve({ deleteSession: deleteSessionMock }),
 }));
 
-vi.mock('@luckystack/core', () => ({
+const { httpConfig } = vi.hoisted(() => ({
+  httpConfig: {
+    sessionCookieName: 'token',
+    sessionCookieSameSite: 'Strict',
+    sessionCookiePath: '/',
+  } as Record<string, unknown>,
+}));
+
+vi.mock('@luckystack/core', async () => ({
+  applyCookiePrefixConstraints: (await vi.importActual<typeof import('@luckystack/core')>('@luckystack/core')).applyCookiePrefixConstraints,
   getLogger: () => ({ warn: () => undefined }),
-  getProjectConfig: () => ({ http: { sessionCookieName: 'token', sessionCookieSameSite: 'Strict', sessionCookiePath: '/' } }),
+  getProjectConfig: () => ({ http: httpConfig }),
   //? Pin runtime mode to non-production so logout-cookie assertions keep the
   //? flagless default (Secure off) that this suite expects.
   isProductionRuntime: () => false,
@@ -81,6 +90,18 @@ describe('handleAuthLogoutRoute', () => {
     expect(await handleAuthLogoutRoute(ctx)).toBe(true);
     expect(deleteSessionMock).toHaveBeenCalledWith('live-token');
     expect(headers['Set-Cookie']).toContain('Max-Age=0');
+  });
+
+  it('clears the prefixed cookie with the same Path/Domain rules it was set with (finding 044)', async () => {
+    httpConfig.sessionCookiePrefix = '__Host-';
+    httpConfig.sessionCookiePath = '/app';
+    httpConfig.sessionCookieDomain = '.example.com';
+    const { ctx, headers } = makeCtx('POST', '/auth/logout');
+    await handleAuthLogoutRoute(ctx);
+    delete httpConfig.sessionCookiePrefix;
+    delete httpConfig.sessionCookieDomain;
+    httpConfig.sessionCookiePath = '/';
+    expect(headers['Set-Cookie']).toBe('__Host-token=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0; Secure;');
   });
 
   it('still clears the cookie when deleteSession throws', async () => {

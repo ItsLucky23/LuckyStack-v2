@@ -75,3 +75,20 @@ describe('extractTokenFromSocket — cookie-mode handshake-auth fallback (CORE-O
     expect(extractTokenFromSocket(makeSocket('token=cookieval', undefined))).toBe('cookieval');
   });
 });
+
+//? Finding 044: the server sets `<prefix><sessionCookieName>`, so both
+//? extractors must read the prefixed name back.
+describe('token extractors honour http.sessionCookiePrefix', () => {
+  it('read the __Host- prefixed cookie and ignore a planted unprefixed one', () => {
+    registerProjectConfig({ session: { basedToken: false }, http: { sessionCookiePrefix: '__Host-' } });
+    const cookie = 'token=planted; __Host-token=real';
+    expect(extractTokenFromRequest(makeRequest(cookie, undefined))).toBe('real');
+    expect(extractTokenFromSocket(makeSocket(cookie, undefined))).toBe('real');
+  });
+
+  it('read the __Secure- prefixed cookie', () => {
+    registerProjectConfig({ session: { basedToken: false }, http: { sessionCookiePrefix: '__Secure-' } });
+    expect(extractTokenFromRequest(makeRequest('__Secure-token=real', undefined))).toBe('real');
+    expect(extractTokenFromSocket(makeSocket('__Secure-token=real', undefined))).toBe('real');
+  });
+});

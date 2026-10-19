@@ -1,4 +1,4 @@
-import { isProductionRuntime } from '@luckystack/core';
+import { applyCookiePrefixConstraints, getProjectConfig, isProductionRuntime } from '@luckystack/core';
 
 //? Single source of truth for the session / OAuth-state cookie `Secure` flag:
 //? honor the explicit `http.sessionCookieSecure` override (CORE-39), else the
@@ -20,3 +20,36 @@ export const resolveCookieSecure = (
   if (secureEnv === 'true') return true;
   return isProductionRuntime();
 };
+
+//? The session cookie builder. Every place that sets, refreshes or clears the
+//? session cookie (login, OAuth callback, 2FA/email-code, sliding refresh,
+//? logout) goes through these, so `http.sessionCookiePrefix` and
+//? `http.sessionCookieDomain` apply everywhere: a clear that differs in name,
+//? Path or Domain from the set would leave the session cookie in the browser.
+//? The token extractors in core resolve the same prefixed name.
+
+/** Effective session cookie name: `http.sessionCookieName` plus any `__Host-`/`__Secure-` prefix. */
+export const resolveSessionCookieName = (): string => {
+  const { http } = getProjectConfig();
+  return applyCookiePrefixConstraints(http.sessionCookieName, http.sessionCookiePrefix).name;
+};
+
+/** Attribute string for the session cookie with the given lifetime (0 clears it). */
+export const buildSessionCookieOptions = (maxAgeSeconds: number): string => {
+  const { http } = getProjectConfig();
+  const constraints = applyCookiePrefixConstraints(
+    http.sessionCookieName,
+    http.sessionCookiePrefix,
+    resolveCookieSecure(http.sessionCookieSecure, process.env.SECURE),
+  );
+  const path = constraints.forcePathRoot ? '/' : http.sessionCookiePath;
+  const domain = http.sessionCookieDomain && !constraints.forbidDomain ? `Domain=${http.sessionCookieDomain}; ` : '';
+  return `HttpOnly; SameSite=${http.sessionCookieSameSite}; Path=${path}; Max-Age=${maxAgeSeconds}; ${domain}${constraints.secure ? 'Secure;' : ''}`;
+};
+
+/** Full `Set-Cookie` value carrying `token` under the effective session cookie name. */
+export const buildSessionCookie = (token: string, cookieOptions: string): string =>
+  `${resolveSessionCookieName()}=${token}; ${cookieOptions}`;
+
+/** `Set-Cookie` value that expires the session cookie (same name, Path and Domain as when set). */
+export const buildClearedSessionCookie = (): string => buildSessionCookie('', buildSessionCookieOptions(0));

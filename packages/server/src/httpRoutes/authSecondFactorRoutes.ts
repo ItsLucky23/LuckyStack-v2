@@ -18,6 +18,8 @@
 
 import { checkRateLimit, getProjectConfig, resolveClientIp } from '@luckystack/core';
 import { getLogin } from '../capabilities';
+import { toClientSession } from './clientSession';
+import { buildSessionCookie } from './sessionCookie';
 import type { HttpRouteContext, HttpRouteHandler } from './types';
 
 type LoginModule = NonNullable<Awaited<ReturnType<typeof getLogin>>>;
@@ -93,13 +95,13 @@ const sendLoginResult = async (
     if (useSessionBasedToken) {
       ctx.res.setHeader('X-Session-Token', result.newToken);
     } else {
-      ctx.res.setHeader('Set-Cookie', `${config.http.sessionCookieName}=${result.newToken}; ${ctx.sessionCookieOptions}`);
+      ctx.res.setHeader('Set-Cookie', buildSessionCookie(result.newToken, ctx.sessionCookieOptions));
     }
   }
   return json(ctx, 200, {
     status: true,
     reason: result.reason,
-    session: result.session,
+    session: toClientSession(result.session),
     authenticated: Boolean(result.newToken),
   });
 };

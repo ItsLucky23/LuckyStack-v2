@@ -4,6 +4,7 @@ import {
   allowedOrigin,
   dispatchHook,
   extractTokenFromRequest,
+  getCsrfConfig,
   getLogger,
   getParams,
   getProjectConfig,
@@ -32,15 +33,22 @@ import { handleSyncRoute } from './httpRoutes/syncRoute';
 import { handleCustomRoutes, handlePreParamsCustomRoutes } from './httpRoutes/customRoutes';
 import { handleStaticAndSpaFallback } from './httpRoutes/staticRoutes';
 import { isOriginExemptPath } from './originExemptRegistry';
-import { resolveCookieSecure } from './httpRoutes/sessionCookie';
+import { buildSessionCookie, buildSessionCookieOptions, resolveSessionCookieName } from './httpRoutes/sessionCookie';
 import type { HttpRouteContext, HttpRouteHandler } from './httpRoutes/types';
 
-const buildSessionCookieOptions = (
-  sessionExpiryDays: number,
-  secure: boolean,
-  http: ReturnType<typeof getProjectConfig>['http'],
-): string =>
-  `HttpOnly; SameSite=${http.sessionCookieSameSite}; Path=${http.sessionCookiePath}; Max-Age=${60 * 60 * 24 * sessionExpiryDays}; ${secure ? 'Secure;' : ''}`;
+//? Header subset handed to the `preHttpRequest` hook: credentials and secrets
+//? removed. The CSRF header name is configurable (`registerCsrfConfig({ headerName })`),
+//? so exclude the configured one — a hard-coded 'x-csrf-token' leaked a renamed
+//? header's session-bound token into every hook payload.
+export const buildHookSafeHeaders = (headers: IncomingMessage['headers']): Record<string, string> => {
+  const csrfHeaderName = getCsrfConfig().headerName.toLowerCase();
+  const safeHeaders: Record<string, string> = {};
+  for (const [k, v] of Object.entries(headers)) {
+    if (k === 'authorization' || k === 'proxy-authorization' || k === 'cookie' || k === 'set-cookie' || k === 'x-csrf-token' || k === csrfHeaderName || k === 'x-test-reset-token' || k === 'x-session-based-token') continue;
+    safeHeaders[k] = Array.isArray(v) ? v.join(', ') : (v ?? '');
+  }
+  return safeHeaders;
+};
 
 const setSecurityHeaders = (req: IncomingMessage, res: ServerResponse, origin: string) => {
   const { cors, securityHeaders } = getProjectConfig().http;
@@ -174,22 +182,20 @@ const refreshSessionCookieIfPresent = async ({
   req,
   res,
   token,
-  sessionCookieName,
   sessionCookieOptions,
 }: {
   req: IncomingMessage;
   res: ServerResponse;
   token: string | null;
-  sessionCookieName: string;
   sessionCookieOptions: string;
 }) => {
-  const hasTokenCookie = hasCookie(req.headers.cookie, sessionCookieName);
+  const hasTokenCookie = hasCookie(req.headers.cookie, resolveSessionCookieName());
   if (!hasTokenCookie || !token) return;
   const currentSession = await readSession(token);
   if (currentSession?.id) {
     //? Sliding expiration in cookie mode: keep browser token lifetime
     //? aligned with Redis TTL.
-    res.setHeader('Set-Cookie', `${sessionCookieName}=${token}; ${sessionCookieOptions}`);
+    res.setHeader('Set-Cookie', buildSessionCookie(token, sessionCookieOptions));
   }
 };
 
@@ -235,15 +241,10 @@ const handleHttpRequestInner = async (
 ): Promise<void> => {
   const config = getProjectConfig();
   const shouldLogDev = config.logging.devLogs;
-  const sessionCookieName = config.http.sessionCookieName;
-  const sessionCookieOptions = buildSessionCookieOptions(
-    config.session.expiryDays,
-    //? Honor the explicit `http.sessionCookieSecure` override (CORE-39), else the
-    //? `SECURE` env flag — shared with the OAuth state cookie via
-    //? `resolveCookieSecure` so the two can never drift (WAVE4).
-    resolveCookieSecure(config.http.sessionCookieSecure, process.env.SECURE),
-    config.http,
-  );
+  //? `Secure` honours the explicit `http.sessionCookieSecure` override (CORE-39),
+  //? else the `SECURE` env flag — shared with the OAuth state cookie via
+  //? `resolveCookieSecure` so the two can never drift (WAVE4).
+  const sessionCookieOptions = buildSessionCookieOptions(60 * 60 * 24 * config.session.expiryDays);
 
   //? Parse the path up-front so the origin gate can consult the exempt-path
   //? registry (registered webhooks) before it would otherwise 403 a
@@ -281,11 +282,7 @@ const handleHttpRequestInner = async (
   //? `preHttpRequest` fires before any route dispatch. Use to instrument
   //? requests (latency timer, audit log), enforce IP allow-lists, or stop
   //? specific paths with a custom error. Header subset excludes auth/cookie.
-  const safeHeaders: Record<string, string> = {};
-  for (const [k, v] of Object.entries(req.headers)) {
-    if (k === 'authorization' || k === 'cookie' || k === 'set-cookie' || k === 'x-csrf-token' || k === 'x-test-reset-token' || k === 'x-session-based-token') continue;
-    safeHeaders[k] = Array.isArray(v) ? v.join(', ') : (v ?? '');
-  }
+  const safeHeaders = buildHookSafeHeaders(req.headers);
   const preHttpResult = await dispatchHook('preHttpRequest', {
     method: req.method?.toUpperCase() ?? 'GET',
     url: req.url ?? '/',
@@ -316,7 +313,7 @@ const handleHttpRequestInner = async (
   }
 
   const token = extractTokenFromRequest(req);
-  await refreshSessionCookieIfPresent({ req, res, token, sessionCookieName, sessionCookieOptions });
+  await refreshSessionCookieIfPresent({ req, res, token, sessionCookieOptions });
 
   const csrfRejected = await enforceCsrfOnStateChangingRequest({ req, res, routePath, token, requestId });
   if (csrfRejected) return;

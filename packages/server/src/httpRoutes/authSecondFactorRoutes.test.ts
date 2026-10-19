@@ -10,7 +10,9 @@ vi.mock('../capabilities', () => ({
   getLogin: () => getLoginMock(),
 }));
 
-vi.mock('@luckystack/core', () => ({
+vi.mock('@luckystack/core', async () => ({
+  applyCookiePrefixConstraints: (await vi.importActual<typeof import('@luckystack/core')>('@luckystack/core')).applyCookiePrefixConstraints,
+  isProductionRuntime: () => false,
   getProjectConfig: () => ({
     http: { sessionCookieName: 'session', trustProxy: false, trustedProxyHopCount: 1 },
     session: { basedToken: false },
@@ -147,6 +149,20 @@ describe('handleAuthTwoFactorRoute', () => {
     await handleAuthTwoFactorRoute(ctx);
     expect(loginModule.verifyTwoFactorChallenge).toHaveBeenCalledWith(expect.objectContaining({ method: 'totp' }));
     expect(out.headers['set-cookie']).toContain('session=tok9');
+  });
+
+  it('keeps the session token and csrfToken out of the response body (finding 037)', async () => {
+    loginModule.verifyTwoFactorChallenge.mockResolvedValue({
+      status: true,
+      reason: 'login.loggedIn',
+      newToken: 'tok9',
+      session: { id: 'u1', token: 'tok9', csrfToken: 'csrf9' },
+    });
+    const { ctx, out } = makeCtx('/auth/api/2fa', { challengeToken: 'c'.repeat(64), code: '123456', method: 'totp' });
+    await handleAuthTwoFactorRoute(ctx);
+    expect(parsed(out)).toMatchObject({ status: true, authenticated: true, session: { id: 'u1' } });
+    expect(out.body).not.toContain('tok9');
+    expect(out.body).not.toContain('csrf9');
   });
 
   it('an unknown method string falls back to totp', async () => {

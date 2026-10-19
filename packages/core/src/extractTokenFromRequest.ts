@@ -1,6 +1,6 @@
 import { IncomingMessage } from 'node:http';
 import { getProjectConfig } from './projectConfig';
-import { getCookieValue } from './cookies';
+import { applyCookiePrefixConstraints, getCookieValue } from './cookies';
 
 /**
  * Extract the authentication token from an HTTP request.
@@ -25,7 +25,9 @@ export const extractTokenFromRequest = (req: IncomingMessage): string | null => 
     : null;
 
   const config = getProjectConfig();
-  const cookieToken = getCookieValue(req.headers.cookie, config.http.sessionCookieName);
+  //? Effective cookie name, matching the server's prefixed `Set-Cookie`.
+  const cookieName = applyCookiePrefixConstraints(config.http.sessionCookieName, config.http.sessionCookiePrefix).name;
+  const cookieToken = getCookieValue(req.headers.cookie, cookieName);
 
   // Token-mode: bearer is canonical, cookie is the fallback.
   if (config.session.basedToken) {

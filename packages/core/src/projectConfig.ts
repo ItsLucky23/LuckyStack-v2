@@ -267,8 +267,11 @@ export interface HttpConfig {
    * - unset (DEFAULT) — no prefix; today's behavior. A missing key changes
    *   nothing.
    *
-   * The server's cookie builder (`buildSessionCookie`) reads this and applies
-   * the prefix to `sessionCookieName` plus the forced attributes. Use
+   * The server's session cookie builder (`@luckystack/server`
+   * `httpRoutes/sessionCookie.ts`) applies the prefix to `sessionCookieName`
+   * plus the forced attributes on every set, refresh and clear, and the token
+   * extractors read the prefixed name. Changing this renames the cookie, so
+   * existing sessions are logged out once. Use
    * {@link applyCookiePrefixConstraints} to compute the effective attributes.
    */
   sessionCookiePrefix?: '__Host-' | '__Secure-';
