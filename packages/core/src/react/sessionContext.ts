@@ -81,6 +81,14 @@ export type ProposeLoginResult =
 export const proposeLogin = async (
   session: BaseSessionLayout,
 ): Promise<ProposeLoginResult> => {
+  //? Providers call this for EVERY non-null session state, including
+  //? `updateSession` broadcasts (room join, avatar). Those are not a login: a
+  //? veto there logged the UI out locally while the server session stayed
+  //? authenticated. Only a null → session (or a different user) is vetoable.
+  if (latestSession?.id === session.id) {
+    setLatestSession(session);
+    return { stopped: false, committed: true };
+  }
   const veto = await dispatchVetoableClientHook('preLogin', { candidateSession: session });
   if (veto.stopped) return { stopped: true, signal: veto.signal, committed: false };
   setLatestSession(session);
