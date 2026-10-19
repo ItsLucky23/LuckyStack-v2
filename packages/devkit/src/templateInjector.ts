@@ -1,11 +1,20 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { ScriptKind, type InterfaceDeclaration, type PropertySignatureDeclaration } from 'typescript-7-api/ast';
+import {
+  ScriptKind,
+  type InterfaceDeclaration,
+  type Node,
+  type PropertySignatureDeclaration,
+  type TypeAliasDeclaration,
+  type TypeNode,
+} from 'typescript-7-api/ast';
 import {
   isIdentifier,
   isInterfaceDeclaration,
   isPropertySignatureDeclaration,
+  isStringLiteral,
+  isTypeAliasDeclaration,
   isTypeLiteralNode,
 } from 'typescript-7-api/ast/is';
 import { ROOT_DIR, getGeneratedSocketTypesPath, getSrcDir } from '@luckystack/core';
@@ -17,7 +26,13 @@ import {
   isVersionedSyncFileName,
   isVersionedSyncServerFileName,
 } from './routeConventions';
-import { apiMarkerSegment, getRoutingRules, isRouteTestFile, syncMarkerSegment, validatePagePath } from './routingRules';
+import { apiMarkerSegment, getRoutingRules, syncMarkerSegment, validatePagePath } from './routingRules';
+import { isRouteSurfaceFile } from './routeNamingValidation';
+import {
+  extractSyncName as extractSrcSyncName,
+  extractSyncPagePath as extractSrcSyncPagePath,
+  extractSyncVersion as extractSrcSyncVersion,
+} from './typeMap/routeMeta';
 import {
   BUILT_IN_TEMPLATE_FILENAMES,
   getRegisteredTemplate,
@@ -138,25 +153,32 @@ export const isEmptyFile = (filePath: string): boolean => {
   }
 };
 
-const isCommentOnlyFile = (filePath: string): boolean => {
+//? The one-line guidance `injectTemplate` writes into a misnamed route file
+//? (see `getInvalidVersionMessage`). A file holding only this line is still the
+//? injector's own output, so renaming it to a valid name may template it.
+const INJECTED_GUIDANCE_PATTERN = /^\/\/ Invalid (?:API|sync) filename: [^\r\n]*$/;
+
+const isInjectedGuidanceOnlyFile = (filePath: string): boolean => {
   try {
     const content = fs.readFileSync(filePath, 'utf8');
-    const withoutBlockComments = content.replaceAll(/\/\*[\s\S]*?\*\//g, '');
-    const withoutLineComments = withoutBlockComments.replaceAll(/(^|\s)\/\/.*$/gm, '$1');
-    return withoutLineComments.trim().length === 0;
+    return INJECTED_GUIDANCE_PATTERN.test(content.trim());
   } catch {
     return false;
   }
 };
 
+//? Gated on `isRouteSurfaceFile`, the predicate the loader and discovery use: a
+//? private helper (`_api/_lib/helpers.ts`) or a co-located `send.test.ts` is
+//? not a route, so it must neither get a guidance comment written into it nor
+//? be reported as a misnamed route.
 export const isInApiFolder = (filePath: string): boolean => {
   const normalized = filePath.replaceAll('\\', '/');
-  return normalized.includes(apiMarkerSegment()) && filePath.endsWith('.ts') && !isRouteTestFile(filePath);
+  return normalized.includes(apiMarkerSegment()) && filePath.endsWith('.ts') && isRouteSurfaceFile(normalized);
 };
 
 export const isInSyncFolder = (filePath: string): boolean => {
   const normalized = filePath.replaceAll('\\', '/');
-  return normalized.includes(syncMarkerSegment()) && filePath.endsWith('.ts') && !isRouteTestFile(filePath);
+  return normalized.includes(syncMarkerSegment()) && filePath.endsWith('.ts') && isRouteSurfaceFile(normalized);
 };
 
 export const isPageFile = (filePath: string): boolean => {
@@ -343,35 +365,33 @@ export const hasPairedFile = (filePath: string): boolean => {
   return fs.existsSync(pairedPath);
 };
 
+//? The three sync-path readers below delegate to the type-map generator's
+//? srcDir- and marker-aware versions, so an injected `type PagePath` /
+//? `SyncName` always names the key the generator emits (`'system'` for a root
+//? sync). A literal `src/…/_sync/` match picked the FIRST `src/` of an absolute
+//? path (a checkout under `~/src/app` became `app/src/examples`) and ignored a
+//? custom srcDir or syncMarker. Name and version read the srcDir-relative path,
+//? so a parent folder named like the marker cannot leak into the name.
+const toSrcRelativeOrSelf = (filePath: string): string =>
+  computeSrcRelativePath(filePath) ?? filePath.replaceAll('\\', '/');
+
 /**
  * Extract page path from a sync file path (e.g., "examples" from "src/examples/_sync/test_server_v1.ts")
  */
-export const extractSyncPagePath = (filePath: string): string => {
-  const normalized = filePath.replaceAll('\\', '/');
-  const match = /src\/(.+?)\/_sync\//.exec(normalized);
-  if (match?.[1]) return match[1];
-  //? A sync directly under `src/_sync/` resolves to the `'system'` sentinel —
-  //? the SAME page key the type-map generator (`routeMeta.extractSyncPagePath`)
-  //? and the dev loader use for root syncs. Returning `''` here injected
-  //? `type PagePath = '';` into the paired client/server template, which then
-  //? failed to index `SyncTypeMap['system']` — a broken generated reference.
-  if (/(?:^|\/)src\/_sync\//.test(normalized)) return 'system';
-  return '';
-};
+export const extractSyncPagePath = (filePath: string): string =>
+  extractSrcSyncPagePath(path.resolve(filePath).replaceAll('\\', '/'));
 
 /**
  * Extract sync name from a sync file path (e.g., "test" from "src/examples/_sync/test_server_v1.ts")
  */
-export const extractSyncName = (filePath: string): string => {
-  const normalized = filePath.replaceAll('\\', '/');
-  const match = /_sync\/(.+)\.ts$/.exec(normalized);
-  if (!match) {
-    const basename = path.basename(filePath, '.ts');
-    return basename.replace(/_server_v\d+$/, '').replace(/_client_v\d+$/, '');
-  }
+export const extractSyncName = (filePath: string): string =>
+  extractSrcSyncName(toSrcRelativeOrSelf(filePath));
 
-  return (match[1] ?? '').replace(/_server_v\d+$/, '').replace(/_client_v\d+$/, '');
-};
+/**
+ * Extract sync version from a sync file path (e.g., "v1" from "src/examples/_sync/test_server_v1.ts")
+ */
+export const extractSyncVersion = (filePath: string): string =>
+  extractSrcSyncVersion(toSrcRelativeOrSelf(filePath));
 
 /**
  * Extract clientInput type body from a sync file's SyncParams interface
@@ -424,63 +444,52 @@ export const extractClientInputFromFile = (filePath: string): string | null => {
   }
 };
 
+const propertyKeyText = (name: Node): string | null =>
+  isIdentifier(name) || isStringLiteral(name) ? name.text : null;
+
+const findTypeLiteralMemberType = (typeNode: TypeNode | undefined, key: string): TypeNode | undefined => {
+  if (!typeNode || !isTypeLiteralNode(typeNode)) return undefined;
+  for (const member of typeNode.members) {
+    if (isPropertySignatureDeclaration(member) && propertyKeyText(member.name) === key) {
+      return member.type;
+    }
+  }
+  return undefined;
+};
+
 /**
  * Extract clientInput type from the generated apiTypes.generated.ts file
  * Used when the server file is already deleted but we need to migrate types to client
  */
-export const extractClientInputFromGeneratedTypes = (pagePath: string, syncName: string): string | null => {
+export const extractClientInputFromGeneratedTypes = (
+  pagePath: string,
+  syncName: string,
+  version: string,
+): string | null => {
   try {
     const generatedTypesPath = getGeneratedSocketTypesPath();
     const content = fs.readFileSync(generatedTypesPath, 'utf8');
 
-    const escapeRegex = (value: string) => value.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
-    const escapedPagePath = escapeRegex(pagePath);
-    const escapedSyncName = escapeRegex(syncName);
+    //? Walk the parsed `_ProjectSyncTypeMap` alias (page -> name -> version ->
+    //? clientInput) instead of matching text. A text search found the API map's
+    //? block for the same page first (it is emitted earlier), predated the
+    //? version level, and assumed the emitter's quoting, which a formatter run
+    //? over the generated file rewrites.
+    const sourceFile = parseSourceText(path.basename(generatedTypesPath), content, ScriptKind.TS);
+    const syncTypeMap = sourceFile.statements.find(
+      (statement): statement is TypeAliasDeclaration =>
+        isTypeAliasDeclaration(statement) && statement.name.text === '_ProjectSyncTypeMap',
+    );
 
-    const pageBlockRegex = new RegExp(String.raw`'${escapedPagePath}'\s*:\s*\{([\s\S]*?)\n\s{2}\};`, 'm');
-    const pageBlockMatch = content.match(pageBlockRegex);
-    if (!pageBlockMatch?.[1]) {
-      console.log(`[TemplateInjector] Could not find page block for ${pagePath}`);
+    const pageType = findTypeLiteralMemberType(syncTypeMap?.type, pagePath);
+    const versionType = findTypeLiteralMemberType(findTypeLiteralMemberType(pageType, syncName), version);
+    const clientInputType = findTypeLiteralMemberType(versionType, 'clientInput');
+    if (!clientInputType) {
+      console.log(`[TemplateInjector] Could not find sync entry for ${pagePath}/${syncName}/${version}`);
       return null;
     }
 
-    const pageBlock = pageBlockMatch[1];
-
-    const syncEntryPattern = new RegExp(String.raw`'${escapedSyncName}':\s*\{\s*clientInput:\s*`);
-    const match = pageBlock.match(syncEntryPattern);
-
-    if (!match || typeof match.index !== 'number') {
-      console.log(`[TemplateInjector] Could not find sync entry for ${pagePath}/${syncName}`);
-      return null;
-    }
-
-    const pageStart = content.indexOf(pageBlock);
-    const globalMatchIndex = pageStart + match.index;
-
-    // Find the start of clientInput value (the opening brace)
-    const searchStart = globalMatchIndex + match[0].length;
-    const braceStart = content.indexOf('{', searchStart - 1);
-
-    if (braceStart === -1) return null;
-
-    // Extract balanced braces
-    let depth = 0;
-    let endIndex = -1;
-
-    for (let i = braceStart; i < content.length; i++) {
-      if (content[i] === '{') depth++;
-      else if (content[i] === '}') depth--;
-
-      if (depth === 0) {
-        endIndex = i;
-        break;
-      }
-    }
-
-    //? Braces never balanced — return null instead of a lone `{` of garbage.
-    if (endIndex === -1) return null;
-
-    const extracted = content.slice(braceStart, endIndex + 1);
+    const extracted = content.slice(clientInputType.getStart(sourceFile), clientInputType.getEnd());
     console.log(`[TemplateInjector] Extracted clientInput types: ${extracted}`);
     return extracted;
   } catch (error) {
@@ -715,13 +724,13 @@ export const shouldInjectTemplate = (
   //? An EMPTY file is always safe to template (there is nothing to lose).
   if (isEmptyFile(filePath)) return true;
 
-  //? A COMMENT-ONLY file is only templated when it is genuinely NEW (the `add`
-  //? event). Commenting out an entire EXISTING `_api`/`_sync`/`page` file and
-  //? saving it (a common debugging move) fires a `change` event with
-  //? comment-only content — injecting the starter template there silently
-  //? OVERWRITES the user's commented-out code with no undo (data loss). On
-  //? `add` there is no prior route entry to clobber, so it stays safe.
-  if (options.isNewFile) return isCommentOnlyFile(filePath);
+  //? Any other content is the user's. Commenting out a whole route and saving
+  //? it fires `change`; renaming, moving, `git checkout` or `stash pop` of that
+  //? same commented-out file fires `add`. Templating either one overwrites the
+  //? commented-out code with no undo. The only non-empty file safe to template
+  //? is one still holding just the injector's own guidance line (a misnamed
+  //? file the user is now renaming to a valid name), and only on `add`.
+  if (options.isNewFile) return isInjectedGuidanceOnlyFile(filePath);
 
   return false;
 };
