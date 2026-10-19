@@ -23,8 +23,9 @@ interface SendResetEmailArgs {
 /**
  * Look up the user by credentials-provider email, generate a reset token,
  * and email them a reset link. Always resolves successfully regardless of
- * whether the email matched a user (anti-enumeration). Returns the result
- * of the email send for diagnostics.
+ * whether the email matched a user (anti-enumeration). The token and send run
+ * in the background, so a send failure is logged, not returned; `ok: false`
+ * only reports a mode/module problem that is the same for every address.
  */
 export const sendPasswordResetEmail = async ({ email, brand }: SendResetEmailArgs): Promise<{ ok: boolean; reason?: string }> => {
   const config = getProjectConfig();
@@ -74,56 +75,70 @@ export const sendPasswordResetEmail = async ({ email, brand }: SendResetEmailArg
     return { ok: true };
   }
 
-  const token = await createPasswordResetToken(user.id);
-  //? SEC: do NOT emit the raw token on the hook bus — hook subscribers are
-  //? untrusted code and the token is a single-use credential. Consumers who need
-  //? to deliver the email themselves should call `createPasswordResetToken`
-  //? directly and build the URL without the framework exposing the secret here.
-  void dispatchHook('passwordResetRequested', {
-    email,
-    matched: true,
-    userId: user.id,
-    ttlSeconds: config.auth.passwordResetTtlSeconds,
+  const deliverResetEmail = async (): Promise<void> => {
+    const token = await createPasswordResetToken(user.id);
+    //? SEC: do NOT emit the raw token on the hook bus — hook subscribers are
+    //? untrusted code and the token is a single-use credential. Consumers who need
+    //? to deliver the email themselves should call `createPasswordResetToken`
+    //? directly and build the URL without the framework exposing the secret here.
+    void dispatchHook('passwordResetRequested', {
+      email,
+      matched: true,
+      userId: user.id,
+      ttlSeconds: config.auth.passwordResetTtlSeconds,
+    });
+    const baseUrl = (config.app.publicUrl || '').replace(/\/+$/, '');
+    //? ADR — DD-ROOTSRC-O8: the reset token is in the URL query string
+    //? (`?token=<hex>`), not in the URL fragment (`#token=<hex>`).
+    //? Tradeoff: query strings appear in server access logs and Referer headers
+    //? if the user's mail client renders the link via a tracking proxy. Fragment
+    //? identifiers (`#`) are never sent to the server and are therefore
+    //? invisible to any log / proxy in the chain — they are more private.
+    //? Decision: query-string is the standard email-link pattern understood by
+    //? every SPA router, and tokens here are one-time + hashed at rest (Redis
+    //? holds only `sha256(token)`), so the exposure window is the TTL of a
+    //? single-use credential, not a replayable secret. Logging is mitigated
+    //? by not logging the full URL at the point of issue (we log `userId`, not
+    //? `resetUrl`). A future `auth.tokenLinkMode: 'fragment'` option can be
+    //? introduced without touching this file — callers receive the raw token
+    //? and can build their own URL.
+    //? Honor `auth.passwordResetPath` (where the consumer's reset page lives),
+    //? the same way `emailChangeConfirmPath` is honored for the email-change link.
+    const resetPath = config.auth.passwordResetPath || '/reset-password';
+    const resetUrl = `${baseUrl}${resetPath}?token=${encodeURIComponent(token)}`;
+
+    const ttlMinutes = Math.round(config.auth.passwordResetTtlSeconds / 60);
+
+    //? Dispatch via the `'password-reset'` template rather than building the
+    //? email inline. `@luckystack/email` ships a built-in for this name, so the
+    //? out-of-the-box copy is unchanged — but a consumer can now
+    //? `registerEmailTemplate('password-reset', …)` to translate or rebrand it
+    //? without forking this flow (CFG-05). `adapterHint: 'transactional'` routes
+    //? through a dedicated transactional sender when one is registered, else the
+    //? default sender.
+    const result = await sendEmail({
+      to: user.email,
+      template: 'password-reset',
+      data: { resetUrl, userName: user.name, brand: resolvedBrand, ttlMinutes },
+      adapterHint: 'transactional',
+    });
+
+    if (result.ok) {
+      //? SEC: log only userId for correlation — not the email address (PII).
+      getLogger().info('[forgotPassword] reset email dispatched', { userId: user.id });
+    } else {
+      getLogger().warn('[forgotPassword] reset email send FAILED', { userId: user.id, reason: result.reason });
+    }
+  };
+
+  //? Fire-and-forget token creation + send (the emailCodeLogin pattern).
+  //? Awaiting them made the existing-account path measurably slower than the
+  //? unknown-address return above — a timing oracle for "this address has an
+  //? account" — and a send failure or a throwing sender (emailConfig.required
+  //? without one) surfaced only for existing accounts. Both paths now return the
+  //? same `{ ok: true }`; failures are logged server-side only.
+  void deliverResetEmail().catch((error: unknown) => {
+    getLogger().error('[forgotPassword] reset email delivery failed', { userId: user.id, error: String(error) });
   });
-  const baseUrl = (config.app.publicUrl || '').replace(/\/+$/, '');
-  //? ADR — DD-ROOTSRC-O8: the reset token is in the URL query string
-  //? (`?token=<hex>`), not in the URL fragment (`#token=<hex>`).
-  //? Tradeoff: query strings appear in server access logs and Referer headers
-  //? if the user's mail client renders the link via a tracking proxy. Fragment
-  //? identifiers (`#`) are never sent to the server and are therefore
-  //? invisible to any log / proxy in the chain — they are more private.
-  //? Decision: query-string is the standard email-link pattern understood by
-  //? every SPA router, and tokens here are one-time + hashed at rest (Redis
-  //? holds only `sha256(token)`), so the exposure window is the TTL of a
-  //? single-use credential, not a replayable secret. Logging is mitigated
-  //? by not logging the full URL at the point of issue (we log `userId`, not
-  //? `resetUrl`). A future `auth.tokenLinkMode: 'fragment'` option can be
-  //? introduced without touching this file — callers receive the raw token
-  //? and can build their own URL.
-  const resetUrl = `${baseUrl}/reset-password?token=${encodeURIComponent(token)}`;
-
-  const ttlMinutes = Math.round(config.auth.passwordResetTtlSeconds / 60);
-
-  //? Dispatch via the `'password-reset'` template rather than building the
-  //? email inline. `@luckystack/email` ships a built-in for this name, so the
-  //? out-of-the-box copy is unchanged — but a consumer can now
-  //? `registerEmailTemplate('password-reset', …)` to translate or rebrand it
-  //? without forking this flow (CFG-05). `adapterHint: 'transactional'` routes
-  //? through a dedicated transactional sender when one is registered, else the
-  //? default sender.
-  const result = await sendEmail({
-    to: user.email,
-    template: 'password-reset',
-    data: { resetUrl, userName: user.name, brand: resolvedBrand, ttlMinutes },
-    adapterHint: 'transactional',
-  });
-
-  if (result.ok) {
-    //? SEC: log only userId for correlation — not the email address (PII).
-    getLogger().info('[forgotPassword] reset email dispatched', { userId: user.id });
-  } else {
-    getLogger().warn('[forgotPassword] reset email send FAILED', { userId: user.id, reason: result.reason });
-  }
-
-  return result.ok ? { ok: true } : { ok: false, reason: result.reason };
+  return { ok: true };
 };

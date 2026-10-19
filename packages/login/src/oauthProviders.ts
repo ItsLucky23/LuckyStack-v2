@@ -25,6 +25,17 @@ export interface CredentialsProvider {
   name: 'credentials';
 }
 
+/**
+ * Explicit `getEmail` result for a provider that can return an address it did
+ * NOT verify (e.g. Microsoft's `userPrincipalName` fallback). A bare string
+ * return keeps the historical meaning: the accessor only returns verified
+ * addresses.
+ */
+export interface OAuthEmailResult {
+  email: string;
+  verified: boolean;
+}
+
 export interface FullOAuthProvider {
   name: string;
   clientID: string;
@@ -53,8 +64,9 @@ export interface FullOAuthProvider {
    * boolean. When set AND the field is present-and-falsy, the framework rejects
    * the profile rather than trusting an unverified address — defense-in-depth
    * against account-linking takeover under the `'unified'` strategy (SEC-21).
-   * A missing field (provider doesn't report it) is treated as "trusted",
-   * preserving behaviour for providers that don't expose the flag.
+   * A missing field (provider doesn't report it) is "no signal": the profile is
+   * accepted but the email counts as unverified, so first-login creation and
+   * cross-provider linking are refused.
    */
   emailVerifiedKey?: string;
   /**
@@ -66,9 +78,24 @@ export interface FullOAuthProvider {
    * Mutually exclusive in practice with `emailVerifiedKey`.
    */
   emailImpliesVerified?: boolean;
+  /**
+   * Set `true` to resolve the email ONLY through `getEmail` and ignore the
+   * userinfo `emailKey` value. For a provider whose userinfo email carries no
+   * verified signal but which exposes a verified-email endpoint (GitHub's
+   * public profile `email` vs `/user/emails`). Without it, a present userinfo
+   * email skips `getEmail` and stays unverified, which refuses first-login
+   * account creation.
+   */
+  alwaysUseGetEmail?: boolean;
   avatarKey?: string;
   avatarCodeKey: string;
-  getEmail?: (accessToken: string) => Promise<string | false | undefined>;
+  /**
+   * Resolve the account email when userinfo has none (or always, with
+   * `alwaysUseGetEmail`). Receives the raw userinfo record as the second
+   * argument. Return a string only for an address the provider verified;
+   * return an {@link OAuthEmailResult} to report an unverified address.
+   */
+  getEmail?: (accessToken: string, userData: OAuthUserData) => Promise<string | false | undefined | OAuthEmailResult>;
   getAvatar?: (params: { userData: OAuthUserData; avatarId?: string; accessToken: string }) => string | undefined | Promise<string | undefined>;
   /**
    * Optional per-provider hook to attach extra runtime-only data to the
@@ -209,12 +236,16 @@ export const githubProvider = (input: OAuthHelperInput): FullOAuthProvider => ({
   scope: mergeScopes(['read:user', 'user:email'], input.extraScopes),
   nameKey: 'login',
   emailKey: 'email',
+  //? The `/user` public `email` has no verified flag, so taking it verbatim left
+  //? every new user with a public email unverified (first-login creation
+  //? refused). Always resolve through the verified-only `/user/emails` list.
+  alwaysUseGetEmail: true,
   avatarKey: 'avatar_url',
   avatarCodeKey: '',
   extraSessionFields: input.extraSessionFields,
   extraAuthorizationParams: input.extraAuthorizationParams,
   usePkce: input.usePkce,
-  getEmail: async (accessToken) => {
+  getEmail: async (accessToken, userData) => {
     const fetchEmails = async () => {
       const response = await fetch('https://api.github.com/user/emails', {
         method: 'GET',
@@ -241,9 +272,17 @@ export const githubProvider = (input: OAuthHelperInput): FullOAuthProvider => ({
     //? to a victim's existing account by that email (SEC-21). Filtering on
     //? `verified` first closes that fallback path.
     const verified = emails.filter((entry) => entry.verified === true);
-    let mainEmail: string | undefined;
-    for (const entry of verified) {
-      if (entry.primary && typeof entry.email === 'string') mainEmail = entry.email;
+    //? Prefer the public profile email when it is in the verified list: accounts
+    //? created before `alwaysUseGetEmail` were keyed on that address, and
+    //? switching them to the primary one would orphan them.
+    const publicEmail = typeof userData.email === 'string' ? userData.email.toLowerCase() : '';
+    let mainEmail: string | undefined = publicEmail
+      ? verified.find((entry) => typeof entry.email === 'string' && entry.email.toLowerCase() === publicEmail)?.email
+      : undefined;
+    if (!mainEmail) {
+      for (const entry of verified) {
+        if (entry.primary && typeof entry.email === 'string') mainEmail = entry.email;
+      }
     }
     mainEmail ??= verified[0]?.email;
     return mainEmail;
@@ -321,7 +360,15 @@ export const facebookProvider = (input: FacebookProviderInput): FullOAuthProvide
 };
 
 export interface MicrosoftProviderInput extends OAuthHelperInput {
-  /** Tenant id segment in the authorize/token URLs. Default `'common'`. */
+  /**
+   * Tenant id segment in the authorize/token URLs. Default `'common'`.
+   * Only a specific tenant (your organisation's id or domain) lets a brand-new
+   * user get an account: Graph `mail` is set by the tenant's admin, so under
+   * `'common'` / `'organizations'` / `'consumers'` any tenant could assert any
+   * address (the nOAuth attack). With those values the email counts as
+   * unverified, so only existing Microsoft accounts can sign in. Overriding
+   * `endpoints` does not change this; set `tenant`.
+   */
   tenant?: string;
   /** OAuth API version segment. Default `'v2.0'`. */
   apiVersion?: string;
@@ -339,6 +386,10 @@ export interface MicrosoftProviderInput extends OAuthHelperInput {
   allowUpnFallback?: boolean;
 }
 
+//? Tenant segments that accept accounts from many tenants (or personal
+//? accounts), so no single admin vouches for the reported `mail`.
+const MICROSOFT_MULTI_TENANT_SEGMENTS = new Set(['common', 'organizations', 'consumers']);
+
 //? NOTE: Microsoft flow is implemented but has not been end-to-end verified
 //? against an Azure AD tenant as of 2026-05-14. The token-exchange URL, the
 //? Graph /me shape, and the photo data-URL pipeline are based on Microsoft
@@ -349,6 +400,7 @@ export const microsoftProvider = (input: MicrosoftProviderInput): FullOAuthProvi
   const oauthVersion = input.apiVersion ?? 'v2.0';
   const graphVersion = input.graphApiVersion ?? 'v1.0';
   const allowUpnFallback = input.allowUpnFallback ?? false;
+  const isSingleTenant = !MICROSOFT_MULTI_TENANT_SEGMENTS.has(tenant.toLowerCase());
   return {
   name: 'microsoft',
   clientID: requireString(input.clientId, 'microsoft clientId'),
@@ -361,6 +413,9 @@ export const microsoftProvider = (input: MicrosoftProviderInput): FullOAuthProvi
   scope: mergeScopes(['openid', 'profile', 'email', 'User.Read'], input.extraScopes),
   nameKey: 'displayName',
   emailKey: 'mail',
+  //? Graph `mail` has no verified flag; it is trusted only when one tenant's
+  //? admin owns it (see `MicrosoftProviderInput.tenant`).
+  emailImpliesVerified: isSingleTenant,
   avatarCodeKey: 'id',
   extraSessionFields: input.extraSessionFields,
   extraAuthorizationParams: input.extraAuthorizationParams,
@@ -417,14 +472,15 @@ export const microsoftProvider = (input: MicrosoftProviderInput): FullOAuthProvi
 
     const record = asOAuthUserData(profile);
     const mail = typeof record.mail === 'string' ? record.mail : '';
-    if (mail) return mail;
+    if (mail) return { email: mail, verified: isSingleTenant };
     //? Only fall back to `userPrincipalName` when the consumer explicitly opted
     //? in (SEC-11). A UPN is not guaranteed routable/verified; using it as the
     //? account email under `'unified'` enables account-linking takeover and
-    //? mis-keys accounts on non-deliverable addresses.
+    //? mis-keys accounts on non-deliverable addresses. It is always reported
+    //? unverified, so it never creates or links an account on its own.
     if (allowUpnFallback) {
       const userPrincipalName = typeof record.userPrincipalName === 'string' ? record.userPrincipalName : '';
-      return userPrincipalName || false;
+      return userPrincipalName ? { email: userPrincipalName, verified: false } : false;
     }
     return false;
   },

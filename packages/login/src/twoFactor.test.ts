@@ -119,6 +119,7 @@ import {
   confirmTotpEnrollment,
   createTwoFactorChallengeIfRequired,
   disableTwoFactor,
+  regenerateRecoveryCodes,
   encryptTotpSecret,
   decryptTotpSecret,
   requestTwoFactorEmailCode,
@@ -386,6 +387,58 @@ describe('enrollment', () => {
     //? …the user's app still shows the SAME code — disable must still accept it.
     const disabled = await disableTwoFactor(user(), code);
     expect(disabled.ok).toBe(true);
+  });
+});
+
+//? Finding 084: the session-authenticated management actions only had the
+//? server's per-IP bucket, so a hijacked session could spread guesses over many
+//? IPs. They now share the login challenge's per-account lockout.
+describe('management actions share the per-account 2FA lockout', () => {
+  //? A 6-digit code outside the ±1 drift window, so it is guaranteed wrong.
+  const wrongCode = (): string => {
+    const valid = new Set([currentCode(-1), currentCode(), currentCode(1)]);
+    let candidate = 0;
+    while (valid.has(String(candidate).padStart(6, '0'))) candidate += 1;
+    return String(candidate).padStart(6, '0');
+  };
+  const LIMIT = 10;
+
+  it('wrong disable codes count toward the account lockout, then even a valid code is refused', async () => {
+    for (let index = 0; index < LIMIT; index += 1) {
+      expect((await disableTwoFactor(user(), wrongCode())).reason).toBe('login.twoFactorInvalidCode');
+    }
+    const locked = await disableTwoFactor(user(), currentCode());
+    expect(locked).toEqual({ ok: false, reason: 'login.twoFactorLocked' });
+    expect(adapterMock.update).not.toHaveBeenCalled();
+  });
+
+  it('wrong recovery-code regenerations count toward the same lockout', async () => {
+    for (let index = 0; index < LIMIT; index += 1) {
+      const result = await regenerateRecoveryCodes(user(), wrongCode());
+      expect(result.ok).toBe(false);
+    }
+    const locked = await regenerateRecoveryCodes(user(), currentCode());
+    expect(locked).toEqual({ ok: false, reason: 'login.twoFactorLocked' });
+    expect(adapterMock.update).not.toHaveBeenCalled();
+  });
+
+  it('failures on the login challenge and on management actions share one counter', async () => {
+    for (let index = 0; index < LIMIT - 1; index += 1) {
+      await regenerateRecoveryCodes(user(), wrongCode());
+    }
+    await disableTwoFactor(user(), wrongCode());
+    adapterMock.findById.mockResolvedValue(user());
+    const challenge = await createTwoFactorChallengeIfRequired(user(), {});
+    if (!challenge) throw new Error('expected a challenge');
+    const result = await verifyTwoFactorChallenge({ challengeToken: challenge.challengeToken, code: currentCode() });
+    expect(result).toEqual({ status: false, reason: 'login.twoFactorLocked' });
+  });
+
+  it('a valid regeneration below the limit still works and resets the counter', async () => {
+    await regenerateRecoveryCodes(user(), wrongCode());
+    const ok = await regenerateRecoveryCodes(user(), currentCode());
+    expect(ok.ok).toBe(true);
+    expect(store.has('test-2fa-accountfail:u1')).toBe(false);
   });
 });
 

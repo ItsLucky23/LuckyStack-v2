@@ -868,12 +868,11 @@ interface OAuthProfile {
   avatar: string;
   /**
    * `true` only when the provider POSITIVELY reported the email as verified
-   * (via `emailVerifiedKey`) or supplied it through a `getEmail` accessor that
-   * itself filters on a verified flag (GitHub). `false` when the provider
-   * exposes NO verified-email signal at all — used to fail-closed on
-   * cross-provider account LINKING under the `'unified'` strategy (SEC-21/SEC-40),
-   * where linking an unverified address to a victim's existing account is an
-   * account-takeover vector. First-time account CREATION is unaffected.
+   * (via `emailVerifiedKey`, `emailImpliesVerified`, or a `getEmail` accessor
+   * that returned a bare string or `{ verified: true }`). `false` when the
+   * provider exposes NO verified-email signal — used to fail-closed on
+   * cross-provider account LINKING under the `'unified'` strategy (SEC-21/SEC-40)
+   * and on first-login account CREATION (M2).
    */
   emailVerified: boolean;
   /**
@@ -919,7 +918,7 @@ const fetchOAuthProfile = async (
   //? `String(value || 'didnt find a name')` truthy-coercion).
   const resolvedName = readStringField(userData, provider.nameKey);
   const name = resolvedName === '' ? 'didnt find a name' : resolvedName;
-  const emailValue = userData[provider.emailKey];
+  const emailValue = provider.alwaysUseGetEmail ? undefined : userData[provider.emailKey];
   let email: string | undefined = typeof emailValue === 'string' ? emailValue : undefined;
 
   //? Track whether the provider POSITIVELY confirmed this email as verified.
@@ -966,19 +965,20 @@ const fetchOAuthProfile = async (
       : '');
   const avatar = typeof avatarValue === 'string' ? avatarValue : '';
 
-  //? Some providers (GitHub) don't return email in /userinfo — fall back to the
-  //? provider's `getEmail` accessor. GitHub's accessor only ever selects a
-  //? `verified === true` address (see `githubProvider.getEmail`), so an email
-  //? obtained this way is treated as positively verified for the cross-provider
-  //? link guard (SEC-21).
+  //? No usable userinfo email (or `alwaysUseGetEmail`, GitHub) — fall back to
+  //? the provider's `getEmail` accessor. A bare string return means the accessor
+  //? filtered on a verified flag (see `githubProvider.getEmail`); an object
+  //? return reports verification explicitly (Microsoft's UPN fallback is
+  //? `verified: false`).
   if (!email && provider.getEmail) {
-    const selectedEmail = await provider.getEmail(accessToken);
+    const selected = await provider.getEmail(accessToken, userData);
+    const selectedEmail = typeof selected === 'object' ? selected.email : selected;
     if (!selectedEmail) {
       getLogger().warn('oauth: no email found via provider.getEmail', { provider: provider.name });
       return null;
     }
     email = selectedEmail;
-    emailVerified = true;
+    emailVerified = typeof selected === 'object' ? selected.verified === true : true;
   }
 
   //? Normalize OAuth emails through the SAME gate as credentials (trim +
@@ -1085,11 +1085,13 @@ const findOrCreateOAuthUser = async (
   //? an address the signer-in may not own — a custom, non-verifying provider would
   //? otherwise let an attacker SQUAT a victim's email (blocking the victim's later
   //? signup with `login.emailExists` and, under `'unified'`, absorbing the victim's
-  //? later verified sign-in into the attacker-seeded row). All built-in providers
-  //? set `emailVerified` (Google/GitHub/Microsoft/Discord/Facebook), so this only
-  //? refuses genuinely-unverified CUSTOM providers; such a provider must verify the
-  //? email (set `emailVerifiedKey` / `getEmail` / `emailImpliesVerified`) to enable
-  //? OAuth signup, rather than the framework trusting it by default.
+  //? later verified sign-in into the attacker-seeded row). Google and Discord
+  //? (verified flag), GitHub (verified `/user/emails`) and Facebook (email only
+  //? when confirmed) report verified emails. Microsoft does so only with a
+  //? single-tenant `tenant`; under `'common'` a new Microsoft user is refused on
+  //? purpose (see `MicrosoftProviderInput.tenant`). A custom provider must
+  //? verify the email (set `emailVerifiedKey` / `getEmail` / `emailImpliesVerified`)
+  //? to enable OAuth signup, rather than the framework trusting it by default.
   if (!emailVerified) {
     getLogger().warn(
       'oauth: refusing first-login account creation for an unverified provider email (account-squatting guard)',

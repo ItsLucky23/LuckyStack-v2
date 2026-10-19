@@ -80,3 +80,17 @@ export const consumeEmailChangeToken = async (token: string): Promise<EmailChang
   }
   return parsed;
 };
+
+/**
+ * Invalidate the user's outstanding email-change link, if any. Call it when
+ * control of the account changes (password reset or change): a change an
+ * attacker requested before that must not stay confirmable afterwards.
+ */
+export const invalidateEmailChangeToken = async (userId: string): Promise<void> => {
+  const pointerKey = emailChangeUserKey(userId);
+  const priorKey = await redis.get(pointerKey);
+  if (priorKey) {
+    await redis.del(priorKey);
+  }
+  await redis.del(pointerKey);
+};
