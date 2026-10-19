@@ -328,6 +328,9 @@ exports[`golden baseline — generated route types > pins the inlined input + ou
   status: 'error';
   errorCode: 'common.500'
 } | {
+  status: 'error';
+  errorCode: string
+} | {
   status: 'success';
   result: {
     preferences: {
