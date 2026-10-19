@@ -9,8 +9,9 @@ import { warnIfInputTypeMissing } from './inputTypeWarning';
 //? identical to the former inline block:
 //?   • resolves the per-route validation mode (`'relaxed'` / `{ input: 'skip' }`
 //?     => skip Zod validation; default `'strict'`);
-//?   • dispatches `preApiValidate`, runs `validateInputByType` in strict mode,
-//?     then `postApiValidate` (always, including the relaxed skip path);
+//?   • dispatches `preApiValidate` (a stop signal vetoes the request before
+//?     validation, like `preSyncValidate`), runs `validateInputByType` in strict
+//?     mode, then `postApiValidate` (always, including the relaxed skip path);
 //?   • on validation failure emits the GENERIC `api.invalidInputType` (the raw
 //?     validator message is NEVER echoed to the client — it only travels to the
 //?     postApiValidate hook + dev logs) and returns `false`.
@@ -18,6 +19,7 @@ import { warnIfInputTypeMissing } from './inputTypeWarning';
 //? so the orchestrator keeps ownership of the abort/cleanup/emitError refs.
 
 type EmitInvalidInputType = () => void | Promise<void>;
+type EmitValidationStopped = (signal: { errorCode: string; httpStatus?: number }) => void | Promise<void>;
 
 export const resolveValidationMode = (validation: RuntimeApiEntry['validation']): 'strict' | 'relaxed' => {
   if (!validation) return 'strict';
@@ -39,6 +41,7 @@ export const runSocketApiValidation = async ({
   user,
   cleanupRequest,
   emitInvalidInputType,
+  emitValidationStopped,
 }: {
   apiEntry: RuntimeApiEntry;
   resolvedName: string;
@@ -46,6 +49,7 @@ export const runSocketApiValidation = async ({
   user: SessionLayout | null;
   cleanupRequest: () => void;
   emitInvalidInputType: EmitInvalidInputType;
+  emitValidationStopped: EmitValidationStopped;
 }): Promise<boolean> => {
   //? Per-route validation toggle. `'relaxed'` or `{ input: 'skip' }` skips
   //? runtime input validation entirely — useful for public webhooks (Stripe,
@@ -56,7 +60,15 @@ export const runSocketApiValidation = async ({
   if (validationMode === 'strict') {
     warnIfInputTypeMissing(resolvedName, apiEntry.inputType);
   }
-  await dispatchHook('preApiValidate', { routeName: resolvedName, data: normalizedData, user, transport: 'socket' });
+  const preValidateResult = await dispatchHook('preApiValidate', { routeName: resolvedName, data: normalizedData, user, transport: 'socket' });
+  //? A stop signal vetoes the request before validation and execution (the
+  //? HookResult contract, mirrored by `preSyncValidate`). postApiValidate does
+  //? not fire: no validation ran.
+  if (preValidateResult.stopped) {
+    cleanupRequest();
+    await emitValidationStopped({ errorCode: preValidateResult.signal.errorCode, httpStatus: preValidateResult.signal.httpStatus });
+    return false;
+  }
 
   if (validationMode === 'strict') {
     const inputValidation = await validateInputByType({

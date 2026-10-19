@@ -72,6 +72,7 @@ const validateRequestMock = vi.fn((_args?: unknown) => seam.validateRequestResul
 const inferHttpMethodMock = vi.fn((_name?: string) => seam.inferredMethod);
 const validateInputByTypeMock = vi.fn(() => Promise.resolve(seam.inputValidation));
 const getSessionMock = vi.fn((_token?: string | null) => Promise.resolve(seam.session));
+const applyErrorFormatterMock = vi.fn(({ response }: { response: unknown; routeName?: string }) => response);
 
 vi.mock('@luckystack/core', () => ({
   getProjectConfig: () => seam.projectConfig,
@@ -126,7 +127,7 @@ vi.mock('@luckystack/core', () => ({
     httpStatus: response.httpStatus ?? fallbackHttpStatus ?? 500,
   }),
   //? Identity formatter — pass the envelope through untouched.
-  applyErrorFormatter: ({ response }: { response: unknown }) => response,
+  applyErrorFormatter: (args: { response: unknown; routeName?: string }) => applyErrorFormatterMock(args),
 }));
 
 //? Imported AFTER the mock registration so both handlers bind to it.
@@ -152,9 +153,9 @@ const registerRoute = (overrides: Record<string, unknown> = {}): void => {
 };
 
 //? Drive the HTTP transport and normalize the returned envelope.
-const driveHttp = async (): Promise<Observed> => {
+const driveHttp = async (name = 'api/examples/doThing/v1'): Promise<Observed> => {
   const res = (await handleHttpApiRequest({
-    name: 'api/examples/doThing/v1',
+    name,
     data: { foo: 'bar' },
     token: 'tok-1',
   })) as Record<string, unknown>;
@@ -171,7 +172,7 @@ const driveHttp = async (): Promise<Observed> => {
 //? packages/presence/src/activity/*.test.ts) then assign only the members the
 //? API handler + its lifecycle helper touch — avoids the banned `as unknown as`
 //? double-cast while not having to satisfy the full socket.io Socket surface.
-const driveSocket = async (): Promise<Observed> => {
+const driveSocket = async (name = 'api/examples/doThing/v1'): Promise<Observed> => {
   let emitted: Record<string, unknown> | undefined;
   //? Established fake-socket pattern in this repo (packages/presence tests):
   //? assert an object literal to Socket at the boundary, supplying only the
@@ -190,7 +191,7 @@ const driveSocket = async (): Promise<Observed> => {
   } as unknown as Socket;
 
   await handleApiRequest({
-    msg: { name: 'api/examples/doThing/v1', data: { foo: 'bar' }, responseIndex: 0 },
+    msg: { name, data: { foo: 'bar' }, responseIndex: 0 },
     socket,
     token: 'tok-1',
   });
@@ -283,6 +284,38 @@ const PARITY_CASES: ParityCase[] = [
       seam.hookResults.preApiExecute = { stopped: true, signal: { errorCode: 'hook.blocked' } };
     },
     expect: { status: 'error', httpStatus: 403, errorCode: 'hook.blocked' },
+  },
+  {
+    title: 'preApiValidate stop signal → short-circuits with signal code + status',
+    arrange: () => {
+      registerRoute();
+      seam.hookResults.preApiValidate = { stopped: true, signal: { errorCode: 'payment.tooLarge', httpStatus: 422 } };
+    },
+    expect: { status: 'error', httpStatus: 422, errorCode: 'payment.tooLarge' },
+  },
+  {
+    title: 'preApiValidate stop signal without httpStatus → defaults to 403',
+    arrange: () => {
+      registerRoute();
+      seam.hookResults.preApiValidate = { stopped: true, signal: { errorCode: 'payment.tooLarge' } };
+    },
+    expect: { status: 'error', httpStatus: 403, errorCode: 'payment.tooLarge' },
+  },
+  {
+    title: 'api.requestTimeoutMs: 0 → timeout disabled, async handler succeeds',
+    arrange: () => {
+      seam.projectConfig.api.requestTimeoutMs = 0;
+      registerRoute({ main: vi.fn(() => new Promise((resolve) => { setTimeout(() => { resolve({ status: 'success', result: { ok: true } }); }, 5); })) });
+    },
+    expect: { status: 'success', httpStatus: 200 },
+  },
+  {
+    title: 'api.requestTimeoutMs negative → timeout disabled, async handler succeeds',
+    arrange: () => {
+      seam.projectConfig.api.requestTimeoutMs = -1;
+      registerRoute({ main: vi.fn(() => new Promise((resolve) => { setTimeout(() => { resolve({ status: 'success', result: { ok: true } }); }, 5); })) });
+    },
+    expect: { status: 'success', httpStatus: 200 },
   },
   {
     title: 'preApiRespond stop signal → localized error envelope',
@@ -538,4 +571,139 @@ describe('transport parity — error responses run the respond-hook chain (#6)',
     //? The stop signal's errorCode supersedes the original auth.required.
     expect(socket.errorCode).toBe('respond.blocked');
   });
+});
+
+//? Payloads every dispatch of `hookName` received, for routeName/transport checks.
+const hookPayloads = (hookName: string): Record<string, unknown>[] =>
+  dispatchHookMock.mock.calls
+    .filter((c) => c[0] === hookName)
+    .map((c) => c[1] as Record<string, unknown>);
+
+const respondHookNames = ['preApiRespond', 'transformApiResponse', 'postApiRespond'] as const;
+
+//? --- preApiValidate stop is a veto: the handler never runs and no validation
+//? outcome is reported (the HookResult contract, mirrored by preSyncValidate). ---
+describe('transport parity — preApiValidate stop signal vetoes execution', () => {
+  for (const drive of [driveHttp, driveSocket]) {
+    it(`${drive === driveHttp ? 'HTTP' : 'socket'}: main() and postApiValidate never run`, async () => {
+      seam = defaultSeam();
+      const main = vi.fn(() => Promise.resolve({ status: 'success', result: { ok: true } }));
+      registerRoute({ main });
+      seam.hookResults.preApiValidate = { stopped: true, signal: { errorCode: 'payment.tooLarge' } };
+
+      const observed = await drive();
+
+      expect(observed.errorCode).toBe('payment.tooLarge');
+      expect(main).not.toHaveBeenCalled();
+      expect(validateInputByTypeMock).not.toHaveBeenCalled();
+      expect(hookPayloads('postApiValidate')).toHaveLength(0);
+      expect(hookPayloads('preApiExecute')).toHaveLength(0);
+    });
+  }
+});
+
+//? --- Respond hooks and the error formatter see the CANONICAL route name on
+//? HTTP, not the raw request spelling. A variant spelling (trailing slash) runs
+//? the same handler, so it must not dodge route-keyed redaction. ---
+describe('transport parity — respond hooks receive the canonical route name', () => {
+  const canonical = 'api/examples/doThing/v1';
+
+  const arrangeCanonical = (registered: boolean): void => {
+    seam = defaultSeam();
+    seam.parsedRoute = { status: 'success', normalizedFullName: canonical, serviceRoute: { normalizedRouteName: 'examples/doThing' } };
+    if (registered) {
+      seam.apisObject[canonical] = {
+        auth: { login: false, additional: [] },
+        main: vi.fn(() => Promise.resolve({ status: 'success', result: { email: 'a@b.c' } })),
+      };
+    }
+  };
+
+  for (const drive of [driveHttp, driveSocket]) {
+    const label = drive === driveHttp ? 'HTTP' : 'socket';
+
+    it(`${label}: a trailing-slash request reports the canonical name to every respond hook`, async () => {
+      arrangeCanonical(true);
+      const observed = await drive(`${canonical}/`);
+      expect(observed.status).toBe('success');
+      for (const hook of respondHookNames) {
+        expect(hookPayloads(hook).map((p) => p.routeName)).toEqual([canonical]);
+      }
+    });
+
+    it(`${label}: an unknown route still reports the canonical name and the formatter gets it too`, async () => {
+      arrangeCanonical(false);
+      const observed = await drive(`${canonical}/`);
+      expect(observed.errorCode).toBe('api.notFound');
+      for (const hook of respondHookNames) {
+        expect(hookPayloads(hook).map((p) => p.routeName)).toEqual([canonical]);
+      }
+      expect(applyErrorFormatterMock.mock.calls.map((c) => c[0].routeName)).toEqual([canonical]);
+    });
+  }
+
+  it('HTTP: a name that fails to parse falls back to the raw (api/-prefixed) name', async () => {
+    seam = defaultSeam();
+    seam.parsedRoute = { status: 'error' };
+    await driveHttp('bad name');
+    expect(hookPayloads('preApiRespond').map((p) => p.routeName)).toEqual(['api/bad name']);
+  });
+});
+
+//? --- apiAuthRejected is keyed by the canonical route name on the socket
+//? transport too, so spelling variants share one consumer throttle key. ---
+describe('transport parity — apiAuthRejected receives the canonical route name', () => {
+  const canonical = 'api/admin/secret/v1';
+
+  for (const drive of [driveHttp, driveSocket]) {
+    for (const variant of ['admin/secret/v1', ' api/admin/secret/v1/']) {
+      it(`${drive === driveHttp ? 'HTTP' : 'socket'}: "${variant}" → ${canonical}`, async () => {
+        seam = defaultSeam();
+        seam.session = null;
+        seam.parsedRoute = { status: 'success', normalizedFullName: canonical, serviceRoute: { normalizedRouteName: 'admin/secret' } };
+        seam.apisObject[canonical] = { auth: { login: true, additional: [] }, main: vi.fn() };
+
+        const observed = await drive(variant);
+
+        expect(observed.errorCode).toBe('auth.required');
+        expect(hookPayloads('apiAuthRejected').map((p) => p.routeName)).toEqual([canonical]);
+      });
+    }
+  }
+
+  it('socket: an additional-predicate rejection also uses the canonical name', async () => {
+    seam = defaultSeam();
+    seam.parsedRoute = { status: 'success', normalizedFullName: canonical, serviceRoute: { normalizedRouteName: 'admin/secret' } };
+    seam.apisObject[canonical] = { auth: { login: false, additional: [] }, main: vi.fn() };
+    seam.validateRequestResult = { status: 'error', errorCode: 'auth.notAdmin' };
+
+    await driveSocket('admin/secret/v1/');
+
+    expect(hookPayloads('apiAuthRejected').map((p) => p.routeName)).toEqual([canonical]);
+  });
+});
+
+//? --- Respond-phase hook payloads carry the documented `transport` tag on both
+//? transports, for success and error responses alike. ---
+describe('transport parity — respond hooks carry the transport tag', () => {
+  for (const [drive, transport] of [[driveHttp, 'http'], [driveSocket, 'socket']] as const) {
+    it(`${transport}: success response`, async () => {
+      seam = defaultSeam();
+      registerRoute();
+      await drive();
+      for (const hook of respondHookNames) {
+        expect(hookPayloads(hook).map((p) => p.transport)).toEqual([transport]);
+      }
+    });
+
+    it(`${transport}: error response`, async () => {
+      seam = defaultSeam();
+      seam.session = null;
+      registerRoute({ auth: { login: true, additional: [] } });
+      await drive();
+      for (const hook of respondHookNames) {
+        expect(hookPayloads(hook).map((p) => p.transport)).toEqual([transport]);
+      }
+    });
+  }
 });
