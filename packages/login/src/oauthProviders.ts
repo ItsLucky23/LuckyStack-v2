@@ -10,7 +10,7 @@
 //? Custom providers (Okta, Apple, X, etc.) plug in as raw `OAuthProvider`
 //? objects alongside the helpers.
 
-import { tryCatch } from '@luckystack/core';
+import { getLogger, tryCatch } from '@luckystack/core';
 
 export type OAuthUserData = Record<string, unknown>;
 
@@ -390,6 +390,20 @@ export interface MicrosoftProviderInput extends OAuthHelperInput {
 //? accounts), so no single admin vouches for the reported `mail`.
 const MICROSOFT_MULTI_TENANT_SEGMENTS = new Set(['common', 'organizations', 'consumers']);
 
+//? Treating multi-tenant `mail` as unverified only stops NEW accounts and
+//? cross-provider links. An EXISTING Microsoft account is still matched by
+//? (email, provider), so another tenant's admin who sets `mail` to that address
+//? signs in as its owner. Blocking that would lock out every existing
+//? multi-tenant login, so it stays a consumer decision; warn once at boot.
+let warnedMultiTenant = false;
+const warnMultiTenantOnce = (tenant: string): void => {
+  if (warnedMultiTenant) return;
+  warnedMultiTenant = true;
+  getLogger().warn(
+    `[login] microsoftProvider tenant '${tenant}' accepts accounts from any Entra tenant: an existing Microsoft account is matched on an unverified Graph mail, so another tenant's admin can sign in as its owner (nOAuth). Set \`tenant\` to your organisation's tenant id or domain to close this.`,
+  );
+};
+
 //? NOTE: Microsoft flow is implemented but has not been end-to-end verified
 //? against an Azure AD tenant as of 2026-05-14. The token-exchange URL, the
 //? Graph /me shape, and the photo data-URL pipeline are based on Microsoft
@@ -401,6 +415,7 @@ export const microsoftProvider = (input: MicrosoftProviderInput): FullOAuthProvi
   const graphVersion = input.graphApiVersion ?? 'v1.0';
   const allowUpnFallback = input.allowUpnFallback ?? false;
   const isSingleTenant = !MICROSOFT_MULTI_TENANT_SEGMENTS.has(tenant.toLowerCase());
+  if (!isSingleTenant) warnMultiTenantOnce(tenant);
   return {
   name: 'microsoft',
   clientID: requireString(input.clientId, 'microsoft clientId'),

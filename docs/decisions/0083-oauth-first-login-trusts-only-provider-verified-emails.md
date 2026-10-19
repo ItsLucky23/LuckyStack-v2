@@ -49,6 +49,13 @@ provider.
 
 - Microsoft apps on the default `common` tenant (and `organizations`,
   `consumers`) cannot sign up new users; existing accounts still sign in.
+- That leaves a residual risk on those tenants: an existing Microsoft account
+  is still matched by its unverified `mail`, so an admin of another tenant who
+  sets `mail` to a user's address signs in as that user. Refusing those logins
+  would lock out every existing multi-tenant user, so that is left to the
+  owner; `microsoftProvider` warns once at boot instead. The real fix is a
+  single-tenant app, or binding accounts to the provider's subject id (a
+  schema change, see above).
 - GitHub sign-in depends on access to the user's email list, which the
   default scope grants.
 - This record does not number the M2 creation guard or the SEC-21 link guard;

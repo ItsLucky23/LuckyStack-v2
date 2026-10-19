@@ -29,6 +29,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`saveSession(..., { onlyIfExists: true })` never recreates a session that was deleted in the meantime** and never re-adds its token to the active-session set (ADR 0077).
 - **Log and error-tracker redaction masks 2FA and recovery codes** (`recoveryCode`, `totp`, `totpCode` in any spelling) once `@luckystack/login` is loaded. A bare `code` key is deliberately left alone.
 
+### Security
+
+- **`microsoftProvider` warns once at boot when `tenant` is `common` (the default), `organizations` or `consumers`.** Existing Microsoft accounts on such an app are still matched by an unverified `mail`, so an admin of any other tenant can sign in as an existing user (nOAuth). Set `tenant` to your organisation's tenant id or domain to close this; binding accounts to the provider's subject id would need a schema change (ADR 0083).
+
 ## [0.12.0] - 2026-10-15
 
 ### Changed

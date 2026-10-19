@@ -3,8 +3,10 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 //? oauthProviders.ts imports `tryCatch` from @luckystack/core (used only inside
 //? the github/microsoft network accessors, which these tests do not exercise).
 //? Mock it so importing the module needs no real core runtime.
+const { warnSpy } = vi.hoisted(() => ({ warnSpy: vi.fn() }));
 vi.mock("@luckystack/core", () => ({
   tryCatch: vi.fn(),
+  getLogger: () => ({ warn: warnSpy }),
 }));
 
 import {
@@ -188,6 +190,19 @@ describe("OAuth provider factories", () => {
       "https://login.microsoftonline.com/my-tenant/oauth2/v2.1/token",
     );
     expect(p.userInfoURL).toBe("https://graph.microsoft.com/beta/me");
+  });
+
+  it("microsoftProvider warns once for a multi-tenant segment and never for a specific tenant", async () => {
+    //? Fresh module instance: the once-flag is module state.
+    vi.resetModules();
+    warnSpy.mockClear();
+    const fresh = await import("./oauthProviders");
+    fresh.microsoftProvider({ ...baseInput, tenant: "contoso.onmicrosoft.com" });
+    expect(warnSpy).not.toHaveBeenCalled();
+    fresh.microsoftProvider({ ...baseInput, tenant: "Organizations" });
+    fresh.microsoftProvider(baseInput);
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    expect(warnSpy.mock.calls[0]?.[0]).toContain("nOAuth");
   });
 });
 
