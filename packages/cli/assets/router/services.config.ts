@@ -6,6 +6,10 @@
 //?
 //?   services: { system: { source: 'root' }, vehicles: { source: 'vehicles' } },
 //?   presets:  { default: { services: ['system'] }, fleet: { services: ['vehicles'] } },
+//?
+//? Every top-level `src/` folder holding `_api` / `_sync` routes is a service and
+//? must be declared here and placed in a preset; the production build fails
+//? otherwise, because no bundle would contain those routes.
 
 import { registerServicesConfig } from '@luckystack/core';
 
@@ -30,6 +34,9 @@ export interface ServicesConfig {
 const servicesConfig: ServicesConfig = {
   services: {
     system: { source: 'root' },
+    //? The account pages' routes (`src/settings/_api`, `src/reset-password/_api`).
+    settings: { source: 'settings' },
+    'reset-password': { source: 'reset-password' },
   },
   customRoutes: {
     '/auth': 'system',
@@ -42,8 +49,8 @@ const servicesConfig: ServicesConfig = {
   },
   presets: {
     default: {
-      description: 'Default bundle — every API/sync route in src/_api and src/_sync.',
-      services: ['system'],
+      description: 'Default bundle — every API/sync route in src/_api and src/_sync, plus the account pages.',
+      services: ['system', 'settings', 'reset-password'],
     },
   },
 };
