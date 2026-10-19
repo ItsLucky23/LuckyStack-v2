@@ -4,8 +4,9 @@
 //? router topology files (services.config.ts + deploy.config.ts + the build-time
 //? server/config/presetLoader.ts) are NOT shipped in a base install, `add` ALSO
 //? copies them in + wires their two side-effect imports into server/server.ts;
-//? `remove` deletes them again + un-wires the imports. A single-instance app never
-//? runs the router — this just makes scaling out later `npm run router`, no rewiring.
+//? `remove` deletes the unedited ones again (edited ones are kept + listed) and
+//? un-wires the imports. A single-instance app never runs the router — this just
+//? makes scaling out later `npm run router`, no rewiring.
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -26,16 +27,14 @@ import {
   type Result,
 } from '../lib/project';
 import type { AddOptions } from './addPresence';
+import { splitShippedFiles } from '../lib/shippedFiles';
 
 const PKG = '@luckystack/router';
 
-//? Project-root-relative paths of the topology files the router needs. Order is
-//? irrelevant for deletion; copy is handled wholesale by copyDirIfAbsent.
-const ROUTER_CONFIG_FILES = [
-  'services.config.ts',
-  'deploy.config.ts',
-  path.join('server', 'config', 'presetLoader.ts'),
-];
+//? Project-root-relative (posix, to match manifest + asset paths) topology files
+//? the router needs. Copy is handled wholesale by copyDirIfAbsent.
+const PRESET_LOADER = 'server/config/presetLoader.ts';
+const ROUTER_CONFIG_FILES = ['services.config.ts', 'deploy.config.ts', PRESET_LOADER];
 
 const SERVER_ENTRY = path.join('server', 'server.ts');
 //? Anchor: the project-config side-effect import that EVERY scaffold's server.ts
@@ -143,12 +142,20 @@ export const removeRouter = (project: ConsumerProject): Result<void> => {
     //? is reported while the files still exist to point at.
     unwireServerImports(project);
     setInvocationTransport(project, ROUTED_INVOCATION, SOCKET_INVOCATION);
-    for (const rel of ROUTER_CONFIG_FILES) {
-      const abs = path.join(project.root, rel);
-      if (fs.existsSync(abs)) {
-        fs.rmSync(abs);
-        console.log(`• removed ${rel}`);
-      }
+    //? The add message tells the user to edit these files (topology lives in
+    //? deploy.config.ts), and the registry promises a 'safe' removal touches no
+    //? user-owned file — so only unedited shipped copies go. An edited preset
+    //? loader imports the other two, so keeping it keeps them as well.
+    const present = ROUTER_CONFIG_FILES.filter((rel) => fs.existsSync(path.join(project.root, rel)));
+    const split = splitShippedFiles(project.root, present, assetPath('router'));
+    const kept = split.kept.includes(PRESET_LOADER) ? present : split.kept;
+    for (const rel of present.filter((file) => !kept.includes(file))) {
+      fs.rmSync(path.join(project.root, rel));
+      console.log(`• removed ${rel}`);
+    }
+    if (kept.length > 0) {
+      console.warn('⚠ kept router config you edited (not deleted — delete it yourself once you no longer need it):');
+      for (const rel of kept) console.warn(`    ${rel}`);
     }
   } catch (error) {
     return err(toError(error));

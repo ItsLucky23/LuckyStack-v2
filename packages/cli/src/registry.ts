@@ -77,7 +77,9 @@ export const REGISTRY: readonly RegistryEntry[] = [
     id: 'cron',
     pkg: '@luckystack/cron',
     kind: 'backend',
-    description: 'Leader-elected recurring jobs (cron expressions / intervals; runs on exactly one instance)',
+    //? Leases are best-effort (a stalled leader can overlap its successor), so
+    //? this must not promise exactly-once — the cron package's own contract.
+    description: 'Leader-elected recurring jobs (cron expressions / intervals; normally one instance fires each run — handlers must be idempotent)',
     removable: 'safe',
     note: 'Register jobs with registerCronJob(...) in luckystack/cron/*.ts; the scheduler starts on the first registration.',
   },
