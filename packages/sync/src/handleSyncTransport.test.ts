@@ -68,7 +68,12 @@ const tryCatch = vi.hoisted(() =>
   ),
 );
 
-vi.mock("@luckystack/core", () => {
+vi.mock("@luckystack/core", async () => {
+  //? The real AsyncLocalStorage identity scope (no I/O), so a test can observe
+  //? which user a detached delivery is attributed to.
+  const identity = await vi.importActual<typeof import("../../core/src/errorTrackerIdentity")>(
+    "../../core/src/errorTrackerIdentity",
+  );
   return {
     tryCatch,
     getProjectConfig: () => state.config,
@@ -100,8 +105,9 @@ vi.mock("@luckystack/core", () => {
     applyErrorFormatter: vi.fn(({ response }: { response: unknown }) => response),
     formatRoomName: vi.fn((room: string) => room),
     resolveClientIp: vi.fn(() => "127.0.0.1"),
-    runWithErrorTrackerIdentityScope: vi.fn((fn: () => unknown) => fn()),
-    setCurrentErrorTrackerIdentity: vi.fn(),
+    runWithErrorTrackerIdentityScope: identity.runWithErrorTrackerIdentityScope,
+    setCurrentErrorTrackerIdentity: identity.setCurrentErrorTrackerIdentity,
+    getCurrentErrorTrackerIdentity: identity.getCurrentErrorTrackerIdentity,
     registerSyncAbortController: vi.fn((socketId: string, cb: string) => {
       state.registerCalls.push({ socketId, cb });
       return `${socketId}:${cb}`;
@@ -798,6 +804,35 @@ describe("HTTP answers the originator before the per-recipient fan-out finishes"
     (mockedCore.dispatchHook as ReturnType<typeof vi.fn>).mockImplementation(() => Promise.resolve({ stopped: false as const }));
     expect(result.status).toBe("error");
     expect(result.errorCode).toBe("custom.denied");
+  });
+
+  it("a _client handler that throws after the answer still runs as the originator's user", async () => {
+    //? The detached delivery must keep the request's identity scope, so an
+    //? error captured there is attributed to the originator, not to nobody.
+    let releaseClient: () => void = () => undefined;
+    const clientGate = new Promise<void>((resolve) => { releaseClient = resolve; });
+    const seen: { identity: unknown } = { identity: "not-run" };
+    state.session = { id: "u-origin", email: "origin@example.com", name: "Origin", roomCodes: ["chat-room"] };
+    state.syncObject = {
+      [`${ROUTE}_server`]: serverEntry(SERVER_OUTPUT),
+      [`${ROUTE}_client`]: vi.fn(async () => {
+        await clientGate;
+        seen.identity = mockedCore.getCurrentErrorTrackerIdentity();
+        throw new Error("client handler failed");
+      }),
+    };
+    (mockedCore.getIoInstance as ReturnType<typeof vi.fn>).mockReturnValue(makeIoInstance([makeRecipientSocket()]));
+
+    const result = await handleHttpSyncRequest({
+      name: ROUTE, data: {}, receiver: "chat-room", token: "tokenA", requesterIp: "127.0.0.1",
+    });
+    expect(result.status).toBe("success");
+    //? The test body is outside any request scope.
+    expect(mockedCore.getCurrentErrorTrackerIdentity()).toBeNull();
+
+    releaseClient();
+    await vi.waitFor(() => { expect(seen.identity).not.toBe("not-run"); });
+    expect(seen.identity).toEqual({ id: "u-origin", email: "origin@example.com", username: "Origin" });
   });
 });
 
