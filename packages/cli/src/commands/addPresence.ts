@@ -8,7 +8,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { addDependency, editFile, err, ok, resolveLuckyStackRange, runNpmInstall, toError, type ConsumerProject, type Result } from '../lib/project';
+import { addDependency, editFile, editFiles, err, ok, resolveLuckyStackRange, runNpmInstall, toError, type ConsumerProject, type FileEdit, type Result } from '../lib/project';
 
 export interface AddOptions {
   install: boolean;
@@ -37,54 +37,65 @@ const enablePresenceFlags = (configPath: string): Result<void> => {
   return ok();
 };
 
-//? Reverse the pruner's edits in main.tsx + TemplateProvider.tsx. `editFile`
-//? throws on a missing token (drifted template); we convert that into a returned
-//? Result so the CLI entry reports it cleanly instead of crashing with a stack
-//? trace. `editFile` writes each file atomically, so a throw can't half-edit it.
-const applyPresenceEdits = (mainPath: string, templateProviderPath: string): Result<void> => {
-  try {
-    editFile(mainPath, [
-      {
-        find: "import { createBrowserRouter, RouterProvider, useParams, useSearchParams, Outlet } from 'react-router-dom';",
-        replace: "import { createBrowserRouter, RouterProvider, useParams, useSearchParams } from 'react-router-dom';",
-      },
-      {
-        find: "import type { PageMiddleware } from '@luckystack/core/client';",
-        replace: "import type { PageMiddleware } from '@luckystack/core/client';\nimport { LocationProvider } from '@luckystack/presence/client';",
-      },
-      { find: 'element: <Outlet />,', replace: 'element: <LocationProvider />,' },
-    ]);
+//? main.tsx — reverse the pruner's three edits (PRUNED -> FULL).
+const MAIN_PRESENCE_EDITS: readonly FileEdit[] = [
+  {
+    find: "import { createBrowserRouter, RouterProvider, useParams, useSearchParams, Outlet } from 'react-router-dom';",
+    replace: "import { createBrowserRouter, RouterProvider, useParams, useSearchParams } from 'react-router-dom';",
+  },
+  {
+    find: "import type { PageMiddleware } from '@luckystack/core/client';",
+    replace: "import type { PageMiddleware } from '@luckystack/core/client';\nimport { LocationProvider } from '@luckystack/presence/client';",
+  },
+  { find: 'element: <Outlet />,', replace: 'element: <LocationProvider />,' },
+];
 
-    //? TemplateProvider.tsx — reverse the pruner's edits. The two import-line changes
-    //? are combined into a single find/replace so no intermediate state is needed as
-    //? an anchor (which would be fragile if the file is reformatted between edits).
-    editFile(templateProviderPath, [
-      {
-        find: "import { useTheme, useSession } from '@luckystack/core/client';",
-        replace: "import { SocketStatusIndicator } from '@luckystack/presence/client';\nimport { useTheme, useSession, useTranslator } from '@luckystack/core/client';",
-      },
-      {
-        find: "import type { SessionLayout } from 'config';\n",
-        replace: "import type { SessionLayout } from 'config';\nimport { useSocketStatus } from 'src/_providers/socketStatusProvider';\n",
-      },
-      {
-        find: '  const { setTheme } = useTheme();\n',
-        replace: '  const { setTheme } = useTheme();\n  const { socketStatus } = useSocketStatus();\n',
-      },
-      {
-        find: '  const { socketStatus } = useSocketStatus();\n',
-        replace: '  const { socketStatus } = useSocketStatus();\n  const translate = useTranslator();\n',
-      },
-      {
-        find: '      <TemplateComponent>{children}</TemplateComponent>',
-        replace:
-          "      <SocketStatusIndicator\n" +
-          '        status={socketStatus.self.status}\n' +
-          '        reconnectAttempt={socketStatus.self.reconnectAttempt}\n' +
-          "        label={translate({ key: 'template.socketStatus' })}\n" +
-          '      />\n' +
-          '      <TemplateComponent>{children}</TemplateComponent>',
-      },
+//? TemplateProvider.tsx — reverse the pruner's edits. The two import-line changes
+//? are combined into a single find/replace so no intermediate state is needed as
+//? an anchor (which would be fragile if the file is reformatted between edits).
+const TEMPLATE_PROVIDER_PRESENCE_EDITS: readonly FileEdit[] = [
+  {
+    find: "import { useTheme, useSession } from '@luckystack/core/client';",
+    replace: "import { SocketStatusIndicator } from '@luckystack/presence/client';\nimport { useTheme, useSession, useTranslator } from '@luckystack/core/client';",
+  },
+  {
+    find: "import type { SessionLayout } from 'config';\n",
+    replace: "import type { SessionLayout } from 'config';\nimport { useSocketStatus } from 'src/_providers/socketStatusProvider';\n",
+  },
+  {
+    find: '  const { setTheme } = useTheme();\n',
+    replace: '  const { setTheme } = useTheme();\n  const { socketStatus } = useSocketStatus();\n',
+  },
+  {
+    find: '  const { socketStatus } = useSocketStatus();\n',
+    replace: '  const { socketStatus } = useSocketStatus();\n  const translate = useTranslator();\n',
+  },
+  {
+    find: '      <TemplateComponent>{children}</TemplateComponent>',
+    replace:
+      "      <SocketStatusIndicator\n" +
+      '        status={socketStatus.self.status}\n' +
+      '        reconnectAttempt={socketStatus.self.reconnectAttempt}\n' +
+      "        label={translate({ key: 'template.socketStatus' })}\n" +
+      '      />\n' +
+      '      <TemplateComponent>{children}</TemplateComponent>',
+  },
+];
+
+//? Whether a client file already carries the presence mount (its import).
+export const hasPresenceImport = (filePath: string): boolean =>
+  fs.readFileSync(filePath, 'utf8').includes('@luckystack/presence/client');
+
+//? Apply the edits to every file NOT wired yet (null = already wired, skip), so a
+//? project an older CLI left half-wired is completed instead of skipped.
+//? `editFiles` computes all edits before writing anything: a token miss in
+//? TemplateProvider (often customized) leaves main.tsx untouched as well. The
+//? throw becomes a returned Result so the CLI reports it without a stack trace.
+const applyPresenceEdits = (mainPath: string | null, templateProviderPath: string | null): Result<void> => {
+  try {
+    editFiles([
+      ...(mainPath === null ? [] : [{ filePath: mainPath, edits: MAIN_PRESENCE_EDITS }]),
+      ...(templateProviderPath === null ? [] : [{ filePath: templateProviderPath, edits: TEMPLATE_PROVIDER_PRESENCE_EDITS }]),
     ]);
   } catch (error) {
     return err(toError(error));
@@ -102,18 +113,25 @@ export const addPresence = (project: ConsumerProject, options: AddOptions): Resu
     ));
   }
 
-  //? Idempotency: if the LocationProvider mount is already wired, presence is
-  //? already present (full scaffold, or a previous `add presence`). Skip the
-  //? edits but still ensure the dependency + install ran.
-  const mainAlreadyWired = fs.readFileSync(mainPath, 'utf8').includes('@luckystack/presence/client');
+  //? Idempotency per FILE: a file that already imports presence is wired (full
+  //? scaffold, or a previous `add presence`). Checking main.tsx alone let a re-run
+  //? report success while TemplateProvider never got <SocketStatusIndicator/>.
+  const mainWired = hasPresenceImport(mainPath);
+  const templateProviderWired = hasPresenceImport(templateProviderPath);
 
-  if (mainAlreadyWired) {
+  if (mainWired && templateProviderWired) {
     console.log('• presence client mounts already present — skipped JSX injection.');
   } else {
-    //? main.tsx — reverse the pruner's three edits (PRUNED -> FULL).
-    const edited = applyPresenceEdits(mainPath, templateProviderPath);
+    const edited = applyPresenceEdits(
+      mainWired ? null : mainPath,
+      templateProviderWired ? null : templateProviderPath,
+    );
     if (!edited.ok) return edited;
-    console.log('• injected <LocationProvider/> (main.tsx) + <SocketStatusIndicator/> (TemplateProvider.tsx)');
+    const injected = [
+      mainWired ? null : '<LocationProvider/> (main.tsx)',
+      templateProviderWired ? null : '<SocketStatusIndicator/> (TemplateProvider.tsx)',
+    ].filter((part) => part !== null);
+    console.log(`• injected ${injected.join(' + ')}`);
   }
 
   //? Add the dependency only AFTER the JSX edits succeed: a token-miss aborts above

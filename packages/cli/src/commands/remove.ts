@@ -13,10 +13,12 @@ import {
   assetPath,
   dropDependency,
   editFile,
+  editFiles,
   err,
   ok,
   toError,
   type ConsumerProject,
+  type FileEdit,
   type Result,
 } from '../lib/project';
 import { collectSourceFiles, matchAll } from '../lib/scan';
@@ -25,6 +27,7 @@ import { removeSentryShim } from './addErrorTracking';
 import { removeSecretManager } from './addSecretManager';
 import { monitoringDeps } from '../featureOptions';
 import { removeRouter } from './addRouter';
+import { hasPresenceImport } from './addPresence';
 import { removeAiDocs } from './addAiDocs';
 import type { RegistryEntry } from '../registry';
 
@@ -157,36 +160,43 @@ export const keptFilesNeedingLogin = (root: string, kept: readonly string[]): st
 //? Reverse the presence client mounts (mirror of create-luckystack-app's
 //? prunePresence): main.tsx swaps <LocationProvider/> back to <Outlet/>;
 //? TemplateProvider.tsx drops <SocketStatusIndicator/> + the wiring it needed.
-//? Each `editFile` is atomic + throws on a missing token, converted to a Result.
-const reversePresenceEdits = (mainPath: string, templateProviderPath: string): Result<void> => {
-  try {
-    editFile(mainPath, [
-      {
-        find: "import { createBrowserRouter, RouterProvider, useParams, useSearchParams } from 'react-router-dom';",
-        replace: "import { createBrowserRouter, RouterProvider, useParams, useSearchParams, Outlet } from 'react-router-dom';",
-      },
-      { find: "import { LocationProvider } from '@luckystack/presence/client';\n", replace: '' },
-      { find: 'element: <LocationProvider />,', replace: 'element: <Outlet />,' },
-    ]);
+const MAIN_PRESENCE_REVERSE_EDITS: readonly FileEdit[] = [
+  {
+    find: "import { createBrowserRouter, RouterProvider, useParams, useSearchParams } from 'react-router-dom';",
+    replace: "import { createBrowserRouter, RouterProvider, useParams, useSearchParams, Outlet } from 'react-router-dom';",
+  },
+  { find: "import { LocationProvider } from '@luckystack/presence/client';\n", replace: '' },
+  { find: 'element: <LocationProvider />,', replace: 'element: <Outlet />,' },
+];
 
-    editFile(templateProviderPath, [
-      { find: "import { SocketStatusIndicator } from '@luckystack/presence/client';\n", replace: '' },
-      {
-        find: "import { useTheme, useSession, useTranslator } from '@luckystack/core/client';",
-        replace: "import { useTheme, useSession } from '@luckystack/core/client';",
-      },
-      { find: "import { useSocketStatus } from 'src/_providers/socketStatusProvider';\n", replace: '' },
-      { find: '  const { socketStatus } = useSocketStatus();\n', replace: '' },
-      { find: '  const translate = useTranslator();\n', replace: '' },
-      {
-        find:
-          "      <SocketStatusIndicator\n" +
-          '        status={socketStatus.self.status}\n' +
-          '        reconnectAttempt={socketStatus.self.reconnectAttempt}\n' +
-          "        label={translate({ key: 'template.socketStatus' })}\n" +
-          '      />\n',
-        replace: '',
-      },
+const TEMPLATE_PROVIDER_PRESENCE_REVERSE_EDITS: readonly FileEdit[] = [
+  { find: "import { SocketStatusIndicator } from '@luckystack/presence/client';\n", replace: '' },
+  {
+    find: "import { useTheme, useSession, useTranslator } from '@luckystack/core/client';",
+    replace: "import { useTheme, useSession } from '@luckystack/core/client';",
+  },
+  { find: "import { useSocketStatus } from 'src/_providers/socketStatusProvider';\n", replace: '' },
+  { find: '  const { socketStatus } = useSocketStatus();\n', replace: '' },
+  { find: '  const translate = useTranslator();\n', replace: '' },
+  {
+    find:
+      "      <SocketStatusIndicator\n" +
+      '        status={socketStatus.self.status}\n' +
+      '        reconnectAttempt={socketStatus.self.reconnectAttempt}\n' +
+      "        label={translate({ key: 'template.socketStatus' })}\n" +
+      '      />\n',
+    replace: '',
+  },
+];
+
+//? Reverse only the files still wired (null = already reversed). `editFiles`
+//? computes both before writing either, so a token miss changes nothing — which
+//? is what the error below promises. Throws become a returned Result.
+const reversePresenceEdits = (mainPath: string | null, templateProviderPath: string | null): Result<void> => {
+  try {
+    editFiles([
+      ...(mainPath === null ? [] : [{ filePath: mainPath, edits: MAIN_PRESENCE_REVERSE_EDITS }]),
+      ...(templateProviderPath === null ? [] : [{ filePath: templateProviderPath, edits: TEMPLATE_PROVIDER_PRESENCE_REVERSE_EDITS }]),
     ]);
   } catch (error) {
     return err(toError(error));
@@ -223,12 +233,16 @@ const removePresence = (project: ConsumerProject, entry: RegistryEntry): Result<
     ));
   }
 
-  //? Idempotency: if the LocationProvider mount is already gone, the JSX is
-  //? already reversed (or presence was never client-wired). Skip the edits but
-  //? still drop the dependency.
-  const mainStillWired = fs.readFileSync(mainPath, 'utf8').includes('@luckystack/presence/client');
-  if (mainStillWired) {
-    const reversed = reversePresenceEdits(mainPath, templateProviderPath);
+  //? Idempotency per FILE: a file without the presence import is already
+  //? reversed (or was never client-wired). Checking main.tsx alone let a re-run
+  //? drop the dependency while TemplateProvider still imported the package.
+  const mainStillWired = hasPresenceImport(mainPath);
+  const templateProviderStillWired = hasPresenceImport(templateProviderPath);
+  if (mainStillWired || templateProviderStillWired) {
+    const reversed = reversePresenceEdits(
+      mainStillWired ? mainPath : null,
+      templateProviderStillWired ? templateProviderPath : null,
+    );
     if (!reversed.ok) {
       //? A token-miss here means the consumer hand-edited the injected presence
       //? mounts. We refuse to guess — nothing is changed (dep still present). Tell
@@ -244,7 +258,11 @@ const removePresence = (project: ConsumerProject, entry: RegistryEntry): Result<
         '    3. drop "@luckystack/presence" from package.json, then npm install.',
       ));
     }
-    console.log('• reverted <LocationProvider/> (main.tsx) + <SocketStatusIndicator/> (TemplateProvider.tsx)');
+    const reverted = [
+      mainStillWired ? '<LocationProvider/> (main.tsx)' : null,
+      templateProviderStillWired ? '<SocketStatusIndicator/> (TemplateProvider.tsx)' : null,
+    ].filter((part) => part !== null);
+    console.log(`• reverted ${reverted.join(' + ')}`);
   } else {
     console.log('• presence client mounts already absent — skipped JSX revert.');
   }

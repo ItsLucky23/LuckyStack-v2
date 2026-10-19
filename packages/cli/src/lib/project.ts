@@ -266,7 +266,8 @@ export interface FileEdit {
 //? matching (mirrors create-luckystack-app's editScaffoldFile) so `\n`-bearing
 //? tokens match regardless of checkout line endings. Throws when a token is
 //? absent so a drifted file surfaces loudly instead of silently half-applying.
-export const editFile = (filePath: string, edits: readonly FileEdit[]): void => {
+//? Returns the edited content; the callers below own the write.
+const applyEdits = (filePath: string, edits: readonly FileEdit[]): string => {
   const original = fs.readFileSync(filePath, 'utf8');
   //? Match against an LF-normalized copy so `\n`-bearing tokens hit regardless of
   //? the checkout's line endings, then restore CRLF on write-back if the file was
@@ -290,7 +291,20 @@ export const editFile = (filePath: string, edits: readonly FileEdit[]): void => 
     content = content.replace(find, () => replace);
   }
   if (wasCrlf) content = content.replaceAll('\n', '\r\n');
-  fs.writeFileSync(filePath, content);
+  return content;
+};
+
+//? `editFile` across several files as ONE unit: every file's edits are computed
+//? in memory first and nothing is written until all of them succeed. Two
+//? separate `editFile` calls would leave file 1 changed when file 2 drifted —
+//? exactly the half-wired state a feature add/remove must never leave behind.
+export const editFiles = (targets: readonly { filePath: string; edits: readonly FileEdit[] }[]): void => {
+  const results = targets.map(({ filePath, edits }) => ({ filePath, content: applyEdits(filePath, edits) }));
+  for (const { filePath, content } of results) fs.writeFileSync(filePath, content);
+};
+
+export const editFile = (filePath: string, edits: readonly FileEdit[]): void => {
+  editFiles([{ filePath, edits }]);
 };
 
 //? Recursively copy `srcDir` into `destDir`, skipping any file that already
