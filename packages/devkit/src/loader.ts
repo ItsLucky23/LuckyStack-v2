@@ -157,6 +157,9 @@ export const initializeAll = async () => {
 // Dev hot-reload uses dynamic `import()` so module load yields to the event
 // loop instead of blocking it the way CommonJS `require()` did. The `?v=...`
 // query is a cachebust so the ESM loader returns a fresh evaluation each save.
+//? Of THIS module only: the modules it imports stay cached by their plain URL,
+//? which is why a changed route dependency restarts the dev server instead
+//? (see `devServerRestart.ts`).
 const importFile = async (absolutePath: string) => {
   const url = `${pathToFileURL(absolutePath).href}?v=${Date.now()}`;
   return import(url);

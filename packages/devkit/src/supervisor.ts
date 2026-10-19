@@ -16,6 +16,7 @@ import { performance } from 'node:perf_hooks';
 import path from 'node:path';
 import { watch } from 'chokidar';
 import { parse as parseDotenv } from 'dotenv';
+import { isDevRestartMessage } from './devServerRestart';
 
 const RESTART_DEBOUNCE_MS = 150;
 const CRASH_RESTART_DELAY_MS = 300;
@@ -214,15 +215,28 @@ let childBootStartedAt = 0;
 let consecutiveFastCrashes = 0;
 let isShuttingDown = false;
 
-const startChild = () => {
+export const startChild = () => {
   if (isShuttingDown) return;
+  //? One child at a time. A watcher restart can start a child while a crash
+  //? restart is still pending; that timer would then start a SECOND child and
+  //? overwrite `childProcess`, orphaning the first: it keeps the port and is
+  //? never sent SIGTERM on shutdown.
+  if (crashRestartTimer) {
+    clearTimeout(crashRestartTimer);
+    crashRestartTimer = null;
+  }
+  if (childProcess) return;
   //? Defensive: `bootSupervisor()` already aborts on an unresolved spawn, so this
   //? is unreachable in practice — it exists to narrow the result type here.
   if (!resolvedChildSpawn.ok) return;
   const { command: childCommand, args: childArgs, runtime: childRuntime } = resolvedChildSpawn.spec;
+  //? The IPC channel carries the child's restart request (`devServerRestart.ts`).
+  //? Verified for Node and for Bun on Linux; Bun on Windows is unverified, so it
+  //? keeps plain stdio and its dev server falls back to a "restart needed" log.
+  const withIpc = childRuntime === 'node' || process.platform !== 'win32';
   childBootStartedAt = performance.now();
   const spawned = spawn(childCommand, childArgs, {
-    stdio: 'inherit',
+    stdio: withIpc ? ['inherit', 'inherit', 'inherit', 'ipc'] : 'inherit',
     //? `process.env` is guaranteed `.env`-free here (see the invariant at the
     //? top of this file), so the child loads `.env` fresh on every restart and
     //? picks up edited values — mirroring a cold `npm run server` boot.
@@ -245,6 +259,13 @@ const startChild = () => {
   //? resolves THIS child's lifecycle exactly once regardless of event order, so
   //? we never double-schedule a restart.
   let handled = false;
+
+  //? A route dependency changed in the child. Ignore a message from a child
+  //? that has already been replaced: restarting would kill its successor.
+  spawned.on('message', (message) => {
+    if (childProcess !== spawned || !isDevRestartMessage(message)) return;
+    scheduleRestart({ event: 'route dependency change', changedPath: message.reason });
+  });
 
   //? A failed `spawn` (ENOENT/EACCES — e.g. a missing `tsx`) emits `'error'`,
   //? NOT `'exit'`. Without this listener Node re-throws it as an uncaught
@@ -324,7 +345,7 @@ const startChild = () => {
   });
 };
 
-const scheduleRestart = ({
+export const scheduleRestart = ({
   event,
   changedPath,
 }: {

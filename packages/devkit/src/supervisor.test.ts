@@ -20,12 +20,20 @@ describe('supervisor env hygiene', () => {
   it('src/supervisor.ts imports nothing from @luckystack/core', () => {
     const source = readFileSync(path.join(here, 'supervisor.ts'), 'utf8');
     expect(source).not.toMatch(/from '@luckystack\/core'/);
+    //? …nor does the one devkit module it imports.
+    const restart = readFileSync(path.join(here, 'devServerRestart.ts'), 'utf8');
+    expect(restart).not.toMatch(/from ['"]/);
   });
 
   const distPath = path.join(here, '..', 'dist', 'supervisor.js');
   it.skipIf(!existsSync(distPath))('dist/supervisor.js bundles no @luckystack/core import', () => {
     const bundle = readFileSync(distPath, 'utf8');
     expect(bundle).not.toContain('@luckystack/core');
+    //? Code the supervisor shares with the dev server (the restart message)
+    //? lands in a split chunk; that chunk runs in the supervisor process too.
+    for (const [, chunk] of bundle.matchAll(/from "\.\/(chunk-[\w-]+\.js)"/g)) {
+      expect(readFileSync(path.join(here, '..', 'dist', chunk ?? ''), 'utf8')).not.toContain('@luckystack/core');
+    }
   });
 });
 
