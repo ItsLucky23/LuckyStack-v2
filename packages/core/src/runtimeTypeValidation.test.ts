@@ -197,3 +197,68 @@ describe('validateInputByType — fail-closed hardening', () => {
     expect(result.status).toBe('error');
   });
 });
+
+describe('validateInputByType — generated type text shapes', () => {
+  beforeEach(() => {
+    registerProjectConfig({});
+    process.env.NODE_ENV = 'production';
+  });
+
+  afterEach(() => {
+    process.env.NODE_ENV = originalNodeEnv;
+    registerProjectConfig({});
+  });
+
+  const validate = (typeText: string, value: unknown) => validateInputByType({ typeText, value, rootKey: 'data' });
+
+  it('accepts a value that satisfies an intersection of object types', async () => {
+    expect(await validate('{ a: string } & { b: number }', { a: 'x', b: 1 })).toEqual({ status: 'success' });
+    expect(await validate('{ a: string; } & ({ b?: number })', { a: 'x' })).toEqual({ status: 'success' });
+    expect(await validate('{ inner: { a: string } & { b: number } }', { inner: { a: 'x', b: 1 } })).toEqual({ status: 'success' });
+  });
+
+  it('still enforces every part of an object intersection and rejects undeclared keys', async () => {
+    expect((await validate('{ a: string } & { b: number }', { a: 'x' })).status).toBe('error');
+    expect((await validate('{ a: string } & { b: number }', { a: 'x', b: 'not-a-number' })).status).toBe('error');
+    expect(await validate('{ a: string } & { b: number }', { a: 'x', b: 1, c: true })).toEqual({ status: 'error', message: 'data.c is not allowed' });
+  });
+
+  it('merges an index signature from one part of the intersection', async () => {
+    expect(await validate('{ a: string } & { [key: string]: string }', { a: 'x', extra: 'y' })).toEqual({ status: 'success' });
+    expect((await validate('{ a: string } & { [key: string]: string }', { a: 'x', extra: 1 })).status).toBe('error');
+  });
+
+  it('does not trip over an ampersand inside a string literal', async () => {
+    expect(await validate("{ kind: 'a&b' }", { kind: 'a&b' })).toEqual({ status: 'success' });
+  });
+
+  it('compares escaped string literals against the unescaped value', async () => {
+    expect(await validate(String.raw`{ kind: 'it\'s' }`, { kind: "it's" })).toEqual({ status: 'success' });
+    expect(await validate(String.raw`{ path: 'a\\b' }`, { path: String.raw`a\b` })).toEqual({ status: 'success' });
+    expect((await validate(String.raw`{ kind: 'it\'s' }`, { kind: String.raw`it\'s` })).status).toBe('error');
+  });
+
+  it('accepts JSON data for JsonValue and rejects non-JSON values', async () => {
+    const typeText = '{ settings: JsonValue }';
+    expect(await validate(typeText, { settings: { theme: 'dark', sizes: [1, 2, null], nested: { on: true } } })).toEqual({ status: 'success' });
+    expect(await validate(typeText, { settings: 'plain' })).toEqual({ status: 'success' });
+    expect(await validate(typeText, { settings: null })).toEqual({ status: 'success' });
+    expect((await validate(typeText, { settings: { when: new Date() } })).status).toBe('error');
+    expect((await validate(typeText, { settings: Number.NaN })).status).toBe('error');
+    expect((await validate(typeText, { settings: JSON.parse('{"__proto__": {"x": 1}}') as unknown })).status).toBe('error');
+  });
+
+  it('distinguishes JsonObject and JsonArray', async () => {
+    expect(await validate('JsonObject', { a: [1] })).toEqual({ status: 'success' });
+    expect((await validate('JsonObject', [1])).status).toBe('error');
+    expect(await validate('JsonArray', [{ a: 1 }])).toEqual({ status: 'success' });
+    expect((await validate('JsonArray', { a: 1 })).status).toBe('error');
+  });
+
+  it('bounds the nesting depth of JsonValue data', async () => {
+    let deep: unknown = 'leaf';
+    for (let index = 0; index < 200; index += 1) deep = [deep];
+    const result = await validate('JsonValue', deep);
+    expect(result.status).toBe('error');
+  });
+});
