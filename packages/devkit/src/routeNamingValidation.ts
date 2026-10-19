@@ -10,7 +10,6 @@ import {
   apiMarkerSegment,
   syncMarkerSegment,
   getRoutingRules,
-  isRouteTestFile,
   validatePagePath,
 } from './routingRules';
 import { getOrInit } from './internal/mapUtils';
@@ -74,7 +73,15 @@ export const isInsidePrivateRouteSubfolder = (fullPath: string): boolean => {
 export const isRouteSurfaceFile = (fullPath: string): boolean =>
   !isInsidePrivateRouteSubfolder(fullPath) && !isTestFile(fullPath);
 
-const walkRouteFiles = (dir: string, results: string[] = []): string[] => {
+//? Marker checks run on the path BELOW srcDir, with a leading `/` so a marker
+//? directly under srcDir still matches the slash-wrapped segment. The absolute
+//? path is not usable: a checkout under a folder literally named `_api` would
+//? put a marker in every path, flagging every `.ts` in the project and reading
+//? each real route token as nested.
+const toSrcMarkerPath = (srcDir: string, filePath: string): string =>
+  `/${normalizePath(path.relative(srcDir, filePath))}`;
+
+const walkRouteFiles = (srcDir: string, dir = srcDir, results: string[] = []): string[] => {
   const entries = fs.readdirSync(dir, { withFileTypes: true });
   const apiSeg = apiMarkerSegment();
   const syncSeg = syncMarkerSegment();
@@ -82,19 +89,19 @@ const walkRouteFiles = (dir: string, results: string[] = []): string[] => {
 
   for (const entry of entries) {
     const fullPath = path.join(dir, entry.name);
-    const normalizedFullPath = normalizePath(fullPath);
+    const srcMarkerPath = toSrcMarkerPath(srcDir, fullPath);
 
     if (ignore(toRel(fullPath))) continue;
 
     //? Private helper subtree under a marker (`_api/_lib/…`) — not a route.
-    if (isInsidePrivateRouteSubfolder(fullPath)) continue;
+    if (isInsidePrivateRouteSubfolder(srcMarkerPath)) continue;
 
     if (entry.isDirectory()) {
       if (entry.name.startsWith('.') || entry.name === 'node_modules') {
         continue;
       }
 
-      walkRouteFiles(fullPath, results);
+      walkRouteFiles(srcDir, fullPath, results);
       continue;
     }
 
@@ -102,11 +109,14 @@ const walkRouteFiles = (dir: string, results: string[] = []): string[] => {
       continue;
     }
 
-    if (isRouteTestFile(entry.name)) {
+    //? The same predicate the loader and discovery use, so a co-located
+    //? `send.test.ts` / `send.spec.ts` is skipped here too instead of failing
+    //? boot as a misnamed route.
+    if (!isRouteSurfaceFile(srcMarkerPath)) {
       continue;
     }
 
-    if (normalizedFullPath.includes(apiSeg) || normalizedFullPath.includes(syncSeg)) {
+    if (srcMarkerPath.includes(apiSeg) || srcMarkerPath.includes(syncSeg)) {
       results.push(fullPath);
     }
   }
@@ -115,30 +125,31 @@ const walkRouteFiles = (dir: string, results: string[] = []): string[] => {
 };
 
 const getFileRouteToken = ({
-  normalizedFilePath,
+  srcMarkerPath,
   marker,
 }: {
-  normalizedFilePath: string;
+  srcMarkerPath: string;
   marker: string;
 }): string => {
-  const markerIndex = normalizedFilePath.indexOf(marker);
+  const markerIndex = srcMarkerPath.indexOf(marker);
   if (markerIndex === -1) {
     return '';
   }
 
   const tokenStart = markerIndex + marker.length;
-  return normalizedFilePath.slice(tokenStart, normalizedFilePath.length - '.ts'.length);
+  return srcMarkerPath.slice(tokenStart, srcMarkerPath.length - '.ts'.length);
 };
 
-const validateRouteFilePath = (filePath: string): RouteNamingIssue[] => {
+const validateRouteFilePath = (srcDir: string, filePath: string): RouteNamingIssue[] => {
   const issues: RouteNamingIssue[] = [];
   const normalizedFilePath = normalizePath(path.resolve(filePath));
+  const srcMarkerPath = toSrcMarkerPath(srcDir, filePath);
   const fileName = path.basename(filePath);
   const apiSeg = apiMarkerSegment();
   const syncSeg = syncMarkerSegment();
 
-  if (normalizedFilePath.includes(apiSeg)) {
-    const apiRouteToken = getFileRouteToken({ normalizedFilePath, marker: apiSeg });
+  if (srcMarkerPath.includes(apiSeg)) {
+    const apiRouteToken = getFileRouteToken({ srcMarkerPath, marker: apiSeg });
     if (apiRouteToken.includes('/')) {
       issues.push({
         kind: 'api',
@@ -158,8 +169,8 @@ const validateRouteFilePath = (filePath: string): RouteNamingIssue[] => {
     }
   }
 
-  if (normalizedFilePath.includes(syncSeg)) {
-    const syncRouteToken = getFileRouteToken({ normalizedFilePath, marker: syncSeg });
+  if (srcMarkerPath.includes(syncSeg)) {
+    const syncRouteToken = getFileRouteToken({ srcMarkerPath, marker: syncSeg });
     if (syncRouteToken.includes('/')) {
       issues.push({
         kind: 'sync',
@@ -237,9 +248,9 @@ const resolveSyncRouteKey = ({
   const kind = syncMatch[1];
   const version = `v${syncMatch[2]}`;
   const syncName = rawSyncName.replace(rules.syncVersionRegex, '');
-  const routeBaseKey = pageLocation
-    ? `sync/${pageLocation}/${syncName}/${version}`
-    : `sync/${syncName}/${version}`;
+  //? Root syncs map to `system`, like the API resolver and the loader's
+  //? runtime key, so `src/_sync/x` and `src/system/_sync/x` collide here too.
+  const routeBaseKey = `sync/${pageLocation || 'system'}/${syncName}/${version}`;
 
   return `${routeBaseKey}_${kind}`;
 };
@@ -249,7 +260,7 @@ export const collectInvalidRouteNamingIssues = (srcDir: string): RouteNamingIssu
   const issues: RouteNamingIssue[] = [];
 
   for (const filePath of allRouteFiles) {
-    issues.push(...validateRouteFilePath(filePath));
+    issues.push(...validateRouteFilePath(srcDir, filePath));
   }
 
   return issues.toSorted((a, b) => a.filePath.localeCompare(b.filePath));
@@ -264,8 +275,9 @@ export const collectDuplicateNormalizedRouteKeyIssues = (srcDir: string): Duplic
   const syncSeg = syncMarkerSegment();
   for (const filePath of allRouteFiles) {
     const normalizedFilePath = normalizePath(path.resolve(filePath));
+    const srcMarkerPath = toSrcMarkerPath(srcDir, filePath);
 
-    if (normalizedFilePath.includes(apiSeg)) {
+    if (srcMarkerPath.includes(apiSeg)) {
       const routeKey = resolveApiRouteKey({ srcDir, filePath });
       if (!routeKey) {
         continue;
@@ -276,7 +288,7 @@ export const collectDuplicateNormalizedRouteKeyIssues = (srcDir: string): Duplic
       continue;
     }
 
-    if (normalizedFilePath.includes(syncSeg)) {
+    if (srcMarkerPath.includes(syncSeg)) {
       const routeKey = resolveSyncRouteKey({ srcDir, filePath });
       if (!routeKey) {
         continue;
