@@ -5,7 +5,7 @@
 //? `<Middleware>`-wrapped page renders.
 
 import { useLocation, useNavigate } from 'react-router-dom';
-import { getMiddlewareHandler, getPageMiddleware, resolveMiddlewareOutcome } from '../middlewareRegistry';
+import { getMiddlewareHandler, resolveMiddlewareOutcome, resolvePageMiddleware } from '../middlewareRegistry';
 import { useSession } from './sessionContext';
 
 const getParams = (locationSearch: string) => {
@@ -27,8 +27,10 @@ export default function useRouter() {
     //? Per-page middleware first (declared via `export const middleware`
     //? on the target page.tsx), then the global fallback. Mirrors the
     //? `<Middleware>` component's resolution order so programmatic
-    //? navigations honor the same guards as direct URL hits.
-    const pageMw = getPageMiddleware(path);
+    //? navigations honor the same guards as direct URL hits. The resolver
+    //? strips `?query`/`#hash` and matches route patterns, so
+    //? `navigate('/settings?tab=a')` still finds the settings guard.
+    const pageMw = resolvePageMiddleware(path);
     const handler = pageMw ?? getMiddlewareHandler();
     const result = await handler({ location: path, searchParams: queryObject, session });
 

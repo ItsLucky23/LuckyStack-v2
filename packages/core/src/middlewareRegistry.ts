@@ -8,6 +8,7 @@
 //? `src/_functions/middlewareHandler.ts` file is required.
 
 import type { BaseSessionLayout } from './sessionTypes';
+import tryCatchSync from './tryCatchSync';
 
 export interface MiddlewareInput {
   location: string;
@@ -96,6 +97,58 @@ export const getPageMiddleware = (path: string): PageMiddleware | undefined =>
   pageMiddlewares.get(path);
 
 export const hasPageMiddleware = (path: string): boolean => pageMiddlewares.has(path);
+
+//? Pages register under their ROUTE PATTERN (lowercased, `[id]` → `:id`), but
+//? React Router renders a page for more URLs than that string: any letter case,
+//? a trailing slash, filled-in dynamic segments, percent-encoded segments and,
+//? for a `<route>/*` pattern, sub-paths. An exact Map lookup on the URL missed
+//? all of those and fell back to the allow-by-default global handler, so the
+//? page rendered unguarded. Resolve against the patterns the way the router
+//? matched them.
+const splitPath = (path: string): string[] => {
+  const withoutSuffix = path.split(/[?#]/, 1)[0] ?? '';
+  return withoutSuffix.split('/').filter((segment) => segment.length > 0);
+};
+
+const decodeSegment = (segment: string): string => {
+  const [error, decoded] = tryCatchSync(() => decodeURIComponent(segment));
+  return error || decoded === null ? segment : decoded;
+};
+
+//? Higher is more specific: a literal segment beats `:param`, both beat a
+//? trailing splat. Close enough to React Router's ranking for one page per
+//? pattern.
+const matchScore = (patternSegments: string[], pathSegments: string[]): number | null => {
+  let score = 0;
+  for (const [index, patternSegment] of patternSegments.entries()) {
+    if (patternSegment === '*' && index === patternSegments.length - 1) return score + 1;
+    const pathSegment = pathSegments[index];
+    if (pathSegment === undefined) return null;
+    if (patternSegment.startsWith(':')) {
+      score += 2;
+    } else if (patternSegment.toLowerCase() === pathSegment.toLowerCase()) {
+      score += 3;
+    } else {
+      return null;
+    }
+  }
+  return patternSegments.length === pathSegments.length ? score : null;
+};
+
+/**
+ * Resolve the per-page middleware for a URL or navigation target. Ignores
+ * letter case, trailing slashes, query and hash, fills `:param` segments and
+ * honours a trailing `*` pattern.
+ */
+export const resolvePageMiddleware = (path: string): PageMiddleware | undefined => {
+  const pathSegments = splitPath(path).map((segment) => decodeSegment(segment));
+  let best: { score: number; middleware: PageMiddleware } | null = null;
+  for (const [pattern, middleware] of pageMiddlewares) {
+    const score = matchScore(splitPath(pattern), pathSegments);
+    if (score !== null && (best === null || score > best.score)) best = { score, middleware };
+  }
+  return best?.middleware;
+};
 
 /** Test helper — drop every registered per-page middleware. */
 export const clearPageMiddlewaresForTests = (): void => {

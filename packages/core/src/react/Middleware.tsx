@@ -6,7 +6,7 @@
 
 import { ReactNode, useEffect, useRef, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { getMiddlewareHandler, getPageMiddleware, resolveMiddlewareOutcome } from '../middlewareRegistry';
+import { getMiddlewareHandler, resolveMiddlewareOutcome, resolvePageMiddleware } from '../middlewareRegistry';
 import { useSession } from './sessionContext';
 import { getProjectConfig } from '../projectConfig';
 
@@ -117,8 +117,10 @@ export default function Middleware({
       //? `export const middleware`), then the global fallback handler
       //? registered via `registerMiddlewareHandler`. This lets pages own
       //? their own guards while keeping a central catch-all for
-      //? cross-cutting cases (server-reachability checks, analytics).
-      const pageMw = getPageMiddleware(location.pathname);
+      //? cross-cutting cases (server-reachability checks, analytics). Resolved
+      //? against the registered route patterns, not by exact URL, so
+      //? `/ADMIN`, `/admin/` and `/orders/123` hit their page's guard.
+      const pageMw = resolvePageMiddleware(location.pathname);
       const handler = pageMw ?? getMiddlewareHandler();
       const result = await handler({
         location: location.pathname,

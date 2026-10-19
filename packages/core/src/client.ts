@@ -134,6 +134,7 @@ export {
   registerPageMiddleware,
   getPageMiddleware,
   hasPageMiddleware,
+  resolvePageMiddleware,
 } from './middlewareRegistry';
 export type {
   MiddlewareInput,
