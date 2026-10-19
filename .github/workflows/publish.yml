@@ -7,6 +7,9 @@ name: publish
 #   - manual workflow_dispatch with `dry_run` (default true) so a maintainer can
 #     validate the full build/lint/test/pack gate without uploading anything.
 #
+# A real publish additionally requires: a v* tag ref, a tag equal to the
+# lockstep package version, and a successful `ci` run for the same commit.
+#
 # Provenance: each package sets `publishConfig.provenance: true` and the real
 # publish passes `--provenance`. npm only mints a provenance attestation when the
 # job runs in a supported CI with an OIDC id-token, hence `permissions.id-token`.
@@ -35,6 +38,8 @@ jobs:
       id-token: write
       # Read the repository contents for the build.
       contents: read
+      # Read the `ci` workflow's runs for this commit (release gate below).
+      actions: read
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -45,6 +50,83 @@ jobs:
           node-version: '22'
           cache: 'npm'
           registry-url: 'https://registry.npmjs.org'
+
+      # --- Release gates (fail before any build work) ---
+      # A real publish only runs from a v* tag. A non-dry manual run on a branch
+      # would publish whatever versions that branch holds, with provenance
+      # pointing at a branch instead of a release tag.
+      - name: Real publish requires a version tag
+        if: ${{ github.event_name == 'workflow_dispatch' && !inputs.dry_run && !startsWith(github.ref, 'refs/tags/v') }}
+        run: |
+          echo "::error::A real publish must run on a v* tag, not ${GITHUB_REF}. Dispatch it on the release tag, or keep dry_run on."
+          exit 1
+
+      # publishPackages.mjs publishes whatever version package.json holds and
+      # skips versions already on npm. Without this check a tag on a commit whose
+      # bump was forgotten ended green with "published 0 packages", and a tag on
+      # the wrong commit published another version under this tag's provenance.
+      - name: Tag must equal the lockstep package version
+        if: ${{ startsWith(github.ref, 'refs/tags/') }}
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          node --input-type=module <<'NODE'
+          import fs from 'node:fs';
+          import path from 'node:path';
+          const tag = process.env.RELEASE_TAG ?? '';
+          const packages = fs.readdirSync('packages', { withFileTypes: true })
+            .filter((entry) => entry.isDirectory() && fs.existsSync(path.join('packages', entry.name, 'package.json')))
+            .map((entry) => JSON.parse(fs.readFileSync(path.join('packages', entry.name, 'package.json'), 'utf8')));
+          const versions = [...new Set(packages.map((pkg) => pkg.version))];
+          if (packages.length === 0) {
+            console.error('::error::No packages/*/package.json found.');
+            process.exit(1);
+          }
+          if (versions.length !== 1) {
+            console.error(`::error::Packages are not on one lockstep version: ${packages.map((pkg) => `${pkg.name}@${pkg.version}`).join(', ')}`);
+            process.exit(1);
+          }
+          if (tag !== `v${versions[0]}`) {
+            console.error(`::error::Tag ${tag} does not match the package version ${versions[0]} (expected v${versions[0]}). Bump the versions or tag the right commit.`);
+            process.exit(1);
+          }
+          console.log(`Tag ${tag} matches ${String(packages.length)} packages at ${versions[0]}.`);
+          NODE
+
+      # ci.yml's `e2e-scaffold` job is the only check of the real consumer path
+      # (publish to a throwaway registry, scaffold, install, build); this workflow
+      # does not run it. So a real publish waits for the `ci` run of this exact
+      # commit and refuses unless it succeeded. Push the commit (main or a PR)
+      # before tagging it, or no run exists.
+      - name: Require a green `ci` run for this commit
+        if: ${{ !(github.event_name == 'workflow_dispatch' && inputs.dry_run) }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          started=$(date +%s)
+          while :; do
+            runs=$(gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/ci.yml/runs?head_sha=${GITHUB_SHA}&per_page=50" \
+              --jq '[.workflow_runs[] | {status, conclusion}]')
+            elapsed=$(( $(date +%s) - started ))
+            if echo "$runs" | jq -e 'any(.[]; .conclusion == "success")' > /dev/null; then
+              echo "ci succeeded for ${GITHUB_SHA}."
+              exit 0
+            fi
+            if echo "$runs" | jq -e 'length > 0 and all(.[]; .status == "completed")' > /dev/null; then
+              echo "::error::No successful ci run for ${GITHUB_SHA}: ${runs}. Fix ci, re-run it, then re-run this workflow."
+              exit 1
+            fi
+            if echo "$runs" | jq -e 'length == 0' > /dev/null && [ "$elapsed" -ge 600 ]; then
+              echo "::error::No ci run exists for ${GITHUB_SHA}. Push the commit to main or a pull request before tagging it."
+              exit 1
+            fi
+            if [ "$elapsed" -ge 3000 ]; then
+              echo "::error::Timed out waiting for ci on ${GITHUB_SHA}: ${runs}"
+              exit 1
+            fi
+            echo "Waiting for ci on ${GITHUB_SHA}: ${runs}"
+            sleep 30
+          done
 
       # npm provenance requires npm >= 9.5. Pin the exact release toolchain:
       # `latest` previously changed CI's lockfile semantics between releases.
