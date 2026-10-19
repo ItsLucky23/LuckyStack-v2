@@ -74,12 +74,27 @@ export const consumePasswordResetToken = async (token: string): Promise<string |
 };
 
 /**
+ * Invalidate the user's outstanding password-reset link, if any. Call it when
+ * control of the account changes (password reset or change, email change):
+ * a link mailed before that change must not stay redeemable afterwards.
+ */
+export const invalidatePasswordResetToken = async (userId: string): Promise<void> => {
+  const pointerKey = pwresetUserKey(userId);
+  const priorKey = await redis.get(pointerKey);
+  if (priorKey) {
+    await redis.del(priorKey);
+  }
+  await redis.del(pointerKey);
+};
+
+/**
  * Bcrypt-hash a plaintext password and write it to the user record via the
  * registered user adapter. Used by the reset flow and by the settings
  * password-change flow. Validates against the active password policy
  * (`projectConfig.auth.passwordPolicy`) before hashing — throws a `PasswordPolicyError`
- * when the plaintext fails policy. Catch and surface the error code to the
- * client; framework-mode reset/change flows already do this.
+ * when the plaintext fails policy. Callers should run `validatePassword` first
+ * and return its reason to the client, as the framework reset and change
+ * routes do; an uncaught throw becomes a generic 500.
  *
  * ADR — DD-LOGIN-F17: this primitive intentionally does NOT revoke sessions.
  * Session revocation is the responsibility of each calling route because the

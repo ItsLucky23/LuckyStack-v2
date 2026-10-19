@@ -1,6 +1,6 @@
 //? intent: Recover access — request a reset link, then set a new password with it.
 
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 
 import { loginPageUrl } from 'config';
@@ -10,8 +10,21 @@ import { apiRequest } from 'src/_sockets/apiRequest';
 export const template = 'plain';
 
 export default function ResetPasswordPage() {
-  const [params] = useSearchParams();
-  const token = useMemo(() => params.get('token') ?? '', [params]);
+  const [params, setParams] = useSearchParams();
+  //? Read the reset token once, then drop it from the address bar: a live
+  //? reset link is an account-takeover credential, and while it sits in the
+  //? URL it reaches browser history, the Referer header and error-tracker
+  //? pageload/navigation/replay data. The link stays valid until used, so
+  //? reopening it from the email still works after a reload.
+  const [token] = useState(() => params.get('token') ?? '');
+  useEffect(() => {
+    if (!params.has('token')) return;
+    setParams((previous) => {
+      const next = new URLSearchParams(previous);
+      next.delete('token');
+      return next;
+    }, { replace: true });
+  }, [params, setParams]);
 
   return (
     <div className="w-full h-full overflow-y-auto bg-background">

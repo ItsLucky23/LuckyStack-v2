@@ -75,11 +75,11 @@ export default function Home() {
     const trimmed = newEmail.trim();
     if (!trimmed || trimmed.toLowerCase() === session.email.toLowerCase()) return;
 
-    //? Credentials accounts must confirm their current password — the route
-    //? rejects the change without it. OAuth accounts have no password; the field
-    //? isn't shown and the empty value is ignored server-side.
-    const isCredentials = session.provider === 'credentials';
-    if (isCredentials && !emailChangePassword) {
+    //? Only credentials accounts can change their email, and they must confirm
+    //? their current password — the route rejects the change otherwise. OAuth
+    //? accounts never see the form (their email belongs to the provider).
+    if (session.provider !== 'credentials') return;
+    if (!emailChangePassword) {
       notify.error({ key: 'settings.emailChange.currentPasswordRequired' });
       return;
     }
@@ -231,7 +231,7 @@ export default function Home() {
           languageItems={languageItems}
           selectedLanguageItem={selectedLanguageItem}
           sessionEmail={session.email}
-          requiresEmailPassword={session.provider === 'credentials'}
+          canChangeEmail={session.provider === 'credentials'}
           emailChangePassword={emailChangePassword}
           onNameChange={setNewName}
           onEmailChange={setNewEmail}

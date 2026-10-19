@@ -78,6 +78,7 @@ export { isAccountLocked, recordAuthFailure, clearAuthFailures } from './authLoc
 export {
   createPasswordResetToken,
   consumePasswordResetToken,
+  invalidatePasswordResetToken,
   updatePasswordHash,
   verifyPassword,
   PasswordPolicyError,
@@ -91,6 +92,7 @@ export { sendPasswordResetEmail } from './forgotPassword';
 export {
   createEmailChangeToken,
   consumeEmailChangeToken,
+  invalidateEmailChangeToken,
 } from './emailChange';
 export type { EmailChangePayload } from './emailChange';
 export { sendEmailChangeConfirmation } from './emailChangeNotification';
@@ -114,6 +116,7 @@ export type {
   CredentialsProvider,
   FullOAuthProvider,
   OAuthUserData,
+  OAuthEmailResult,
 } from './oauthProviders';
 
 // User adapter registry: lets consumers swap out the Prisma User model behind auth flows.

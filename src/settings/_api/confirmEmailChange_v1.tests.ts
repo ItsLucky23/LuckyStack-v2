@@ -120,4 +120,39 @@ export const customTests: CustomTestCase[] = [
       ctx.expect.eq(unchanged?.email, oldEmail);
     },
   },
+  {
+    //? Finding 008: OAuth accounts are found by (email, provider), so a changed
+    //? email would orphan the account or bind it to an attacker's address at
+    //? the same provider. A token minted for an OAuth account must not apply.
+    name: 'OAuth account: confirm is refused and the email stays unchanged',
+    run: async (ctx: TestContext) => {
+      const { createEmailChangeToken } = await import('@luckystack/login');
+      const oldEmail = uniqueEmail('confirm-oauth-old');
+      const created = await ctx.prisma.user.create({
+        data: { email: oldEmail, name: 'OAuth', provider: 'google', avatarFallback: 'O' },
+      });
+      const token = await createEmailChangeToken(created.id, uniqueEmail('confirm-oauth-new'));
+
+      const result = await ctx.callApi<unknown, ConfirmResponse>({ token });
+      ctx.expect.eq(result.status, 'error');
+      if (result.status === 'error') ctx.expect.eq(result.errorCode, 'settings.emailChange.managedByProvider');
+      const unchanged = await ctx.prisma.user.findUnique({ where: { id: created.id } });
+      ctx.expect.eq(unchanged?.email, oldEmail);
+    },
+  },
+  {
+    //? Finding 039: a reset link mailed to the OLD address must not survive
+    //? the move to a new address.
+    name: 'a pending password-reset link dies when the email change is confirmed',
+    run: async (ctx: TestContext) => {
+      const { createEmailChangeToken, createPasswordResetToken, consumePasswordResetToken } = await import('@luckystack/login');
+      const { userId } = await seedUser(ctx, uniqueEmail('confirm-reset-old'));
+      const resetToken = await createPasswordResetToken(userId);
+      const token = await createEmailChangeToken(userId, uniqueEmail('confirm-reset-new'));
+
+      const result = await ctx.callApi<unknown, ConfirmResponse>({ token });
+      ctx.expect.eq(result.status, 'success');
+      ctx.expect.eq(await consumePasswordResetToken(resetToken), null);
+    },
+  },
 ];

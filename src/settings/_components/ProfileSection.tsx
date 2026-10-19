@@ -31,9 +31,10 @@ interface ProfileSectionProps {
   languageItems: DropdownItem[];
   selectedLanguageItem: DropdownItem | undefined;
   sessionEmail: string;
-  //? Credentials accounts must confirm their current password to change email
-  //? (the route hard-requires it). OAuth accounts skip this field.
-  requiresEmailPassword: boolean;
+  //? Only credentials accounts can change their email, and they must confirm
+  //? their current password (the route hard-requires both). For OAuth accounts
+  //? the email belongs to the provider, so it is shown read-only.
+  canChangeEmail: boolean;
   emailChangePassword: string;
   onNameChange: (name: string) => void;
   onEmailChange: (email: string) => void;
@@ -57,7 +58,7 @@ export function ProfileSection({
   languageItems,
   selectedLanguageItem,
   sessionEmail,
-  requiresEmailPassword,
+  canChangeEmail,
   emailChangePassword,
   onNameChange,
   onEmailChange,
@@ -110,37 +111,44 @@ export function ProfileSection({
 
       <div className="flex flex-col gap-1">
         <label htmlFor="settings-email" className="text-xs font-medium">{translate({ key: 'settings.email' })}</label>
-        <div className="flex gap-2">
-          <input
-            id="settings-email"
-            type="email"
-            className={inputClass}
-            value={newEmail}
-            onChange={(e) => { onEmailChange(e.target.value); }}
-            disabled={emailChangePending}
-          />
-          <button
-            type="button"
-            onClick={onRequestEmailChange}
-            disabled={emailChangePending || !newEmail.trim() || newEmail.trim().toLowerCase() === sessionEmail.toLowerCase() || (requiresEmailPassword && !emailChangePassword)}
-            className="h-9 px-3 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap"
-          >
-            {translate({ key: 'settings.emailChange.button' })}
-          </button>
-        </div>
-        {requiresEmailPassword && (
-          <input
-            id="settings-email-password"
-            type="password"
-            autoComplete="current-password"
-            className={inputClass}
-            placeholder={translate({ key: 'settings.currentPassword' })}
-            value={emailChangePassword}
-            onChange={(e) => { onEmailChangePasswordChange(e.target.value); }}
-            disabled={emailChangePending}
-          />
+        {canChangeEmail ? (
+          <>
+            <div className="flex gap-2">
+              <input
+                id="settings-email"
+                type="email"
+                className={inputClass}
+                value={newEmail}
+                onChange={(e) => { onEmailChange(e.target.value); }}
+                disabled={emailChangePending}
+              />
+              <button
+                type="button"
+                onClick={onRequestEmailChange}
+                disabled={emailChangePending || !newEmail.trim() || newEmail.trim().toLowerCase() === sessionEmail.toLowerCase() || !emailChangePassword}
+                className="h-9 px-3 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap"
+              >
+                {translate({ key: 'settings.emailChange.button' })}
+              </button>
+            </div>
+            <input
+              id="settings-email-password"
+              type="password"
+              autoComplete="current-password"
+              className={inputClass}
+              placeholder={translate({ key: 'settings.currentPassword' })}
+              value={emailChangePassword}
+              onChange={(e) => { onEmailChangePasswordChange(e.target.value); }}
+              disabled={emailChangePending}
+            />
+            <p className="text-xs text-common">{translate({ key: 'settings.emailChange.label' })}</p>
+          </>
+        ) : (
+          <>
+            <input id="settings-email" type="email" className={inputClass} value={sessionEmail} readOnly disabled />
+            <p className="text-xs text-common">{translate({ key: 'settings.emailChange.managedByProvider' })}</p>
+          </>
         )}
-        <p className="text-xs text-common">{translate({ key: 'settings.emailChange.label' })}</p>
       </div>
 
       <div className="flex flex-col gap-1">

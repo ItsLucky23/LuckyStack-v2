@@ -24,19 +24,23 @@ import { SessionProvider } from 'src/_providers/SessionProvider';
 import { SocketStatusProvider } from 'src/_providers/socketStatusProvider';
 
 //? OAuth handoff for sessionStorage-token mode. The backend's /auth/callback
-//? cannot Set-Cookie a sessionStorage token, so it 302s to `...?token=<token>`.
-//? OAuth is a full-page navigation (no fetch to read an X-Session-Token header),
-//? so we capture the token from the URL HERE — synchronously, before React mounts
-//? (SessionProvider's socket connect + first `system/session` request both fire on
-//? mount and read the token from sessionStorage). Then strip it from the URL via
-//? replaceState so the long-lived token never lingers in the address bar, browser
-//? history, or a Referer header. No-op in cookie mode (no ?token= is emitted).
+//? cannot Set-Cookie a sessionStorage token, so it 302s to `...#token=<token>`
+//? (a fragment, never the query string, so the token is not sent to servers
+//? or logged). OAuth is a full-page navigation (no fetch to read an
+//? X-Session-Token header), so we capture the token from the URL HERE —
+//? synchronously, before React mounts (SessionProvider's socket connect + first
+//? `system/session` request both fire on mount and read the token from
+//? sessionStorage). Then strip it from the URL via replaceState so the
+//? long-lived token never lingers in the address bar or browser history.
+//? No-op in cookie mode (no #token= is emitted).
 if (sessionBasedToken) {
   const url = new URL(globalThis.location.href);
-  const handoffToken = url.searchParams.get('token');
+  const fragment = new URLSearchParams(url.hash.slice(1));
+  const handoffToken = fragment.get('token');
   if (handoffToken) {
     sessionStorage.setItem('token', handoffToken);
-    url.searchParams.delete('token');
+    fragment.delete('token');
+    url.hash = fragment.toString();
     globalThis.history.replaceState({}, '', `${url.pathname}${url.search}${url.hash}`);
   }
 }

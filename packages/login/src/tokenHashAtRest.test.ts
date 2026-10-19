@@ -118,8 +118,8 @@ vi.mock('@luckystack/core', () => ({
 vi.mock('./userAdapter', () => ({ getUserAdapter: vi.fn() }));
 vi.mock('./passwordPolicy', () => ({ validatePassword: vi.fn(() => null) }));
 
-import { createPasswordResetToken, consumePasswordResetToken } from './passwordReset';
-import { createEmailChangeToken, consumeEmailChangeToken } from './emailChange';
+import { createPasswordResetToken, consumePasswordResetToken, invalidatePasswordResetToken } from './passwordReset';
+import { createEmailChangeToken, consumeEmailChangeToken, invalidateEmailChangeToken } from './emailChange';
 
 const sha256 = (token: string): string => createHash('sha256').update(token).digest('hex');
 
@@ -195,5 +195,36 @@ describe('email-change token (hash-at-rest, one-time)', () => {
     const token = 'a'.repeat(64);
     store.set(sha256(token), JSON.stringify({ userId: 'only-this' }));
     expect(await consumeEmailChangeToken(token)).toBeNull();
+  });
+});
+
+//? Finding 039: each flow only replaced its OWN older token, so a pending link of
+//? the other kind outlived a password reset / email change. The per-user
+//? invalidators must kill the outstanding link and leave other users' alone.
+describe('pending-token invalidation per user', () => {
+  it('invalidatePasswordResetToken makes an outstanding reset link unredeemable', async () => {
+    const token = await createPasswordResetToken('user-123');
+    await invalidatePasswordResetToken('user-123');
+    expect(await consumePasswordResetToken(token)).toBeNull();
+  });
+
+  it('invalidateEmailChangeToken makes an outstanding email-change link unconfirmable', async () => {
+    const token = await createEmailChangeToken('user-7', 'attacker@evil.test');
+    await invalidateEmailChangeToken('user-7');
+    expect(await consumeEmailChangeToken(token)).toBeNull();
+  });
+
+  it('only touches the given user', async () => {
+    const otherReset = await createPasswordResetToken('other');
+    const otherChange = await createEmailChangeToken('other', 'other@x.com');
+    await invalidatePasswordResetToken('user-123');
+    await invalidateEmailChangeToken('user-123');
+    expect(await consumePasswordResetToken(otherReset)).toBe('other');
+    expect(await consumeEmailChangeToken(otherChange)).toEqual({ userId: 'other', newEmail: 'other@x.com' });
+  });
+
+  it('is a no-op when the user has no outstanding link', async () => {
+    await expect(invalidatePasswordResetToken('nobody')).resolves.toBeUndefined();
+    await expect(invalidateEmailChangeToken('nobody')).resolves.toBeUndefined();
   });
 });

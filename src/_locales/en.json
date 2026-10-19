@@ -181,7 +181,8 @@
       "emailSameAsCurrent": "The new email is the same as the current one.",
       "emailSendFailed": "Could not send the confirmation email. Try again later.",
       "currentPasswordRequired": "Enter your current password to change your email.",
-      "wrongCurrentPassword": "That password is incorrect."
+      "wrongCurrentPassword": "That password is incorrect.",
+      "managedByProvider": "Your email address comes from the service you sign in with and can't be changed here."
     },
     "passwordSection": "Password",
     "twoFactorSection": "Two-factor authentication",

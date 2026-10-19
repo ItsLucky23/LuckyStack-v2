@@ -216,7 +216,11 @@ describe('email-change confirm page (template + login asset)', () => {
   });
 
   it('waits for an explicit click before spending the token', () => {
-    expect(page).not.toContain('useEffect');
+    //? An effect may strip `?token=` from the URL, but must never call the API:
+    //? each effect body (up to its dependency array) is checked for `apiRequest`.
+    const effectBodies = [...page.matchAll(/useEffect\(([\s\S]*?)\}, \[/g)].map((match) => match[1] ?? '');
+    expect(effectBodies.some((body) => body.includes('apiRequest'))).toBe(false);
+    expect(page).toMatch(/const handleConfirm = async[\s\S]*?apiRequest/);
     expect(page).toContain("useState<Status>(token ? 'idle' : 'error')");
     expect(page).toMatch(/onClick=\{\(\) => \{ void handleConfirm\(\); \}\}/);
   });

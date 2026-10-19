@@ -13,6 +13,55 @@ import { sentry } from '../../config';
 
 const env = import.meta.env;
 
+//? URL parameters that carry a live credential: reset / email-change links
+//? (`?token=`), the token-mode OAuth handoff (`#token=`) and the OAuth `code`.
+const SENSITIVE_URL_PARAMS = ['token', 'code'];
+const URL_PARSE_BASE = 'http://placeholder.invalid';
+
+const deleteSensitiveParams = (params: URLSearchParams): boolean => {
+  let changed = false;
+  for (const key of SENSITIVE_URL_PARAMS) {
+    if (params.has(key)) {
+      params.delete(key);
+      changed = true;
+    }
+  }
+  return changed;
+};
+
+/** Remove credential parameters from a URL's query AND fragment; relative URLs stay relative. */
+export const scrubSensitiveUrl = (raw: string): string => {
+  if (!URL.canParse(raw, URL_PARSE_BASE)) return raw;
+  const url = new URL(raw, URL_PARSE_BASE);
+  const queryChanged = deleteSensitiveParams(url.searchParams);
+  const hashParams = new URLSearchParams(url.hash.slice(1));
+  const hashChanged = url.hash.includes('=') && deleteSensitiveParams(hashParams);
+  if (!queryChanged && !hashChanged) return raw;
+  if (hashChanged) url.hash = hashParams.toString();
+  return URL.canParse(raw) ? url.toString() : `${url.pathname}${url.search}${url.hash}`;
+};
+
+const URL_SPAN_ATTRIBUTES = ['url.full', 'http.url'];
+
+//? Errors AND transactions carry the page URL (`request.url`, set from
+//? location.href) and span URL attributes; scrubbing only errors let pageload
+//? transactions ship live reset tokens.
+const scrubEventUrls = <T extends Sentry.Event>(event: T): T => {
+  if (event.request?.url) event.request.url = scrubSensitiveUrl(event.request.url);
+  const spanDataList = [event.contexts?.trace?.data, ...(event.spans ?? []).map((span) => span.data)];
+  for (const data of spanDataList) {
+    if (!data) continue;
+    for (const key of URL_SPAN_ATTRIBUTES) {
+      const value: unknown = data[key];
+      if (typeof value === 'string') data[key] = scrubSensitiveUrl(value);
+    }
+  }
+  return event;
+};
+
+//? Navigation breadcrumbs use `from`/`to`; fetch/xhr breadcrumbs use `url`.
+const BREADCRUMB_URL_KEYS = ['url', 'from', 'to'];
+
 /**
  * Initialize Sentry error monitoring for the React application.
  * Should be called as early as possible in the application startup.
@@ -76,16 +125,18 @@ export const initializeSentry = () => {
       /^Socket connection/,
     ],
 
-    // Filter out sensitive data
-    beforeSend(event) {
-      // Remove sensitive URL parameters
-      if (event.request?.url) {
-        const url = new URL(event.request.url);
-        url.searchParams.delete('token');
-        url.searchParams.delete('code');
-        event.request.url = url.toString();
+    // Filter out sensitive URL parameters from errors, transactions and breadcrumbs
+    beforeSend: (event) => scrubEventUrls(event),
+    beforeSendTransaction: (event) => scrubEventUrls(event),
+    beforeBreadcrumb(breadcrumb) {
+      const { data } = breadcrumb;
+      if (data) {
+        for (const key of BREADCRUMB_URL_KEYS) {
+          const value: unknown = data[key];
+          if (typeof value === 'string') data[key] = scrubSensitiveUrl(value);
+        }
       }
-      return event;
+      return breadcrumb;
     },
   });
 

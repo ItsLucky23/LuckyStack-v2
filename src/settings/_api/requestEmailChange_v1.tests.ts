@@ -7,22 +7,20 @@ import type { CustomTestCase, TestContext } from '@luckystack/test-runner';
 //? rejection, same-as-current rejection, and the cross-user emailTaken
 //? guard.
 //?
-//? NOTE — the happy-path success branch calls `sendEmailChangeConfirmation`,
-//? which lazy-imports the OPTIONAL peer `@luckystack/email`. When that peer
-//? is absent the send returns `ok: false` and the route maps it to
-//? `auth.emailSendFailed`. Because the outcome depends on whether the email
-//? package is installed in the test environment, we assert the deterministic
-//? rejection branches instead of pinning a success envelope here.
+//? The confirmation send runs in the background (finding 082), so a free
+//? address answers `success` whether or not `@luckystack/email` is installed —
+//? the same answer as a taken address.
 //?
 //? The route reads the caller's CURRENT email from the SESSION (`user.email`),
 //? so `session.login({ email })` controls the same-as-current comparison.
 //?
 //? Input shape (from the route source `requestEmailChange_v1.ts`):
-//?   { newEmail: string }
+//?   { newEmail: string; currentPassword?: string }
 //? Output envelope:
 //?   { status: 'success' }
-//?   | { status: 'error', errorCode: 'settings.emailChange.invalidEmail' | 'settings.emailChange.emailSameAsCurrent'
-//?       | 'auth.emailTaken' | 'auth.emailSendFailed' | <preEmailChange veto code> }
+//?   | { status: 'error', errorCode: 'settings.emailChange.managedByProvider' | 'settings.emailChange.invalidEmail'
+//?       | 'settings.emailChange.emailSameAsCurrent' | 'settings.emailChange.currentPasswordRequired'
+//?       | 'settings.emailChange.wrongCurrentPassword' | <preEmailChange veto code> }
 
 interface RequestSuccess {
   status: 'success';
@@ -101,6 +99,48 @@ export const customTests: CustomTestCase[] = [
       //? success path so the caller cannot tell whether the address is taken.
       const result = await ctx.callApi<unknown, RequestResponse>({ newEmail: takenEmail, currentPassword: password });
       ctx.expect.eq(result.status, 'success');
+    },
+  },
+  {
+    //? Finding 082: the free-address branch used to await the send and return
+    //? `emailSendFailed` on failure, which the taken branch never can. It now
+    //? answers exactly like the taken branch, even without an email sender.
+    name: 'free address returns success without waiting on the send (same answer as a taken address)',
+    run: async (ctx: TestContext) => {
+      const { updatePasswordHash } = await import('@luckystack/login');
+      const callerEmail = uniqueEmail('req-free-caller');
+      const password = 'CallerReAuth#2026';
+      const caller = await ctx.prisma.user.create({
+        data: { email: callerEmail, name: 'Caller', provider: 'credentials', avatarFallback: 'C' },
+      });
+      await updatePasswordHash(caller.id, password);
+      await ctx.session.login({ id: caller.id, email: callerEmail });
+
+      const result = await ctx.callApi<unknown, RequestResponse>({ newEmail: uniqueEmail('req-free'), currentPassword: password });
+      ctx.expect.eq(result.status, 'success');
+    },
+  },
+  {
+    //? Finding 008: OAuth accounts are found by (email, provider); changing the
+    //? email orphans the account or lets a stolen session rebind it.
+    name: 'OAuth session is refused with settings.emailChange.managedByProvider',
+    run: async (ctx: TestContext) => {
+      const { getSession, saveSession } = await import('@luckystack/login');
+      const email = uniqueEmail('req-oauth');
+      const created = await ctx.prisma.user.create({
+        data: { email, name: 'OAuth', provider: 'google', avatarFallback: 'O' },
+      });
+      const { token } = await ctx.session.login({ id: created.id, email });
+      //? `session.login` always mints a credentials session; re-save the same
+      //? token as a Google session (keeps its CSRF token).
+      const current = await getSession(token);
+      if (!current) throw new Error('session not found after login');
+      const googleSession = { ...current, provider: 'google' };
+      await saveSession(token, googleSession, false);
+
+      const result = await ctx.callApi<unknown, RequestResponse>({ newEmail: uniqueEmail('req-oauth-new') });
+      ctx.expect.eq(result.status, 'error');
+      if (result.status === 'error') ctx.expect.eq(result.errorCode, 'settings.emailChange.managedByProvider');
     },
   },
 ];

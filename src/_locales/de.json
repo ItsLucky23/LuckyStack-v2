@@ -180,7 +180,8 @@
       "emailSameAsCurrent": "Die neue E-Mail-Adresse ist mit der aktuellen identisch.",
       "emailSendFailed": "Bestätigungs-E-Mail konnte nicht gesendet werden. Versuche es später erneut.",
       "currentPasswordRequired": "Gib dein aktuelles Passwort ein, um deine E-Mail-Adresse zu ändern.",
-      "wrongCurrentPassword": "Dieses Passwort ist falsch."
+      "wrongCurrentPassword": "Dieses Passwort ist falsch.",
+      "managedByProvider": "Deine E-Mail-Adresse stammt von dem Dienst, mit dem du dich anmeldest, und kann hier nicht geändert werden."
     },
     "passwordSection": "Passwort",
     "twoFactorSection": "Zwei-Faktor-Authentifizierung",

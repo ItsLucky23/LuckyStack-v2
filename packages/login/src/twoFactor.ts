@@ -581,11 +581,17 @@ export const confirmTotpEnrollment = async (user: UserRecord, code: string): Pro
  * code, so a hijacked (but 2FA-less) session can't silently strip the factor.
  */
 export const disableTwoFactor = async (user: UserRecord, code: string): Promise<{ ok: boolean; reason?: string }> => {
+  //? Same account-level ceiling as the login challenge: the server's per-IP
+  //? bucket alone lets a hijacked session spread code guesses over many IPs.
+  if (await isTwoFactorAccountLocked(user.id)) return { ok: false, reason: 'login.twoFactorLocked' };
   //? Management action (session-authenticated) → plain proof-of-possession, no
   //? single-use guard, so a just-logged-in user isn't blocked for 30s.
   const viaTotp = await verifyTotpForUser(user, code, false);
   const viaRecovery = viaTotp ? false : await consumeRecoveryCode(user, code);
-  if (!viaTotp && !viaRecovery) return { ok: false, reason: 'login.twoFactorInvalidCode' };
+  if (!viaTotp && !viaRecovery) {
+    await recordTwoFactorAccountFailure(user.id);
+    return { ok: false, reason: 'login.twoFactorInvalidCode' };
+  }
 
   const [updateError] = await tryCatch(() => getUserAdapter().update(user.id, {
     totpSecret: null,
@@ -603,8 +609,13 @@ export const disableTwoFactor = async (user: UserRecord, code: string): Promise<
 
 /** Replace the recovery-code set (requires a valid current TOTP code). */
 export const regenerateRecoveryCodes = async (user: UserRecord, code: string): Promise<ConfirmTotpEnrollmentResult> => {
-  //? Management action → plain verify (see disableTwoFactor).
-  if (!(await verifyTotpForUser(user, code, false))) return { ok: false, reason: 'login.twoFactorInvalidCode' };
+  //? Management action → plain verify + account-level lockout (see disableTwoFactor).
+  if (await isTwoFactorAccountLocked(user.id)) return { ok: false, reason: 'login.twoFactorLocked' };
+  if (!(await verifyTotpForUser(user, code, false))) {
+    await recordTwoFactorAccountFailure(user.id);
+    return { ok: false, reason: 'login.twoFactorInvalidCode' };
+  }
+  await clearTwoFactorAccountFailures(user.id);
   const { raw, hashes } = generateRecoveryCodes();
   const [updateError] = await tryCatch(() => getUserAdapter().update(user.id, { recoveryCodes: hashes }));
   if (updateError) {

@@ -2,6 +2,7 @@ import { dispatchHook } from '@luckystack/core';
 import {
   consumeEmailChangeToken,
   getUserAdapter,
+  invalidatePasswordResetToken,
   revokeUserSessions,
 } from '@luckystack/login';
 import { AuthProps, SessionLayout } from '../../../config';
@@ -41,9 +42,19 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
   //? Capture the old email for the audit hook before we overwrite it.
   const before = await functions.db.prisma.user.findUnique({
     where: { id: userId },
-    select: { email: true },
+    select: { email: true, provider: true },
   });
-  const oldEmail = before?.email ?? '';
+  if (!before) {
+    return { status: 'error', errorCode: 'settings.emailChange.invalidToken' };
+  }
+  const oldEmail = before.email;
+
+  //? Only credentials accounts can change their email (see
+  //? requestEmailChange). Re-checked here against the stored provider so a
+  //? token minted before that rule existed cannot rebind an OAuth account.
+  if (before.provider !== 'credentials') {
+    return { status: 'error', errorCode: 'settings.emailChange.managedByProvider' };
+  }
 
   //? Race protection: between minting and clicking, the new address could have
   //? been claimed by another sign-up (any provider). Check across all providers
@@ -59,6 +70,10 @@ export const main = async ({ data, functions }: ApiParams): Promise<ApiResponse>
   //? Pass the typed `Partial<UserRecord>` directly — no `Record<string, unknown>`
   //? intermediary needed; `email` is a valid key on `UserRecord`.
   await getUserAdapter().update(userId, { email: newEmail });
+
+  //? A reset link mailed to the OLD address must die with it: whoever still
+  //? reads that mailbox could otherwise reset the password after the move.
+  await invalidatePasswordResetToken(userId);
 
   //? Email is a credential — rotate every session. NO `exceptToken` here:
   //? we want the user to sign in fresh with the new email everywhere.
