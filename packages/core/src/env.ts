@@ -20,8 +20,8 @@ export type RuntimeEnv = z.infer<typeof EnvSchema>;
 let cachedEnv: RuntimeEnv | null = null;
 
 //? Single source of truth for which env files the framework loads, in order
-//? ("later overrides earlier"; a real ambient env var beats them all). Default `['.env', '.env.local']`. Override at
-//? runtime with the AMBIENT env var `LUCKYSTACK_ENV_FILES` (comma-separated) — it
+//? ("later overrides earlier"; a real ambient env var beats them all). Default
+//? `['.env', '.env.local']`. Override at runtime with the AMBIENT env var `LUCKYSTACK_ENV_FILES` (comma-separated) — it
 //? must be a real environment variable, not a key inside one of the .env files
 //? (those are only read AFTER this list is resolved).
 export const DEFAULT_ENV_FILES = ['.env', '.env.local'];
