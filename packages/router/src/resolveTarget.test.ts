@@ -129,6 +129,21 @@ describe("parseServiceFromPath", () => {
     expect(parseServiceFromPath("/api/%ZZ")).toBeNull();
   });
 
+  //? REGRESSION (sweep 105): the default resolver decoded the full request URL,
+  //? query string included.
+  it("ignores the query string on a single-segment path", () => {
+    expect(parseServiceFromPath("/uploads?next=%2Fa")).toBe("uploads");
+    expect(parseServiceFromPath("/billing?x=1")).toBe("billing");
+  });
+
+  it("does not reject a request whose query holds a stray percent sign", () => {
+    expect(parseServiceFromPath("/api/billing/x/v1?q=100%")).toBe("billing");
+  });
+
+  it("ignores a fragment", () => {
+    expect(parseServiceFromPath("/pages#a/b")).toBe("pages");
+  });
+
   it('routes custom paths from the pure-data ownership manifest', () => {
     expect(parseServiceFromPath('/webhooks/inbound', { '/webhooks': 'system' })).toBe('system');
   });

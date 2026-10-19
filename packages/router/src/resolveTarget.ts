@@ -114,7 +114,11 @@ export const parseServiceFromPath = (
   //? disagree on the service key. Decoding once keeps the slice index
   //? consistent with what was decoded. `tryCatchSync` guards malformed
   //? sequences like `%ZZ` — those resolve to no service (null).
-  const [decodeError, decoded] = tryCatchSync(() => decodeURIComponent(pathname));
+  //? Strip `?`/`#` BEFORE decoding, as `resolveCustomRouteOwner` does: the query
+  //? is not part of the service key, an encoded `%2F` in it must not move the
+  //? segment boundary, and a stray `%` in it must not reject the whole request.
+  const pathOnly = pathname.split(/[?#]/, 1)[0] ?? pathname;
+  const [decodeError, decoded] = tryCatchSync(() => decodeURIComponent(pathOnly));
   if (decodeError || decoded === null) return null;
 
   const first = firstSegment(decoded);
