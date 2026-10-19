@@ -3,6 +3,10 @@ import path from 'node:path';
 import { ROOT_DIR, getServerFunctionDirs, getSharedDir, getSrcDir } from '@luckystack/core';
 
 import { getOrInit } from './internal/mapUtils';
+import { isRouteSurfaceFile } from './routeNamingValidation';
+import { apiMarkerSegment, syncMarkerSegment } from './routingRules';
+
+const srcDirFromRoot = (): string => path.relative(ROOT_DIR, getSrcDir()).replaceAll('\\', '/');
 
 const SUPPORTED_EXTENSIONS = ['.ts', '.tsx', '.js', '.jsx', '.mts', '.cts'];
 
@@ -164,9 +168,14 @@ const resolveImportToFile = (importerPath: string, specifier: string): string | 
     return tryResolveWithExtensions(relativeBase);
   }
 
-  if (specifier.startsWith('src/') || specifier.startsWith('@/')) {
-    const sourcePath = specifier.startsWith('@/') ? specifier.slice(2) : specifier.slice(4);
-    return tryResolveWithExtensions(path.join(getSrcDir(), sourcePath));
+  //? `src/` and `@/` are the scaffold's aliases for srcDir; a project with a
+  //? different srcDir (`app`) imports through its own folder name as well.
+  const srcFromRoot = srcDirFromRoot();
+  const srcAliases = ['src/', '@/'];
+  if (srcFromRoot && !srcFromRoot.startsWith('..')) srcAliases.push(`${srcFromRoot}/`);
+  const srcAlias = srcAliases.find((alias) => specifier.startsWith(alias));
+  if (srcAlias) {
+    return tryResolveWithExtensions(path.join(getSrcDir(), specifier.slice(srcAlias.length)));
   }
 
   if (specifier.startsWith('shared/')) {
@@ -176,8 +185,15 @@ const resolveImportToFile = (importerPath: string, specifier: string): string | 
   return null;
 };
 
+//? Honours the configured srcDir and route markers like the rest of devkit,
+//? checked on the srcDir-relative path. A helper or test under a marker is
+//? not a route; the walk continues through it to the routes that import it.
 const isRouteFile = (filePath: string): boolean => {
-  return filePath.includes('/src/') && (filePath.includes('/_api/') || filePath.includes('/_sync/'));
+  const relative = path.relative(getSrcDir(), filePath).replaceAll('\\', '/');
+  if (relative.startsWith('..') || path.isAbsolute(relative)) return false;
+  const markerPath = `/${relative}`;
+  return (markerPath.includes(apiMarkerSegment()) || markerPath.includes(syncMarkerSegment()))
+    && isRouteSurfaceFile(markerPath);
 };
 
 const collectScopedFiles = (): Set<string> => {

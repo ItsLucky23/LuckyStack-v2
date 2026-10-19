@@ -18,6 +18,7 @@ import {
   extractClientInputFromGeneratedTypes,
   extractSyncPagePath,
   extractSyncName,
+  extractSyncVersion,
   injectServerTemplateWithClientInput,
   updateClientFileForPairedServer,
   updateClientFileForDeletedServer,
@@ -28,8 +29,18 @@ import {
 } from "./typeMapGenerator.js";
 import { findDependentRouteFiles, invalidateGraphForFile } from "./importDependencyGraph";
 import { isPrismaClientMissing, runPrismaGenerate } from "./prismaClientCheck";
-import { tryCatch, getProjectConfig, getLocaleReloader, isProductionRuntime } from "@luckystack/core";
+import {
+  tryCatch,
+  getProjectConfig,
+  getLocaleReloader,
+  isProductionRuntime,
+  getGeneratedSocketTypesPath,
+  getGeneratedApiSchemasPath,
+  getGeneratedApiDocsPath,
+} from "@luckystack/core";
 import { getRoutingRules } from './routingRules';
+import { isRouteSurfaceFile } from './routeNamingValidation';
+import { requestDevServerRestart } from './devServerRestart';
 
 // ----------------------------
 // Watcher for Hot Reload + Type Generation
@@ -37,11 +48,14 @@ import { getRoutingRules } from './routingRules';
 
 const normalizeFsPath = (value: string): string => path.resolve(value).replaceAll('\\', '/');
 
+//? The generator's own outputs must not trigger another run. Match the
+//? CONFIGURED output paths (a consumer can rename them) plus any
+//? `.generated.` file; a fixed filename list missed the Zod schema file, so
+//? every input-type change ran the whole generation twice.
 const isGeneratedPath = (normalizedPath: string): boolean => {
-  return (
-    normalizedPath.includes('apiTypes.generated.ts')
-    || normalizedPath.includes('apiDocs.generated.json')
-  );
+  if (normalizedPath.includes('.generated.')) return true;
+  return [getGeneratedSocketTypesPath(), getGeneratedApiSchemasPath(), getGeneratedApiDocsPath()]
+    .some((generatedPath) => normalizeFsPath(generatedPath) === normalizedPath);
 };
 
 // ---------------------------------------------------------------------------
@@ -50,22 +64,28 @@ const isGeneratedPath = (normalizedPath: string): boolean => {
 
 /**
  * Creates a self-contained type-map regeneration queue that coalesces
- * concurrent save bursts into a single background run via setImmediate.
+ * concurrent save bursts into a single run via setImmediate.
  */
+//? setImmediate only DEFERS the run until the current event finishes; the
+//? generation itself is synchronous (the TypeScript API talks to its process
+//? through blocking calls), so the dev server answers no request while it
+//? runs. Accepted for development; the logged duration makes the pause
+//? visible instead of looking like a hung request.
 const createTypeMapQueue = () => {
   const queue = { pending: false, running: false };
 
   const run = () => {
     queue.running = true;
     queue.pending = false;
-    const startedAt = Date.now();
     setImmediate(() => {
       void (async () => {
+        const startedAt = Date.now();
         const [err] = await tryCatch(() => { generateTypeMapFile({ quiet: true }); });
+        const durationMs = Date.now() - startedAt;
         if (err) {
-          console.log(`[HotReload] type map regeneration failed: ${String(err)}`, 'red');
+          console.log(`[HotReload] type map regeneration failed after ${durationMs}ms: ${String(err)}`, 'red');
         } else {
-          console.log(`[HotReload] type map ready in ${Date.now() - startedAt}ms`, 'green');
+          console.log(`[HotReload] type map regenerated in ${durationMs}ms (the server answered no requests meanwhile)`, 'green');
         }
         queue.running = false;
         if (queue.pending) {
@@ -91,8 +111,8 @@ const createTypeMapQueue = () => {
 // ---------------------------------------------------------------------------
 
 /**
- * Bundles the four mutable sets that track pending API/Sync add/delete
- * operations so they travel as a single value rather than four separate
+ * Bundles the mutable sets that track pending API/Sync add/delete
+ * operations so they travel as a single value rather than separate
  * variables inside the watcher closure.
  */
 const createPendingChangeSets = () => ({
@@ -100,6 +120,11 @@ const createPendingChangeSets = () => ({
   apiDeletes: new Set<string>(),
   syncUpserts: new Set<string>(),
   syncDeletes: new Set<string>(),
+  //? Deleted sync SERVER files whose paired client still needs its types
+  //? inlined. A set the sync task drains, not a closure handed to the
+  //? scheduler: any later sync event in the debounce window replaces the
+  //? scheduled task, and a closure would be dropped with it.
+  deletedSyncServers: new Set<string>(),
 });
 
 // ---------------------------------------------------------------------------
@@ -144,11 +169,20 @@ const makeIsInServerFunctionsDir = (segments: PathSegments) =>
   (normalizedPath: string): boolean =>
     segments.serverFunctionsSegments.some((seg) => normalizedPath.includes(seg));
 
-const makeIsRouteDependencyFile = (segments: PathSegments) =>
+//? A route file is route surface under a marker. A private helper
+//? (`_api/_lib/x.ts`) or a co-located test under the marker is NOT: it is an
+//? ordinary dependency, so its edits regenerate types and reload the routes
+//? that import it instead of being handled (and ignored) as a route.
+const makeIsRouteFile = (segments: PathSegments) =>
+  (normalizedPath: string): boolean =>
+    (normalizedPath.includes(segments.apiMarkerSlash) || normalizedPath.includes(segments.syncMarkerSlash))
+    && isRouteSurfaceFile(normalizedPath);
+
+const makeIsRouteDependencyFile = (segments: PathSegments, isRouteFile: (p: string) => boolean) =>
   (normalizedPath: string): boolean => {
     if (!normalizedPath.endsWith('.ts') && !normalizedPath.endsWith('.tsx')) return false;
     if (!normalizedPath.includes(segments.srcSegment)) return false;
-    if (normalizedPath.includes(segments.apiMarkerSlash) || normalizedPath.includes(segments.syncMarkerSlash)) return false;
+    if (isRouteFile(normalizedPath)) return false;
     if (isGeneratedPath(normalizedPath)) return false;
     return true;
   };
@@ -163,11 +197,11 @@ const makeIsSharedDependencyFile = (
     return isInServerFunctionsDir(normalizedPath);
   };
 
-const makeIsTypeMapRelevantFile = (segments: PathSegments) =>
+const makeIsTypeMapRelevantFile = (segments: PathSegments, isRouteFile: (p: string) => boolean) =>
   (normalizedPath: string): boolean => {
     if (isGeneratedPath(normalizedPath)) return false;
     if (!(normalizedPath.endsWith('.ts') || normalizedPath.endsWith('.tsx'))) return false;
-    if (normalizedPath.includes(segments.apiMarkerSlash) || normalizedPath.includes(segments.syncMarkerSlash)) return false;
+    if (isRouteFile(normalizedPath)) return false;
     return (
       normalizedPath.includes(segments.srcSegment)
       || normalizedPath.endsWith('/config.ts')
@@ -273,9 +307,10 @@ export const setupWatchers = () => {
 
   const segments = buildPathSegments();
   const isInServerFunctionsDir = makeIsInServerFunctionsDir(segments);
-  const isRouteDependencyFile = makeIsRouteDependencyFile(segments);
+  const isRouteFile = makeIsRouteFile(segments);
+  const isRouteDependencyFile = makeIsRouteDependencyFile(segments, isRouteFile);
   const isSharedDependencyFile = makeIsSharedDependencyFile(segments, isInServerFunctionsDir);
-  const isTypeMapRelevantFile = makeIsTypeMapRelevantFile(segments);
+  const isTypeMapRelevantFile = makeIsTypeMapRelevantFile(segments, isRouteFile);
   const isLocaleFile = makeIsLocaleFile(segments);
 
   const typeMap = createTypeMapQueue();
@@ -298,13 +333,46 @@ export const setupWatchers = () => {
       console.log(`[HotReload] API removed: ${deletePath}`, 'yellow');
     }
 
+    //? A reload also rebuilds the TypeScript Program to read the input type,
+    //? which blocks like type-map generation does — hence the duration.
     for (const upsertPath of upsertPaths) {
+      const startedAt = Date.now();
       await upsertApiFromFile(upsertPath);
-      console.log(`[HotReload] API reloaded: ${upsertPath}`, 'green');
+      console.log(`[HotReload] API reloaded in ${Date.now() - startedAt}ms: ${upsertPath}`, 'green');
+    }
+  };
+
+  //? Inline the last generated `clientInput` into the client of each deleted
+  //? sync server, before the type map is regenerated without that route.
+  const migrateClientsOfDeletedSyncServers = async () => {
+    const serverPaths = [...pending.deletedSyncServers];
+    pending.deletedSyncServers.clear();
+
+    for (const serverPath of serverPaths) {
+      //? Restored within the debounce window (rename back, checkout): the
+      //? client still has its server, so it keeps the generated types.
+      if (fs.existsSync(serverPath)) continue;
+      const clientPath = getPairedSyncFile(serverPath);
+      if (!clientPath || !fs.existsSync(clientPath)) continue;
+
+      // Extract clientInput types from generated types file (server file is already deleted)
+      const clientInputTypes = extractClientInputFromGeneratedTypes(
+        extractSyncPagePath(serverPath),
+        extractSyncName(serverPath),
+        extractSyncVersion(serverPath),
+      );
+
+      // Fall back to a placeholder block when types couldn't be extracted from generated file.
+      await updateClientFileForDeletedServer(
+        clientPath,
+        clientInputTypes ?? '{\n    // Types were in _server.ts - please add them here\n  }',
+      );
     }
   };
 
   const processPendingSyncChanges = async ({ regenerateTypeMap = false }: { regenerateTypeMap?: boolean } = {}) => {
+    await migrateClientsOfDeletedSyncServers();
+
     const deletePaths = [...pending.syncDeletes];
     const upsertPaths = [...pending.syncUpserts];
     pending.syncDeletes.clear();
@@ -321,22 +389,39 @@ export const setupWatchers = () => {
     }
 
     for (const upsertPath of upsertPaths) {
+      const startedAt = Date.now();
       await upsertSyncFromFile(upsertPath);
-      console.log(`[HotReload] Sync reloaded: ${upsertPath}`, 'green');
+      console.log(`[HotReload] Sync reloaded in ${Date.now() - startedAt}ms: ${upsertPath}`, 'green');
     }
   };
 
-  const enqueueAffectedRoutesFromDependency = (changedPath: string) => {
+  /** Returns true when the dev server is about to restart instead. */
+  const enqueueAffectedRoutesFromDependency = (changedPath: string): boolean => {
     const affectedRoutes = findDependentRouteFiles(changedPath);
 
     if (affectedRoutes.size === 0) {
       console.log(`[HotReload] No API/Sync routes depend on: ${changedPath}`, 'yellow');
-      return;
+      return false;
     }
 
-    //? With dynamic `import()` + per-load `?v=` cachebust in loader.ts there is
-    //? nothing to invalidate on the main thread; the next upsert will fetch a
-    //? fresh module instance.
+    //? Re-importing a route with the loader's `?v=` query does NOT re-evaluate
+    //? the modules the route imports: the ESM loader caches those by their
+    //? plain URL, so the route would keep running the OLD code of this file.
+    //? Only a new process runs the new code, so ask the supervisor to restart.
+    if (requestDevServerRestart(changedPath)) {
+      console.log(
+        `[HotReload] Dependency changed: ${changedPath} -> restarting the dev server (${affectedRoutes.size} route(s) import it)`,
+        'blue'
+      );
+      return true;
+    }
+
+    //? Not supervised: reloading still refreshes the routes' input types (the
+    //? Program is rebuilt), but their handlers keep the old dependency code.
+    console.log(
+      `[HotReload] ${changedPath} changed, but routes that import it keep running its old code until you restart the dev server (the supervised \`npm run server\` restarts automatically)`,
+      'yellow'
+    );
 
     let queuedApiCount = 0;
     let queuedSyncCount = 0;
@@ -369,6 +454,8 @@ export const setupWatchers = () => {
         await processPendingSyncChanges();
       });
     }
+
+    return false;
   };
 
   const handleAdd = async (filePath: string) => {
@@ -427,7 +514,11 @@ export const setupWatchers = () => {
       }
     }
 
-    if (normalizedPath.includes(segments.apiMarkerNoLead)) {
+    //? Only route files take the route path; a new helper or test under a
+    //? marker falls through to `handleChange` as an ordinary dependency.
+    const isRoute = isRouteFile(normalizedPath);
+
+    if (isRoute && normalizedPath.includes(segments.apiMarkerNoLead)) {
       pending.apiDeletes.delete(normalizedPath);
       pending.apiUpserts.add(normalizedPath);
       scheduleReload('api', async () => {
@@ -436,7 +527,7 @@ export const setupWatchers = () => {
       return;
     }
 
-    if (normalizedPath.includes(segments.syncMarkerNoLead)) {
+    if (isRoute && normalizedPath.includes(segments.syncMarkerNoLead)) {
       pending.syncDeletes.delete(normalizedPath);
       pending.syncUpserts.add(normalizedPath);
       scheduleReload('sync', async () => {
@@ -487,11 +578,13 @@ export const setupWatchers = () => {
     }
 
     if (isRouteDependencyFile(normalizedPath)) {
+      //? A restarting server regenerates on boot; generating here as well would
+      //? only hold up the restart.
+      if (enqueueAffectedRoutesFromDependency(normalizedPath)) return;
       scheduleReload('typemap', () => {
         console.log(`[HotReload] Route dependency changed, scheduling type map regeneration`, 'blue');
         typeMap.request();
       });
-      enqueueAffectedRoutesFromDependency(normalizedPath);
       return;
     }
 
@@ -529,14 +622,14 @@ export const setupWatchers = () => {
     const normalizedPath = normalizeFsPath(changedPath);
     invalidateGraphForFile(normalizedPath);
 
+    if (isSharedDependencyFile(normalizedPath) && enqueueAffectedRoutesFromDependency(normalizedPath)) {
+      return; //? the restarted server loads functions and types fresh
+    }
+
     scheduleReload('functions', async () => {
       typeMap.request();
       await initializeFunctions();
     });
-
-    if (isSharedDependencyFile(normalizedPath)) {
-      enqueueAffectedRoutesFromDependency(normalizedPath);
-    }
   };
 
   const handleDelete = (filePath: string) => {
@@ -555,11 +648,11 @@ export const setupWatchers = () => {
     }
 
     if (isRouteDependencyFile(normalizedPath)) {
+      if (enqueueAffectedRoutesFromDependency(normalizedPath)) return;
       scheduleReload('typemap', () => {
         console.log(`[HotReload] Route dependency deleted, scheduling type map regeneration`, 'blue');
         typeMap.request();
       });
-      enqueueAffectedRoutesFromDependency(normalizedPath);
       return;
     }
 
@@ -587,24 +680,11 @@ export const setupWatchers = () => {
       });
       pending.syncUpserts.delete(normalizedPath);
       pending.syncDeletes.add(normalizedPath);
+      // Special handling for sync server file deletion when client exists
+      if (isSyncServerFile(normalizedPath)) {
+        pending.deletedSyncServers.add(normalizedPath);
+      }
       scheduleReload('sync', async () => {
-        // Special handling for sync server file deletion when client exists
-        if (isSyncServerFile(normalizedPath)) {
-          const clientPath = getPairedSyncFile(normalizedPath);
-          if (clientPath && fs.existsSync(clientPath)) {
-            // Extract clientInput types from generated types file (server file is already deleted)
-            const pagePath = extractSyncPagePath(normalizedPath);
-            const syncName = extractSyncName(normalizedPath);
-            const clientInputTypes = extractClientInputFromGeneratedTypes(pagePath, syncName);
-
-            // Fall back to a placeholder block when types couldn't be extracted from generated file.
-            await updateClientFileForDeletedServer(
-              clientPath,
-              clientInputTypes ?? '{\n    // Types were in _server.ts - please add them here\n  }',
-            );
-          }
-        }
-
         await processPendingSyncChanges();
       });
     }
