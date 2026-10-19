@@ -52,6 +52,7 @@
     "invalidVersion": "Ungültige Sync-Version.",
     "failedRequest": "Sync-Anfrage {{name}} ist fehlgeschlagen: {{message}}",
     "requestTimeout": "Sync-Anfrage hat das Zeitlimit überschritten.",
+    "disconnected": "Verbindung getrennt, bevor die Sync-Anfrage bestätigt wurde.",
     "disabled": "Sync über HTTP ist deaktiviert.",
     "devToolsUnavailable": "Sync-Entwicklerwerkzeuge sind in dieser Umgebung nicht verfügbar.",
     "clientExecutionFailed": "Sync-Client-Handler ist fehlgeschlagen.",

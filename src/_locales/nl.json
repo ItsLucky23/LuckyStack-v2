@@ -46,7 +46,8 @@
     "invalidClientResponse": "Sync client retourneerde een ongeldige respons.",
     "clientRejected": "Sync-event is afgewezen door clientvalidatie.",
     "clientFilteredOut": "Sync-event is afgewezen op de _client file.",
-    "ioUnavailable": "Socketserver is niet beschikbaar."
+    "ioUnavailable": "Socketserver is niet beschikbaar.",
+    "disconnected": "Verbinding verbroken voordat het sync-request bevestigd was."
   },
   "error": {
     "invalidResponse": "Server retourneerde een ongeldige foutrespons."

@@ -52,6 +52,7 @@
     "invalidVersion": "Invalid sync version.",
     "failedRequest": "Sync request {{name}} failed: {{message}}",
     "requestTimeout": "Sync request timed out.",
+    "disconnected": "Connection lost before the sync request was confirmed.",
     "disabled": "Sync over HTTP is disabled.",
     "devToolsUnavailable": "Sync dev tools are not available in this environment.",
     "clientExecutionFailed": "Sync client handler failed.",
