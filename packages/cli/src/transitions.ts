@@ -27,6 +27,7 @@ import { addLogin, AUTH_SERVER_HOOKS, AUTH_NONE_SERVER_PLACEHOLDER } from './com
 import { copySentryShim, removeSentryShim } from './commands/addErrorTracking';
 import { removeFeature, pruneLoginDocs, splitLoginFiles, keptFilesNeedingLogin, LOGIN_COPIED_PATHS } from './commands/remove';
 import { removeDirIfEmptyDeep } from './lib/shippedFiles';
+import { stripGeneratorLoginGuards, unmatchedGuardedGenerators } from './lib/guardlessGenerators';
 import type { DetectedDbProvider, DetectedOrm, ProjectState } from './lib/state';
 import { switchOrm, ORM_SURFACES } from './commands/switchOrm';
 import {
@@ -191,6 +192,8 @@ const removeLoginChange = (root?: string): Change => ({
     "- config.ts: credentials → false, forgotPassword → 'disabled'",
     '- unregister the notification hooks in luckystack/server/index.ts',
     '- strip login sections from README.md (best-effort)',
+    '- drop the /login guard from the generators for new pages (.luckystack/templates/page_dashboard.template.tsx, scripts/scaffoldPage.mjs)',
+    ...(root === undefined ? [] : unmatchedGuardedGenerators(root).map((rel) => `⚠ ${rel} was edited, so its /login guard stays — remove it by hand or new pages redirect to the missing /login`)),
     '⚠ if a page redirects to /login (e.g. src/page.tsx middleware), update it — the auth routes are gone',
   ],
   apply: wrap((ctx) => {
@@ -260,6 +263,10 @@ const removeLoginChange = (root?: string): Change => ({
     //? Mirror the single-feature `remove login`: strip login-as-installed prose from
     //? README so the manage path leaves the same clean state.
     pruneLoginDocs(ctx.project.root);
+    //? Same generators the `--auth=none` scaffold ships (finding 098).
+    for (const rel of stripGeneratorLoginGuards(ctx.project.root)) {
+      console.warn(`⚠ ${rel} was edited, so its /login guard stays — remove it by hand or new pages redirect to the missing /login.`);
+    }
   }),
 });
 

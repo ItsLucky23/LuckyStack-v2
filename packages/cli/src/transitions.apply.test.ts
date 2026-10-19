@@ -131,6 +131,29 @@ describe('Change.apply — auth → none deletes the UI + drops the dep', () => 
     applyOne(planChanges(cfg({ authMode: 'credentials' }), cfg()), 'Auth: → none');
     expect(fs.existsSync(path.join(dir, 'src', 'login'))).toBe(false);
   });
+
+  it('drops the /login guard from the new-page generators and names an edited one instead', () => {
+    //? Review 1 finding 7: same generators as the --auth=none scaffold (098).
+    const template = path.resolve(import.meta.dirname, '..', '..', 'create-luckystack-app', 'template');
+    place('scripts/scaffoldPage.mjs', fs.readFileSync(path.join(template, 'scripts', 'scaffoldPage.mjs'), 'utf8'));
+    const editedTemplate = fs
+      .readFileSync(path.join(template, '_dot_luckystack', 'templates', 'page_dashboard.template.tsx'), 'utf8')
+      .replace('//? Default: require login.', '//? Team default: require login.');
+    place('.luckystack/templates/page_dashboard.template.tsx', editedTemplate);
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => { /* captured */ });
+    vi.spyOn(console, 'log').mockImplementation(() => { /* quiet */ });
+
+    const changes = planChanges(cfg({ authMode: 'credentials' }), cfg(), dir);
+    const preview = changes.find((c) => c.summary.includes('Auth: → none'))?.effects.join('\n') ?? '';
+    expect(preview).toContain('⚠ .luckystack/templates/page_dashboard.template.tsx was edited');
+    expect(preview).not.toContain('⚠ scripts/scaffoldPage.mjs');
+
+    applyOne(changes, 'Auth: → none');
+    expect(fs.readFileSync(path.join(dir, 'scripts', 'scaffoldPage.mjs'), 'utf8'))
+      .not.toMatch(/^\s*if \(!session\) return \{ success: false, redirect: '\/login' \};/m);
+    expect(fs.readFileSync(path.join(dir, '.luckystack', 'templates', 'page_dashboard.template.tsx'), 'utf8')).toBe(editedTemplate);
+    expect(warn.mock.calls.map((call) => String(call[0])).join('\n')).toContain('page_dashboard.template.tsx was edited');
+  });
 });
 
 describe('Change.apply — email & monitoring deps + env', () => {
