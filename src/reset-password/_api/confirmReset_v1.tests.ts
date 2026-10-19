@@ -1,5 +1,7 @@
 import type { CustomTestCase, TestContext } from '@luckystack/test-runner';
 import {
+  consumeEmailChangeToken,
+  createEmailChangeToken,
   createPasswordResetToken,
   loginWithCredentialsCore,
   updatePasswordHash,
@@ -125,6 +127,28 @@ export const customTests: CustomTestCase[] = [
       });
       ctx.expect.eq(second.status, 'error', 'second call must reject — token is single-use');
       ctx.expect.eq(second.errorCode, 'login.resetInvalidToken');
+
+      await cleanupUser(ctx, email);
+    },
+  },
+  {
+    //? Finding 039: an email change requested by whoever the reset locks out
+    //? (e.g. with a stolen password) must not stay confirmable afterwards.
+    name: 'a pending email-change link dies when the password is reset',
+    run: async (ctx: TestContext) => {
+      const email = `confirm-pending-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}@example.com`;
+      const user = await seedCredentialsUser(ctx, email, 'OldPass!123');
+      const changeToken = await createEmailChangeToken(user.id, `attacker-${Date.now().toString(36)}@example.com`);
+      const token = await createPasswordResetToken(user.id);
+      const newPassword = 'NewPass!456';
+
+      const result = await ctx.callApi<ConfirmResetInput, ConfirmResetResponse>({
+        token,
+        password: newPassword,
+        confirmPassword: newPassword,
+      });
+      ctx.expect.eq(result.status, 'success', `reset failed: ${result.errorCode ?? 'unknown'}`);
+      ctx.expect.eq(await consumeEmailChangeToken(changeToken), null);
 
       await cleanupUser(ctx, email);
     },

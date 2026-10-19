@@ -179,7 +179,8 @@
       "emailSameAsCurrent": "Het nieuwe e-mailadres is hetzelfde als het huidige.",
       "emailSendFailed": "Kon de bevestigingsmail niet versturen. Probeer het later opnieuw.",
       "currentPasswordRequired": "Voer je huidige wachtwoord in om je e-mailadres te wijzigen.",
-      "wrongCurrentPassword": "Dat wachtwoord is onjuist."
+      "wrongCurrentPassword": "Dat wachtwoord is onjuist.",
+      "managedByProvider": "Je e-mailadres komt van de dienst waarmee je inlogt en kan hier niet worden gewijzigd."
     },
     "passwordSection": "Wachtwoord",
     "twoFactorSection": "Tweestapsverificatie",

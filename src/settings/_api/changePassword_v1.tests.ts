@@ -107,4 +107,61 @@ export const customTests: CustomTestCase[] = [
       if (result.status === 'error') ctx.expect.eq(result.errorCode, 'login.passwordCharacterMinimum');
     },
   },
+  {
+    //? Finding 061: the route checked length only, so the full policy threw
+    //? inside updatePasswordHash and the caller got a generic 500.
+    name: 'a common password is rejected with login.passwordTooCommon (not a 500)',
+    run: async (ctx: TestContext) => {
+      const oldPassword = 'OldPassword123!';
+      await seedCredentialsUser(ctx, oldPassword);
+      const result = await ctx.callApi<unknown, ChangePasswordResponse>({
+        currentPassword: oldPassword,
+        newPassword: '12345678',
+        confirmPassword: '12345678',
+      });
+      ctx.expect.eq(result.status, 'error');
+      if (result.status === 'error') ctx.expect.eq(result.errorCode, 'login.passwordTooCommon');
+    },
+  },
+  {
+    name: 'a password over the 72-byte bcrypt cap is rejected with login.passwordCharacterLimit (not a 500)',
+    run: async (ctx: TestContext) => {
+      const oldPassword = 'OldPassword123!';
+      await seedCredentialsUser(ctx, oldPassword);
+      const longPassword = `Aa1!${'x'.repeat(96)}`;
+      const result = await ctx.callApi<unknown, ChangePasswordResponse>({
+        currentPassword: oldPassword,
+        newPassword: longPassword,
+        confirmPassword: longPassword,
+      });
+      ctx.expect.eq(result.status, 'error');
+      if (result.status === 'error') ctx.expect.eq(result.errorCode, 'login.passwordCharacterLimit');
+    },
+  },
+  {
+    //? Finding 039: links requested under the old password must not survive it.
+    name: 'pending email-change and reset links die when the password changes',
+    run: async (ctx: TestContext) => {
+      const {
+        createEmailChangeToken,
+        consumeEmailChangeToken,
+        createPasswordResetToken,
+        consumePasswordResetToken,
+      } = await import('@luckystack/login');
+      const oldPassword = 'OldPassword123!';
+      const newPassword = 'NewPassword456!';
+      const { userId } = await seedCredentialsUser(ctx, oldPassword);
+      const changeToken = await createEmailChangeToken(userId, `attacker-${Date.now().toString()}@example.com`);
+      const resetToken = await createPasswordResetToken(userId);
+
+      const result = await ctx.callApi<unknown, ChangePasswordResponse>({
+        currentPassword: oldPassword,
+        newPassword,
+        confirmPassword: newPassword,
+      });
+      ctx.expect.eq(result.status, 'success');
+      ctx.expect.eq(await consumeEmailChangeToken(changeToken), null);
+      ctx.expect.eq(await consumePasswordResetToken(resetToken), null);
+    },
+  },
 ];

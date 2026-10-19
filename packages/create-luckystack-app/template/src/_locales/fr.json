@@ -182,7 +182,8 @@
       "emailSameAsCurrent": "La nouvelle adresse e-mail est identique à l'actuelle.",
       "emailSendFailed": "Impossible d'envoyer l'e-mail de confirmation. Réessayez plus tard.",
       "currentPasswordRequired": "Saisissez votre mot de passe actuel pour changer votre adresse e-mail.",
-      "wrongCurrentPassword": "Votre mot de passe actuel est incorrect."
+      "wrongCurrentPassword": "Votre mot de passe actuel est incorrect.",
+      "managedByProvider": "Votre adresse e-mail provient du service avec lequel vous vous connectez et ne peut pas être modifiée ici."
     },
     "passwordSection": "Mot de passe",
     "twoFactorSection": "Authentification à deux facteurs",

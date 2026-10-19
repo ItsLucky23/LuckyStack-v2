@@ -1,5 +1,11 @@
 import { dispatchHook, getProjectConfig } from '@luckystack/core';
-import { consumePasswordResetToken, revokeUserSessions, updatePasswordHash, validatePassword } from '@luckystack/login';
+import {
+  consumePasswordResetToken,
+  invalidateEmailChangeToken,
+  revokeUserSessions,
+  updatePasswordHash,
+  validatePassword,
+} from '@luckystack/login';
 import { AuthProps } from '../../../config';
 import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
 
@@ -63,6 +69,9 @@ export const main = async ({ data }: ApiParams): Promise<ApiResponse> => {
   //? revoke every active session for this user so any compromised credential
   //? becomes useless once the new password is set.
   const revokedCount = await revokeUserSessions(userId, null);
+  //? A pending email change may have been requested by whoever this reset
+  //? locks out; it must not stay confirmable after the reset.
+  await invalidateEmailChangeToken(userId);
 
   void dispatchHook('passwordResetCompleted', {
     userId,

@@ -1,6 +1,6 @@
 //? intent: Landing spot for the email-change confirmation link — proves the new address is reachable.
 
-import { useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Link, useSearchParams } from 'react-router-dom';
 
 import { loginPageUrl } from 'config';
@@ -12,8 +12,19 @@ export const template = 'plain';
 type Status = 'idle' | 'loading' | 'success' | 'error';
 
 export default function ConfirmEmailPage() {
-  const [params] = useSearchParams();
-  const token = useMemo(() => params.get('token') ?? '', [params]);
+  const [params, setParams] = useSearchParams();
+  //? Read the token once, then drop it from the address bar so the live
+  //? confirmation credential does not linger in browser history, the Referer
+  //? header or error-tracker pageload/navigation/replay data.
+  const [token] = useState(() => params.get('token') ?? '');
+  useEffect(() => {
+    if (!params.has('token')) return;
+    setParams((previous) => {
+      const next = new URLSearchParams(previous);
+      next.delete('token');
+      return next;
+    }, { replace: true });
+  }, [params, setParams]);
   const translate = useTranslator();
   //? Start idle so link-prefetchers and mail-client preview panes cannot
   //? consume the one-shot token before the human clicks confirm.

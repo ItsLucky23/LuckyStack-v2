@@ -978,7 +978,7 @@ const fetchOAuthProfile = async (
       return null;
     }
     email = selectedEmail;
-    emailVerified = typeof selected === 'object' ? selected.verified === true : true;
+    emailVerified = typeof selected === 'object' ? selected.verified : true;
   }
 
   //? Normalize OAuth emails through the SAME gate as credentials (trim +

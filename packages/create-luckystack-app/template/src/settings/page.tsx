@@ -98,11 +98,11 @@ export default function Home() {
     const trimmed = newEmail.trim();
     if (!trimmed || trimmed.toLowerCase() === session.email.toLowerCase()) return;
 
-    //? Credentials accounts must confirm their current password — the route
-    //? rejects the change without it. OAuth accounts have no password; the field
-    //? isn't shown and the empty value is ignored server-side.
-    const isCredentials = session.provider === 'credentials';
-    if (isCredentials && !emailChangePassword) {
+    //? Only credentials accounts can change their email, and they must confirm
+    //? their current password — the route rejects the change otherwise. OAuth
+    //? accounts never see the form (their email belongs to the provider).
+    if (session.provider !== 'credentials') return;
+    if (!emailChangePassword) {
       notify.error({ key: 'settings.emailChange.currentPasswordRequired' });
       return;
     }
@@ -368,37 +368,46 @@ export default function Home() {
 
           <div className="flex flex-col gap-1">
             <label htmlFor="settings-email" className="text-xs font-medium">{translate({ key: 'settings.email' })}</label>
-            <div className="flex gap-2">
-              <input
-                id="settings-email"
-                type="email"
-                className={inputClass}
-                value={newEmail}
-                onChange={(e) => { setNewEmail(e.target.value); }}
-                disabled={emailChangePending}
-              />
-              <button
-                type="button"
-                onClick={() => void handleRequestEmailChange()}
-                disabled={emailChangePending || !newEmail.trim() || newEmail.trim().toLowerCase() === session.email.toLowerCase() || (session.provider === 'credentials' && !emailChangePassword)}
-                className="h-9 px-3 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap"
-              >
-                {translate({ key: 'settings.emailChange.button' })}
-              </button>
-            </div>
-            {session.provider === 'credentials' && (
-              <input
-                id="settings-email-password"
-                type="password"
-                autoComplete="current-password"
-                className={inputClass}
-                placeholder={translate({ key: 'settings.currentPassword' })}
-                value={emailChangePassword}
-                onChange={(e) => { setEmailChangePassword(e.target.value); }}
-                disabled={emailChangePending}
-              />
+            {/* Only credentials accounts can change their email; for OAuth
+                accounts the email belongs to the provider (read-only here). */}
+            {session.provider === 'credentials' ? (
+              <>
+                <div className="flex gap-2">
+                  <input
+                    id="settings-email"
+                    type="email"
+                    className={inputClass}
+                    value={newEmail}
+                    onChange={(e) => { setNewEmail(e.target.value); }}
+                    disabled={emailChangePending}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void handleRequestEmailChange()}
+                    disabled={emailChangePending || !newEmail.trim() || newEmail.trim().toLowerCase() === session.email.toLowerCase() || !emailChangePassword}
+                    className="h-9 px-3 rounded-md bg-primary text-white text-sm font-medium hover:bg-primary-hover transition-colors cursor-pointer disabled:opacity-60 whitespace-nowrap"
+                  >
+                    {translate({ key: 'settings.emailChange.button' })}
+                  </button>
+                </div>
+                <input
+                  id="settings-email-password"
+                  type="password"
+                  autoComplete="current-password"
+                  className={inputClass}
+                  placeholder={translate({ key: 'settings.currentPassword' })}
+                  value={emailChangePassword}
+                  onChange={(e) => { setEmailChangePassword(e.target.value); }}
+                  disabled={emailChangePending}
+                />
+                <p className="text-xs text-common">{translate({ key: 'settings.emailChange.label' })}</p>
+              </>
+            ) : (
+              <>
+                <input id="settings-email" type="email" className={inputClass} value={session.email} readOnly disabled />
+                <p className="text-xs text-common">{translate({ key: 'settings.emailChange.managedByProvider' })}</p>
+              </>
             )}
-            <p className="text-xs text-common">{translate({ key: 'settings.emailChange.label' })}</p>
           </div>
 
           <div className="flex flex-col gap-1">

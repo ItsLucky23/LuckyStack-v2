@@ -1,5 +1,12 @@
-import { dispatchHook, getProjectConfig } from '@luckystack/core';
-import { revokeUserSessions, updatePasswordHash, verifyPassword } from '@luckystack/login';
+import { dispatchHook } from '@luckystack/core';
+import {
+  invalidateEmailChangeToken,
+  invalidatePasswordResetToken,
+  revokeUserSessions,
+  updatePasswordHash,
+  validatePassword,
+  verifyPassword,
+} from '@luckystack/login';
 import { AuthProps, SessionLayout } from '../../../config';
 import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
 import { sendPasswordChangedNotification } from '../../../server/hooks/notifications';
@@ -19,17 +26,18 @@ export interface ApiParams {
 }
 
 export const main = async ({ data, user, functions }: ApiParams): Promise<ApiResponse> => {
-  const { passwordPolicy } = getProjectConfig().auth;
   const { currentPassword, newPassword, confirmPassword } = data;
 
   if (!currentPassword || !newPassword || !confirmPassword) {
     return { status: 'error', errorCode: 'login.empty' };
   }
-  if (newPassword.length < passwordPolicy.minLength) {
-    return { status: 'error', errorCode: 'login.passwordCharacterMinimum' };
-  }
-  if (newPassword.length > passwordPolicy.maxLength) {
-    return { status: 'error', errorCode: 'login.passwordCharacterLimit' };
+  //? Run the FULL password policy (length, 72-byte bcrypt cap, complexity,
+  //? common-list, custom validator) up front, as confirmReset does. A length-only
+  //? check let updatePasswordHash throw PasswordPolicyError later → a generic 500
+  //? after the vetoable prePasswordChanged hook had already run.
+  const policyFailure = validatePassword(newPassword);
+  if (policyFailure) {
+    return { status: 'error', errorCode: policyFailure };
   }
   if (newPassword !== confirmPassword) {
     return { status: 'error', errorCode: 'login.passwordNotMatch' };
@@ -62,6 +70,11 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
   // longer valid. The current session (the one that just changed the
   // password) stays active so the user isn't kicked from this device.
   const revokedCount = await revokeUserSessions(user.id, user.token);
+  //? Pending email-change / reset links were requested under the old password;
+  //? whoever made them (possibly the attacker this change locks out) must not
+  //? be able to redeem them afterwards.
+  await invalidateEmailChangeToken(user.id);
+  await invalidatePasswordResetToken(user.id);
 
   void dispatchHook('passwordChanged', {
     userId: user.id,

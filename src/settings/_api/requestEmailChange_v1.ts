@@ -4,7 +4,7 @@
 //? canonical CJS-interop pattern that lint-rules also accept.
 // eslint-disable-next-line import-x/default
 import validator from 'validator';
-import { dispatchHook } from '@luckystack/core';
+import { dispatchHook, getLogger, tryCatch } from '@luckystack/core';
 import { sendEmailChangeConfirmation, verifyPassword } from '@luckystack/login';
 import { AuthProps, SessionLayout } from '../../../config';
 import { Functions, ApiResponse } from '../../../src/_sockets/apiTypes.generated';
@@ -18,18 +18,26 @@ export const auth: AuthProps = {
 };
 
 export interface ApiParams {
-  //? LOGIN-EMAILCHG: `currentPassword` is required for credentials-provider
-  //? accounts. A session-hijack (stolen cookie / XSS) that can change the
-  //? email locks the real owner out permanently because the confirm link goes
-  //? to the NEW (attacker-controlled) address. Collecting the current password
-  //? at initiation time prevents the attack — only someone who already knows
-  //? the credential can start the change flow.
+  //? LOGIN-EMAILCHG: `currentPassword` is required. A session-hijack (stolen
+  //? cookie / XSS) that can change the email locks the real owner out
+  //? permanently because the confirm link goes to the NEW (attacker-controlled)
+  //? address. Collecting the current password at initiation time prevents the
+  //? attack — only someone who already knows the credential can start the
+  //? change flow.
   data: { newEmail: string; currentPassword?: string };
   user: SessionLayout;
   functions: Functions;
 }
 
 export const main = async ({ data, user, functions }: ApiParams): Promise<ApiResponse> => {
+  //? Only credentials accounts can change their email. An OAuth account is
+  //? found by (email, provider), so a changed email cuts the owner off from
+  //? their next provider sign-in, and lets a stolen session (no password to
+  //? re-check) bind the account to an address the attacker owns at the same
+  //? provider. The email belongs to the provider; it is changed there.
+  if (user.provider !== 'credentials') {
+    return { status: 'error', errorCode: 'settings.emailChange.managedByProvider' };
+  }
   if (typeof data.newEmail !== 'string') {
     return { status: 'error', errorCode: 'settings.emailChange.invalidEmail' };
   }
@@ -44,28 +52,37 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
   }
 
   //? LOGIN-EMAILCHG: require and verify the current password before initiating
-  //? an email change for credentials-provider accounts. OAuth accounts have no
-  //? stored password so the check is skipped for them (the provider session is
-  //? the re-auth proof). An empty or missing `currentPassword` is rejected
-  //? before the DB read so there is no timing difference between "no password
+  //? an email change. An empty or missing `currentPassword` is rejected before
+  //? the DB read so there is no timing difference between "no password
   //? supplied" and "wrong password" — both return the same errorCode.
-  if (user.provider === 'credentials') {
-    const currentPassword = data.currentPassword ?? '';
-    if (!currentPassword) {
-      return { status: 'error', errorCode: 'settings.emailChange.currentPasswordRequired' };
-    }
-    const dbUser = await functions.db.prisma.user.findUnique({
-      where: { id: user.id },
-      select: { password: true },
-    });
-    const storedHash = dbUser?.password ?? null;
-    if (!storedHash) {
-      return { status: 'error', errorCode: 'settings.emailChange.currentPasswordRequired' };
-    }
-    const passwordOk = await verifyPassword(currentPassword, storedHash);
-    if (!passwordOk) {
-      return { status: 'error', errorCode: 'settings.emailChange.wrongCurrentPassword' };
-    }
+  const currentPassword = data.currentPassword ?? '';
+  if (!currentPassword) {
+    return { status: 'error', errorCode: 'settings.emailChange.currentPasswordRequired' };
+  }
+  const dbUser = await functions.db.prisma.user.findUnique({
+    where: { id: user.id },
+    select: { password: true },
+  });
+  const storedHash = dbUser?.password ?? null;
+  if (!storedHash) {
+    return { status: 'error', errorCode: 'settings.emailChange.currentPasswordRequired' };
+  }
+  const passwordOk = await verifyPassword(currentPassword, storedHash);
+  if (!passwordOk) {
+    return { status: 'error', errorCode: 'settings.emailChange.wrongCurrentPassword' };
+  }
+
+  //? Vetoable pre-hook. Lets compliance / approval / 2FA add-ons abort the
+  //? change with their own errorCode before any token is minted. It runs
+  //? BEFORE the taken-address lookup so a veto (and the hook's own run time)
+  //? is the same whether or not the address is taken (DD-ROOTSRC-O6).
+  const preChange = await dispatchHook('preEmailChange', {
+    userId: user.id,
+    currentEmail: user.email,
+    newEmail,
+  });
+  if (preChange.stopped) {
+    return { status: 'error', errorCode: preChange.signal.errorCode };
   }
 
   //? ADR — DD-ROOTSRC-O6: do NOT reveal whether the new address is already
@@ -99,21 +116,21 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
     return { status: 'success' };
   }
 
-  //? Vetoable pre-hook. Lets compliance / approval / 2FA add-ons abort the
-  //? change with their own errorCode before any token is minted.
-  const preChange = await dispatchHook('preEmailChange', {
-    userId: user.id,
-    currentEmail: user.email,
-    newEmail,
-  });
-  if (preChange.stopped) {
-    return { status: 'error', errorCode: preChange.signal.errorCode };
-  }
-
-  const result = await sendEmailChangeConfirmation({
+  //? Fire-and-forget the token + send (DD-ROOTSRC-O6). Awaiting it made the
+  //? free-address branch measurably slower than the taken branch above, and a
+  //? send failure returned an error the taken branch never can — both reveal
+  //? whether another account owns the address. Failures are logged only.
+  void tryCatch(() => sendEmailChangeConfirmation({
     userId: user.id,
     newEmail,
     userName: user.name,
+  })).then(([sendError, result]) => {
+    if (sendError || !result?.ok) {
+      getLogger().error('[settings] email-change confirmation send failed', {
+        userId: user.id,
+        reason: sendError ? String(sendError) : result?.reason,
+      });
+    }
   });
 
   //? LOGIN-EMAILCHG: notify the OLD address so the real owner is alerted to
@@ -127,8 +144,5 @@ export const main = async ({ data, user, functions }: ApiParams): Promise<ApiRes
     newEmail,
   });
 
-  if (!result.ok) {
-    return { status: 'error', errorCode: 'settings.emailChange.emailSendFailed' };
-  }
   return { status: 'success' };
 };
