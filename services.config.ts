@@ -10,6 +10,8 @@
  *   - `system` is reserved and always maps to `src/_api` + `src/_sync` (source: 'root').
  *   - `src/system` is invalid as a service folder.
  *   - A service may belong to EXACTLY ONE preset.
+ *   - Every top-level src/ folder with _api/_sync routes must be a declared
+ *     service in a preset; the production build fails otherwise.
  *   - Route names follow the service-first contract: `service/name` (see docs/ARCHITECTURE_ROUTING.md).
  */
 
@@ -41,6 +43,10 @@ const servicesConfig: ServicesConfig = {
     system: { source: 'root' },
     vehicles: { source: 'vehicles' },
     billing: { source: 'billing' },
+    //? The account pages' routes (`src/settings/_api`, `src/reset-password/_api`).
+    //? Undeclared, they were silently left out of every production bundle.
+    settings: { source: 'settings' },
+    'reset-password': { source: 'reset-password' },
   },
 
   customRoutes: {
@@ -55,8 +61,8 @@ const servicesConfig: ServicesConfig = {
 
   presets: {
     'core-preset': {
-      description: 'Identity, session, and root-level system APIs.',
-      services: ['system'],
+      description: 'Identity, session, account settings, password reset, and root-level system APIs.',
+      services: ['system', 'settings', 'reset-password'],
     },
     'fleet-preset': {
       description: 'Vehicle management service bundle.',
