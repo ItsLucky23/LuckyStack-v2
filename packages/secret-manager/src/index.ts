@@ -285,12 +285,23 @@ const isLoopbackHost = (hostname: string): boolean =>
 const validateUrl = (url: string, allowInsecureHttp: boolean): void => {
   //? Reject relative / non-http(s) URLs (e.g. `file://`) up front so the resolve
   //? endpoint can't be pointed at the local filesystem or another protocol.
+  //? Error text never echoes the raw `url`: it can embed credentials, and these
+  //? messages reach console.warn / `onResolveError` / error trackers. Name the
+  //? parsed origin (no userinfo, path or query) instead.
   const [parseError, parsed] = tryCatchSync(() => new URL(url));
   if (parseError || !parsed) {
-    throw new Error(`[secret-manager] Invalid \`url\`: "${url}" is not an absolute URL.`);
+    throw new Error('[secret-manager] Invalid `url`: the value is not an absolute URL.');
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     throw new Error(`[secret-manager] Invalid \`url\` scheme "${parsed.protocol}": only http(s) is supported.`);
+  }
+  //? fetch refuses a URL with userinfo anyway (and quotes it whole in its
+  //? error), so reject it here with a redacted message instead of leaking it
+  //? on every resolve. Authentication belongs in the bearer `token`.
+  if (parsed.username || parsed.password) {
+    throw new Error(
+      `[secret-manager] Invalid \`url\` "${parsed.protocol}//***:***@${parsed.host}": credentials in the URL are not supported. Remove them and authenticate with \`token\`.`,
+    );
   }
   //? The channel carries the bearer token + plaintext secrets, so plain http is a
   //? cleartext leak. Permit it only for loopback, or behind an explicit opt-in
@@ -298,7 +309,7 @@ const validateUrl = (url: string, allowInsecureHttp: boolean): void => {
   if (parsed.protocol === 'http:' && !isLoopbackHost(parsed.hostname)) {
     if (!allowInsecureHttp) {
       throw new Error(
-        `[secret-manager] Refusing plain-http \`url\` "${url}": the bearer token and resolved secrets would travel in cleartext. Use https, point at a loopback host, or set \`allowInsecureHttp: true\` to override.`,
+        `[secret-manager] Refusing plain-http \`url\` "${parsed.origin}": the bearer token and resolved secrets would travel in cleartext. Use https, point at a loopback host, or set \`allowInsecureHttp: true\` to override.`,
       );
     }
     console.warn(

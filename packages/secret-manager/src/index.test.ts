@@ -368,6 +368,29 @@ describe('url validation (validateUrl)', () => {
     );
   });
 
+  //? 072 — a url with userinfo is rejected, and no error text carries the
+  //? credentials (they reach console.warn / onResolveError / error trackers).
+  it('rejects a url with embedded credentials without echoing them', async () => {
+    const error = await initSecretManager(baseConfig({ url: 'https://svc:p4ss@secrets.internal/v1' }))
+      .catch((caught: unknown) => caught);
+
+    expect(String(error)).toMatch(/credentials in the URL are not supported/);
+    expect(String(error)).toMatch(/https:\/\/\*\*\*:\*\*\*@secrets\.internal/);
+    expect(String(error)).not.toMatch(/p4ss|svc/);
+  });
+
+  it('never echoes the raw url in validation errors', async () => {
+    const unparsable = await initSecretManager(baseConfig({ url: '//svc:p4ss@secrets.internal' }))
+      .catch((caught: unknown) => caught);
+    const plainHttp = await initSecretManager(baseConfig({ url: 'http://secrets.example.com/r?key=s3cr3t' }))
+      .catch((caught: unknown) => caught);
+
+    expect(String(unparsable)).toMatch(/is not an absolute URL/);
+    expect(String(unparsable)).not.toMatch(/p4ss/);
+    expect(String(plainHttp)).toMatch(/Refusing plain-http `url` "http:\/\/secrets\.example\.com"/);
+    expect(String(plainHttp)).not.toMatch(/s3cr3t/);
+  });
+
   it('does not validate the url in local mode (placeholder allowed)', async () => {
     await expect(
       initSecretManager(baseConfig({ source: 'local', url: 'not-a-url' })),
