@@ -662,10 +662,10 @@ export interface SocketConfig {
   pingInterval: number;
   /**
    * Minimum ms between client → server `activity` heartbeats (repo-src C-CFG /
-   * presence C1). The consumer template's activity tracker + `@luckystack/presence`
-   * read this to throttle how often mouse/keyboard/touch activity is reported
-   * (previously hardcoded to 10s). DEFAULT 10000 (10s) — a missing key keeps the
-   * historical cadence.
+   * presence C1). The client activity tracker in `src/_sockets` reads this to
+   * throttle how often mouse/keyboard/touch activity is reported; the server
+   * (and `@luckystack/presence`) records every heartbeat it receives. DEFAULT
+   * 10000 (10s) — a missing key keeps the historical cadence.
    */
   activityHeartbeatThrottleMs: number;
   /**
