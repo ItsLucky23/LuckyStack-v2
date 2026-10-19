@@ -3,11 +3,11 @@
 //? decomposition stays behavior-equivalent: same used-key set + locations, same
 //? dynamic-site filtering, same locale flattening + bad-file skip.
 
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync, readdirSync, readFileSync, symlinkSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { harvestUsedKeys, collectDynamicSites, loadLocaleKeys } from './checkI18n';
+import { checkI18n, harvestUsedKeys, harvestFrameworkKeys, collectDynamicSites, loadLocaleKeys } from './checkI18n';
 import type { SourceFile } from '../lib/scan';
 
 //? Build a minimal in-memory SourceFile (rel + text + derived lines). Mirrors
@@ -129,5 +129,49 @@ describe('loadLocaleKeys', () => {
     tmp = mkdtempSync(path.join(os.tmpdir(), 'i18n-'));
     writeLocale(tmp, path.join('src', 'data', 'config.json'), JSON.stringify({ a: 'b' }));
     expect(loadLocaleKeys(tmp).size).toBe(0);
+  });
+});
+
+describe('framework-emitted keys (finding 021)', () => {
+  let tmp: string;
+
+  afterEach(() => {
+    if (tmp) rmSync(tmp, { recursive: true, force: true });
+    vi.restoreAllMocks();
+  });
+
+  const writeAt = (root: string, rel: string, text: string): void => {
+    const abs = path.join(root, rel);
+    mkdirSync(path.dirname(abs), { recursive: true });
+    writeFileSync(abs, text, 'utf8');
+  };
+
+  it('harvests dotted literals from installed @luckystack/*/dist, including symlinked workspace packages', () => {
+    tmp = mkdtempSync(path.join(os.tmpdir(), 'i18n-fw-'));
+    writeAt(tmp, 'node_modules/@luckystack/server/dist/index.js', `res({ errorCode: "api.invalidName", message: 'sync.disabled' });\nimport x from "./chunk.js";`);
+    writeAt(tmp, 'linked/core/dist/client.mjs', 'const code = ok ? `auth.required` : "api.notFound";');
+    symlinkSync(path.join(tmp, 'linked', 'core'), path.join(tmp, 'node_modules', '@luckystack', 'core'), 'dir');
+    writeAt(tmp, 'node_modules/@luckystack/server/dist/index.d.ts', `type X = 'types.only';`);
+
+    const keys = harvestFrameworkKeys(tmp);
+
+    expect([...keys].toSorted()).toEqual(['api.invalidName', 'api.notFound', 'auth.required', 'sync.disabled']);
+  });
+
+  it('keeps framework codes out of the UNUSED report and warns against deleting them', () => {
+    tmp = mkdtempSync(path.join(os.tmpdir(), 'i18n-fw-'));
+    writeAt(tmp, 'node_modules/@luckystack/server/dist/index.js', `res({ errorCode: 'api.invalidName' });`);
+    writeAt(tmp, 'src/_locales/en.json', JSON.stringify({ api: { invalidName: 'Bad name' }, mine: { stale: 'x' } }));
+    writeAt(tmp, 'src/page.tsx', 'export default () => null;\n');
+    vi.spyOn(console, 'log').mockImplementation(vi.fn());
+
+    checkI18n({ root: tmp, pkgPath: path.join(tmp, 'package.json'), pkg: {} });
+
+    const dump = path.join(tmp, 'dump');
+    const unusedLog = readdirSync(dump).find((name) => name.startsWith('UNUSED_I18N_')) ?? '';
+    const report = readFileSync(path.join(dump, unusedLog), 'utf8');
+    expect(report).toContain('- mine.stale');
+    expect(report).not.toContain('- api.invalidName');
+    expect(report).toContain('does NOT prove them');
   });
 });

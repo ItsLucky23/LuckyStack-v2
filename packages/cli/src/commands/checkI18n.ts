@@ -3,7 +3,8 @@
 //?   D. Missing translations — keys used in code but absent from one or more locales.
 //? Dynamic keys (`notify.error({ key: errorCode })`) are handled by ALSO harvesting
 //? every literal `errorCode: '...'` repo-wide as a "used" key (server error codes
-//? are hardcoded, so this covers the dynamic path). Truly-unresolvable dynamic
+//? are hardcoded, so this covers the dynamic path), plus the keys the installed
+//? @luckystack/* packages emit (harvestFrameworkKeys). Truly-unresolvable dynamic
 //? call sites are listed separately for manual review.
 //? Output: dump/UNUSED_I18N_<hash>.log + dump/MISSING_I18N_<hash>.log.
 
@@ -67,6 +68,36 @@ export const harvestUsedKeys = (files: SourceFile[]): UsedKeys => {
   return { locations, keys: new Set(locations.keys()) };
 };
 
+//? Translation keys the INSTALLED framework emits at runtime (`errorCode:
+//? 'api.invalidName'`, `message: 'sync.disabled'`, `fallbackErrorCode: …`) and
+//? the client translates from the consumer's own locales. Since the package
+//? split they live in node_modules, which the source scan skips, so without
+//? this every framework code read as "unused" and the report told the LLM to
+//? delete it. Harvests every dotted string literal in @luckystack/*/dist rather
+//? than a fixed set of property names: built code reaches keys via ternaries
+//? and constants too, and a false "used" only keeps a key — the safe direction.
+const FRAMEWORK_CODE_EXTENSIONS = new Set(['.js', '.mjs', '.cjs']);
+const DOTTED_LITERAL = /['"`]([A-Za-z][\w-]*(?:\.[\w-]+)+)['"`]/g;
+
+export const harvestFrameworkKeys = (root: string): Set<string> => {
+  const keys = new Set<string>();
+  const scope = path.join(root, 'node_modules', '@luckystack');
+  if (!fs.existsSync(scope)) return keys;
+  for (const name of fs.readdirSync(scope)) {
+    //? existsSync follows symlinks (workspace installs link the packages).
+    const dist = path.join(scope, name, 'dist');
+    if (!fs.existsSync(dist)) continue;
+    walkDir(dist, new Set(['node_modules']), (abs) => {
+      if (!FRAMEWORK_CODE_EXTENSIONS.has(path.extname(abs))) return;
+      for (const match of fs.readFileSync(abs, 'utf8').matchAll(DOTTED_LITERAL)) {
+        const candidate = match[1];
+        if (candidate !== undefined && isTranslationKey(candidate)) keys.add(candidate);
+      }
+    });
+  }
+  return keys;
+};
+
 //? Exclude literals + TS type annotations (`key: string` in a function param /
 //? interface is not a translation call) so the manual-review note stays signal.
 const NON_KEY_VALUES = new Set(['true', 'false', 'null', 'undefined', 'string', 'number', 'boolean', 'unknown', 'any', 'void', 'object', 'never']);
@@ -103,6 +134,7 @@ export const checkI18n = (project: ConsumerProject): void => {
 
   //? Used keys (literal `key:`/`errorCode:`) + unresolved dynamic `key:<var>` sites.
   const { locations: usedLocations, keys: usedKeys } = harvestUsedKeys(files);
+  const frameworkKeys = harvestFrameworkKeys(project.root);
   const dynamicSites = collectDynamicSites(files);
 
   //? Locale files → dotted key sets per file.
@@ -120,7 +152,7 @@ export const checkI18n = (project: ConsumerProject): void => {
     kind: 'UNUSED_I18N',
     items: [...localeKeys],
     renderSection: ([rel, keys]) => {
-      const unusedKeys = [...keys].filter((k) => !usedKeys.has(k)).toSorted();
+      const unusedKeys = [...keys].filter((k) => !usedKeys.has(k) && !frameworkKeys.has(k)).toSorted();
       if (unusedKeys.length === 0) return null;
       return {
         section: `## file: ${rel}\n${unusedKeys.map((k) => `- ${k}`).join('\n')}`,
@@ -130,12 +162,20 @@ export const checkI18n = (project: ConsumerProject): void => {
     header: (count) =>
       `# UNUSED TRANSLATIONS — ${String(count)} found across ${String(localeRels.length)} locale file(s)\n` +
       `# Present in a locale JSON but referenced nowhere in code.\n` +
-      `# Used-key set = literal { key: '...' } + errorCode: '...' (dotted) repo-wide.\n` +
+      `# Used-key set = literal { key: '...' } + errorCode: '...' (dotted) repo-wide,\n` +
+      `# plus ${String(frameworkKeys.size)} dotted literal(s) emitted by the installed @luckystack/* packages\n` +
+      `# (node_modules/@luckystack/*/dist).\n` +
       `# Heuristic limit: keys reached via a variable/helper (e.g. t('foo.bar'),\n` +
       `# positional keys) are NOT recognized and may be listed here in error.\n` +
+      `# WARNING: framework error codes (api.*, auth.*, sync.*, routing.*, …) never\n` +
+      `# appear in your own source — a zero-match repo search does NOT prove them\n` +
+      `# unused. Keys of a feature you have not added yet (e.g. docs.* before\n` +
+      `# \`npx luckystack add docs-ui\`) are needed once you add it.\n` +
       dynamicNote +
       `# Feed this to an LLM: before deleting each key, full-text-search the repo\n` +
-      `# for its dotted name; delete only keys with zero matches.\n\n`,
+      `# AND node_modules/@luckystack for its dotted name; delete only keys with\n` +
+      `# zero matches in both, and keep any key under a framework prefix unless\n` +
+      `# the developer confirms it.\n\n`,
     emptyText: '(no unused translations)\n',
   });
 
