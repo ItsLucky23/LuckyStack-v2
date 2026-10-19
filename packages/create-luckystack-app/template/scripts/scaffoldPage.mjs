@@ -165,16 +165,16 @@ export default function Page({ params, searchParams }: PageProps) {
 
 const PAGE_DASHBOARD_TEMPLATE = `//? intent: TODO — describe in one plain-language line what this page is FOR.
 
-//? Dashboard page template — wrapped in the \`'dashboard'\` template
-//? (sidebar + main content). Includes a login-required middleware as a
-//? sane default — adjust the role check or remove the middleware if this
-//? page is public.
+//? Dashboard page template — wrapped in the \`'home'\` template (the signed-in
+//? shell; registered in src/_components/templates/TemplateProvider.tsx).
+//? Includes a login-required middleware as a sane default — adjust the role
+//? check or remove the middleware if this page is public.
 
 import type { PageMiddleware } from '@luckystack/core/client';
 //@ts-ignore Relative import: '{{REL_PATH}}' is replaced at scaffold time.
 import type { SessionLayout } from '{{REL_PATH}}config';
 
-export const template = 'dashboard';
+export const template = 'home';
 
 //? Default: require login. Customize for role checks
 //? (e.g. \`if (!session.admin) return undefined;\` to bounce non-admins back).

@@ -15,7 +15,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        node-version: ['20', '22']
+        # Matches package.json engines (node >=22.13).
+        node-version: ['22', '24']
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -24,14 +25,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ matrix.node-version }}
-          cache: 'npm'
+{{CI_GITHUB_PM_SETUP}}
 
       - name: Install dependencies
-        # Use npm install rather than npm ci because the scaffold ships no
-        # package-lock.json — the lockfile is created on the user's first
-        # `npm install` and should be committed before CI runs. Once the
-        # lockfile is committed, switch this line to: npm ci --prefer-offline
-        run: npm install
+        # Plain install rather than the frozen-lockfile variant because the
+        # scaffold ships no lockfile — it is created on the user's first install
+        # and should be committed before CI runs. Once the lockfile is
+        # committed, switch this line to: {{CI_FROZEN_INSTALL_COMMAND}}
+        run: {{CI_INSTALL_COMMAND}}
 
       - name: Generate type artifacts
         run: npm run generateArtifacts

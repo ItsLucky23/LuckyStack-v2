@@ -5,6 +5,16 @@ dist
 # Local env: .env holds only non-secret config and IS committed.
 # .env.local holds secrets (DATABASE_URL, OAuth keys, etc.) and is NOT committed.
 .env.local
+.env.*.local
+# Docker overlay: may hold remote database/Redis URLs and passwords.
+.env.docker
+
+# SQLite data files (user rows, password hashes). `file:./dev.db` lands in the
+# project root (drizzle/mikro-orm) or in prisma/ (Prisma resolves it there).
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
 
 # @luckystack/secret-manager shared bearer token (single-line file, never commit).
 .secret-manager-token
