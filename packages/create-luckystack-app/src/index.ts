@@ -19,8 +19,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import readline from 'node:readline/promises';
-import { emitKeypressEvents } from 'node:readline';
+import { createInterface, emitKeypressEvents } from 'node:readline';
 import { stdin as input, stdout as output } from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
@@ -348,14 +347,65 @@ export const DEFAULT_CHOICES: ScaffoldChoices = {
   packageManager: 'npm',
 };
 
+//? Thrown when stdin ends before every fallback prompt has an answer.
+export class StdinClosedError extends Error {
+  constructor() {
+    super('[create-luckystack-app] stdin closed before every question was answered, so nothing was scaffolded. Pass --no-prompt to use the defaults plus your flags, or provide one answer line per question.');
+    this.name = 'StdinClosedError';
+  }
+}
+
+type AskLine = (prompt: string) => Promise<string>;
+
+//? Line reader for the fallback prompts. Every 'line' event is queued, because a
+//? pipe delivers all answers in one chunk: `rl.question()` only receives the
+//? line that arrives while it is waiting, and readline drops the rest. When the
+//? input ends before an answer arrives, `ask` rejects with StdinClosedError
+//? instead of leaving a promise that never settles (the process would then exit 0
+//? having written nothing).
+export const createLineReader = (
+  inputStream: NodeJS.ReadableStream,
+  outputStream: NodeJS.WritableStream,
+): { ask: AskLine; close: () => void } => {
+  const rl = createInterface({ input: inputStream, terminal: false });
+  const queued: string[] = [];
+  let closed = false;
+  let waiting: { resolve: (line: string) => void; reject: (error: Error) => void } | null = null;
+  rl.on('line', (line) => {
+    if (waiting) {
+      const pending = waiting;
+      waiting = null;
+      pending.resolve(line);
+      return;
+    }
+    queued.push(line);
+  });
+  rl.on('close', () => {
+    closed = true;
+    if (waiting) {
+      const pending = waiting;
+      waiting = null;
+      pending.reject(new StdinClosedError());
+    }
+  });
+  const ask: AskLine = (prompt) => {
+    outputStream.write(prompt);
+    const next = queued.shift();
+    if (next !== undefined) return Promise.resolve(next);
+    if (closed) return Promise.reject(new StdinClosedError());
+    return new Promise((resolve, reject) => { waiting = { resolve, reject }; });
+  };
+  return { ask, close: () => { rl.close(); } };
+};
+
 const pickFromList = async <T extends string>(
-  rl: readline.Interface,
+  ask: AskLine,
   label: string,
   options: readonly T[],
   defaultValue: T,
 ): Promise<T> => {
   const numbered = options.map((opt, idx) => `  ${String(idx + 1)}) ${opt}${opt === defaultValue ? ' (default)' : ''}`).join('\n');
-  const raw = await rl.question(`\n${label}\n${numbered}\n> `);
+  const raw = await ask(`\n${label}\n${numbered}\n> `);
   const answer = raw.trim();
   if (!answer) return defaultValue;
   const asNumber = Number(answer);
@@ -374,12 +424,12 @@ const pickFromList = async <T extends string>(
 };
 
 const pickMulti = async <T extends string>(
-  rl: readline.Interface,
+  ask: AskLine,
   label: string,
   options: readonly T[],
 ): Promise<T[]> => {
   const numbered = options.map((opt, idx) => `  ${String(idx + 1)}) ${opt}`).join('\n');
-  const raw = await rl.question(`\n${label} (comma-separated, blank = none)\n${numbered}\n> `);
+  const raw = await ask(`\n${label} (comma-separated, blank = none)\n${numbered}\n> `);
   const answer = raw.trim();
   if (!answer) return [];
   const picks = new Set<T>();
@@ -397,9 +447,9 @@ const pickMulti = async <T extends string>(
   return [...picks];
 };
 
-const askYesNo = async (rl: readline.Interface, label: string, defaultValue: boolean): Promise<boolean> => {
+const askYesNo = async (ask: AskLine, label: string, defaultValue: boolean): Promise<boolean> => {
   const hint = defaultValue ? 'Y/n' : 'y/N';
-  const raw = await rl.question(`\n${label} (${hint}) > `);
+  const raw = await ask(`\n${label} (${hint}) > `);
   const answer = raw.trim().toLowerCase();
   if (!answer) return defaultValue;
   return answer === 'y' || answer === 'yes';
@@ -407,92 +457,106 @@ const askYesNo = async (rl: readline.Interface, label: string, defaultValue: boo
 
 //? Non-interactive fallback (pipes / CI / no-TTY): the numbered-prompt flow.
 //? Used automatically when stdin/stdout isn't a terminal, so the arrow-key
-//? wizard below never breaks an automated run.
+//? wizard below never breaks an automated run. Stdin that ends before every
+//? question is answered is a hard error (exit 1), never a silent exit 0.
 const runPromptsFallback = async (
   presets: Record<string, string | string[]> = {},
 ): Promise<ScaffoldChoices> => {
-  const rl = readline.createInterface({ input, output });
-  //? Gather into the same answer-bag the wizard produces, then funnel through
-  //? `convertAnswersToChoices` so the two prompt paths share one validation +
-  //? normalization seam. CLI-flag presets (CFG-01) pre-fill the bag; we only
-  //? prompt for keys that weren't supplied on the command line.
+  const reader = createLineReader(input, output);
+  try {
+    return convertAnswersToChoices(await collectFallbackAnswers(presets, reader.ask));
+  } catch (error: unknown) {
+    if (!(error instanceof StdinClosedError)) throw error;
+    console.error(`\n${error.message}`);
+    process.exit(1);
+  } finally {
+    reader.close();
+  }
+};
+
+//? Gather into the same answer-bag the wizard produces, then funnel through
+//? `convertAnswersToChoices` so the two prompt paths share one validation +
+//? normalization seam. CLI-flag presets (CFG-01) pre-fill the bag; we only
+//? prompt for keys that weren't supplied on the command line. Exported for tests.
+export const collectFallbackAnswers = async (
+  presets: Record<string, string | string[]>,
+  ask: AskLine,
+): Promise<Record<string, string | string[]>> => {
   const answers: Record<string, string | string[]> = { ...presets };
   const need = (key: string): boolean => !(key in presets);
-  try {
-    if (need('orm')) {
-      answers.orm = await pickFromList(rl, 'Which ORM / data layer? (prisma = classic · drizzle = TS-first SQL · mikro-orm = TS-first incl. MongoDB · none = bring your own)', PROVIDER_OPTIONS.orm, 'prisma');
-    }
-    const orm = asOption(answers.orm, PROVIDER_OPTIONS.orm, 'prisma');
-    if (orm !== 'none' && need('dbProvider')) {
-      //? Drizzle is SQL-only — offer the filtered list (and a matching default).
-      answers.dbProvider = orm === 'drizzle'
-        ? await pickFromList(rl, 'Which database provider? (drizzle is SQL-only)', SQL_DB_PROVIDERS, 'postgresql')
-        : await pickFromList(rl, 'Which database provider do you want to use?', PROVIDER_OPTIONS.dbProvider, 'mongodb');
-    }
-    //? orm 'none' has no data layer for a UserAdapter at all — auth stays off.
-    //? drizzle/mikro-orm DO support auth via the generated starter UserAdapter.
-    if (orm !== 'none' && need('authMode')) {
-      answers.authMode = await pickFromList(rl, 'Authentication mode?', PROVIDER_OPTIONS.authMode, 'none');
-    }
-    const authMode = orm === 'none' ? 'none' : asOption(answers.authMode, PROVIDER_OPTIONS.authMode, 'none');
-    if (authMode === 'credentials+oauth' && need('oauthProviders')) {
-      answers.oauthProviders = await pickMulti(rl, 'Which OAuth providers to wire?', PROVIDER_OPTIONS.oauthProviders);
-    }
-    if (need('emailProvider')) {
-      answers.emailProvider = await pickFromList(rl, 'Transactional email adapter?', PROVIDER_OPTIONS.emailProvider, 'none');
-    }
-    if (need('monitoringProvider')) {
-      answers.monitoringProvider = await pickFromList(rl, 'Observability backend?', PROVIDER_OPTIONS.monitoringProvider, 'none');
-    }
-    if (need('presence')) {
-      answers.presence = (await askYesNo(rl, 'Install @luckystack/presence (AFK / presence / socket-status)?', false)) ? 'Yes' : 'No';
-    }
-    if (need('errorTracking')) {
-      answers.errorTracking = (await askYesNo(rl, 'Install @luckystack/error-tracking (error capture + auto-instrumentation)?', false)) ? 'Yes' : 'No';
-    }
-    if (need('docsUi')) {
-      answers.docsUi = (await askYesNo(rl, 'Install @luckystack/docs-ui (in-app API docs viewer)?', false)) ? 'Yes' : 'No';
-    }
-    if (need('secretManager')) {
-      answers.secretManager = (await askYesNo(rl, 'Install @luckystack/secret-manager (.env-pointer secret resolution)?', false)) ? 'Yes' : 'No';
-    }
-    if (need('router')) {
-      answers.router = (await askYesNo(rl, 'Install @luckystack/router (multi-instance load-balancer; run via npm run router)?', false)) ? 'Yes' : 'No';
-    }
-    if (need('cron')) {
-      answers.cron = (await askYesNo(rl, 'Install @luckystack/cron (leader-elected recurring jobs; register in luckystack/cron/*.ts)?', false)) ? 'Yes' : 'No';
-    }
-    if (need('aiInstructions')) {
-      answers.aiInstructions = (await askYesNo(
-        rl,
-        'Include LuckyStack AI dev instructions (AGENTS.md, docs, branch-logs, record-check git hook)?',
-        true,
-      )) ? 'Yes' : 'No';
-    }
-    //? Browser tooling is an AI-template sub-feature — only offered when the AI
-    //? instructions are included. `convertAnswersToChoices` forces 'none' when
-    //? aiInstructions is off, so a stale preset can't leak through.
-    const aiInstructions = answers.aiInstructions !== 'No';
-    if (aiInstructions && need('aiBrowserTooling')) {
-      answers.aiBrowserTooling = await pickFromList(
-        rl,
-        'Set up AI browser-testing tooling? (all = agent-browser + Playwright/Chrome DevTools MCP; agent-browser = cheap CLI only; none)',
-        PROVIDER_OPTIONS.aiBrowserTooling,
-        'agent-browser',
-      );
-    }
-    if (need('packageManager')) {
-      answers.packageManager = await pickFromList(
-        rl,
-        'Which package manager? (npm = default, works everywhere; bun = much faster, must already be on your PATH)',
-        PROVIDER_OPTIONS.packageManager,
-        'npm',
-      );
-    }
-    return convertAnswersToChoices(answers);
-  } finally {
-    rl.close();
+  if (need('orm')) {
+    answers.orm = await pickFromList(ask, 'Which ORM / data layer? (prisma = classic · drizzle = TS-first SQL · mikro-orm = TS-first incl. MongoDB · none = bring your own)', PROVIDER_OPTIONS.orm, 'prisma');
   }
+  const orm = asOption(answers.orm, PROVIDER_OPTIONS.orm, 'prisma');
+  if (orm !== 'none' && need('dbProvider')) {
+    //? Drizzle is SQL-only — offer the filtered list (and a matching default).
+    answers.dbProvider = orm === 'drizzle'
+      ? await pickFromList(ask, 'Which database provider? (drizzle is SQL-only)', SQL_DB_PROVIDERS, 'postgresql')
+      : await pickFromList(ask, 'Which database provider do you want to use?', PROVIDER_OPTIONS.dbProvider, 'mongodb');
+  }
+  //? orm 'none' has no data layer for a UserAdapter at all — auth stays off.
+  //? drizzle/mikro-orm DO support auth via the generated starter UserAdapter.
+  if (orm !== 'none' && need('authMode')) {
+    answers.authMode = await pickFromList(ask, 'Authentication mode?', PROVIDER_OPTIONS.authMode, 'none');
+  }
+  const authMode = orm === 'none' ? 'none' : asOption(answers.authMode, PROVIDER_OPTIONS.authMode, 'none');
+  if (authMode === 'credentials+oauth' && need('oauthProviders')) {
+    answers.oauthProviders = await pickMulti(ask, 'Which OAuth providers to wire?', PROVIDER_OPTIONS.oauthProviders);
+  }
+  if (need('emailProvider')) {
+    answers.emailProvider = await pickFromList(ask, 'Transactional email adapter?', PROVIDER_OPTIONS.emailProvider, 'none');
+  }
+  if (need('monitoringProvider')) {
+    answers.monitoringProvider = await pickFromList(ask, 'Observability backend?', PROVIDER_OPTIONS.monitoringProvider, 'none');
+  }
+  if (need('presence')) {
+    answers.presence = (await askYesNo(ask, 'Install @luckystack/presence (AFK / presence / socket-status)?', false)) ? 'Yes' : 'No';
+  }
+  //? A monitoring backend always brings error-tracking along, so only ask
+  //? when no backend was picked.
+  if (asOption(answers.monitoringProvider, PROVIDER_OPTIONS.monitoringProvider, 'none') === 'none' && need('errorTracking')) {
+    answers.errorTracking = (await askYesNo(ask, 'Install @luckystack/error-tracking (error capture + auto-instrumentation)?', false)) ? 'Yes' : 'No';
+  }
+  if (need('docsUi')) {
+    answers.docsUi = (await askYesNo(ask, 'Install @luckystack/docs-ui (in-app API docs viewer)?', false)) ? 'Yes' : 'No';
+  }
+  if (need('secretManager')) {
+    answers.secretManager = (await askYesNo(ask, 'Install @luckystack/secret-manager (.env-pointer secret resolution)?', false)) ? 'Yes' : 'No';
+  }
+  if (need('router')) {
+    answers.router = (await askYesNo(ask, 'Install @luckystack/router (multi-instance load-balancer; run via npm run router)?', false)) ? 'Yes' : 'No';
+  }
+  if (need('cron')) {
+    answers.cron = (await askYesNo(ask, 'Install @luckystack/cron (leader-elected recurring jobs; register in luckystack/cron/*.ts)?', false)) ? 'Yes' : 'No';
+  }
+  if (need('aiInstructions')) {
+    answers.aiInstructions = (await askYesNo(
+      ask,
+      'Include LuckyStack AI dev instructions (AGENTS.md, docs, branch-logs, record-check git hook)?',
+      true,
+    )) ? 'Yes' : 'No';
+  }
+  //? Browser tooling is an AI-template sub-feature — only offered when the AI
+  //? instructions are included. `convertAnswersToChoices` forces 'none' when
+  //? aiInstructions is off, so a stale preset can't leak through.
+  const aiInstructions = answers.aiInstructions !== 'No';
+  if (aiInstructions && need('aiBrowserTooling')) {
+    answers.aiBrowserTooling = await pickFromList(
+      ask,
+      'Set up AI browser-testing tooling? (all = agent-browser + Playwright/Chrome DevTools MCP; agent-browser = cheap CLI only; none)',
+      PROVIDER_OPTIONS.aiBrowserTooling,
+      'agent-browser',
+    );
+  }
+  if (need('packageManager')) {
+    answers.packageManager = await pickFromList(
+      ask,
+      'Which package manager? (npm = default, works everywhere; bun = much faster, must already be on your PATH)',
+      PROVIDER_OPTIONS.packageManager,
+      'npm',
+    );
+  }
+  return answers;
 };
 
 //? ───────── Arrow-key wizard (interactive TTY only) ─────────
@@ -760,6 +824,16 @@ const runWizard = (
     paint();
   });
 
+//? Only @luckystack/error-tracking reads SENTRY_DSN / POSTHOG_KEY and forwards
+//? errors, so a monitoring backend without it installs an SDK nothing uses. Same
+//? contract as `luckystack manage` (cli transitions.ts planMonitoring adds the
+//? package with every backend), so both tools agree on the recorded choices.
+const impliedErrorTracking = (monitoringProvider: MonitoringProvider, errorTracking: boolean): boolean => {
+  if (monitoringProvider === 'none' || errorTracking) return errorTracking;
+  console.log(`monitoring=${monitoringProvider} needs @luckystack/error-tracking (it sends the errors to ${monitoringProvider}) — installing it too.`);
+  return true;
+};
+
 //? Map the raw wizard answer bag onto a fully-typed `ScaffoldChoices`,
 //? validating every provider field against `PROVIDER_OPTIONS` (so an out-of-band
 //? value falls back to its default instead of leaking through as an arbitrary
@@ -791,6 +865,7 @@ const convertAnswersToChoices = (answers: Record<string, string | string[]>): Sc
     process.exit(2);
   }
 
+  const monitoringProvider = asOption(answers.monitoringProvider, PROVIDER_OPTIONS.monitoringProvider, 'none');
   return {
     orm,
     dbProvider,
@@ -799,10 +874,11 @@ const convertAnswersToChoices = (answers: Record<string, string | string[]>): Sc
       ? PROVIDER_OPTIONS.oauthProviders.filter((provider) => oauthPicked.includes(provider))
       : [],
     emailProvider: asOption(answers.emailProvider, PROVIDER_OPTIONS.emailProvider, 'none'),
-    monitoringProvider: asOption(answers.monitoringProvider, PROVIDER_OPTIONS.monitoringProvider, 'none'),
+    monitoringProvider,
     presence: answers.presence === 'Yes',
-    //? Opt-in convention (default off): only true when explicitly 'Yes'.
-    errorTracking: answers.errorTracking === 'Yes',
+    //? Opt-in convention (default off): only true when explicitly 'Yes' — or
+    //? implied by a monitoring backend.
+    errorTracking: impliedErrorTracking(monitoringProvider, answers.errorTracking === 'Yes'),
     //? Opt-in convention (default off): only true when explicitly 'Yes'.
     docsUi: answers.docsUi === 'Yes',
     secretManager: answers.secretManager === 'Yes',
@@ -915,12 +991,12 @@ const runPrompts = async (presets: Record<string, string | string[]> = {}): Prom
     },
     {
       key: 'monitoringProvider', type: 'select', label: 'Observability backend? (Sentry/Datadog/PostHog SDK)',
-      description: 'WHERE telemetry goes — the backend SDK + .env keys. @luckystack/error-tracking (next) feeds it.',
+      description: 'WHERE telemetry goes — the backend SDK + .env keys. A backend also installs @luckystack/error-tracking, which feeds it.',
       details: [
         'Picks the observability BACKEND + its SDK + .env keys (Sentry / Datadog /',
         'PostHog) — i.e. WHERE telemetry ends up. It does not capture anything on',
-        'its own: @luckystack/error-tracking (the next question) is the layer that',
-        'collects errors and sends them here. "none" = no backend wired.',
+        'its own: @luckystack/error-tracking is the layer that collects errors and',
+        'sends them here, so picking a backend installs it too. "none" = no backend.',
       ].join('\n'),
       options: PROVIDER_OPTIONS.monitoringProvider, defaultValue: 'none',
     },
@@ -937,22 +1013,23 @@ const runPrompts = async (presets: Record<string, string | string[]> = {}): Prom
     },
     {
       key: 'errorTracking', type: 'select', label: 'Install @luckystack/error-tracking?',
-      description: 'Auto-captures errors and feeds the backend above. Press ? — important if you picked backend "none".',
+      description: 'Auto-captures errors. Press ? — without a backend it needs your own sink.',
       details: [
         '@luckystack/error-tracking is a thin layer the framework auto-wires into',
         'every API + sync call: it captures thrown errors, adds request/timing',
         'spans, and tags the current user — with zero code in your handlers.',
         '',
-        'It does NOT store anything itself; it FORWARDS to a backend. Two cases:',
-        ' • You picked a backend above (Sentry/PostHog/Datadog) → errors flow there.',
-        ' • You picked "none" → there is nowhere to send, so this package stays a',
-        '   no-op. Only useful then if you register your own captureException sink',
-        '   in code.',
+        'It does NOT store anything itself; it FORWARDS to a backend. This question',
+        'only appears because you picked backend "none" (a backend installs it',
+        'automatically), so there is nowhere to send yet: the package stays a no-op',
+        'unless you register your own captureException sink in code.',
         '',
-        'So install it together with a backend (or your own sink). It is safe to',
-        'leave on — dormant until a DSN/key is set. Skip it for a backend-free app.',
+        'Skip it for a backend-free app.',
       ].join('\n'),
       options: ['Yes', 'No'], defaultValue: 'No',
+      //? A monitoring backend needs error-tracking to receive anything, so it is
+      //? implied there (see `impliedErrorTracking`) and only asked for 'none'.
+      skip: (a) => a.monitoringProvider !== undefined && a.monitoringProvider !== 'none',
     },
     {
       key: 'docsUi', type: 'select', label: 'Install @luckystack/docs-ui?',
@@ -1069,7 +1146,9 @@ const buildPresetAnswers = (args: CliArgs): Record<string, string | string[]> =>
 //? Enforce the cross-field invariants the wizard's `convertAnswersToChoices`
 //? guarantees, for the `--no-prompt` (flags-over-defaults) path: OAuth providers
 //? only matter under `credentials+oauth`, and browser tooling rides on the AI
-//? template. Keeps both choice-resolution paths consistent.
+//? template. Keeps both choice-resolution paths consistent. A passed FLAG is
+//? never dropped silently: main() runs `findFlagConflicts` on the result and
+//? exits when this normalisation removed something the user asked for.
 export const normalizeChoices = (choices: ScaffoldChoices): ScaffoldChoices => {
   //? Only orm 'none' forces auth off (no data layer for a UserAdapter —
   //? ADR 0020, relaxed). drizzle/mikro-orm ship a starter UserAdapter instead.
@@ -1078,9 +1157,51 @@ export const normalizeChoices = (choices: ScaffoldChoices): ScaffoldChoices => {
     ...choices,
     authMode,
     oauthProviders: authMode === 'credentials+oauth' ? choices.oauthProviders : [],
+    errorTracking: impliedErrorTracking(choices.monitoringProvider, choices.errorTracking),
     aiBrowserTooling: choices.aiInstructions ? choices.aiBrowserTooling : 'none',
   };
 };
+
+//? The choices a passed flag depends on. `null` = not known yet (checked before
+//? the prompts, when only the flags are known), so no conflict is reported.
+interface FlagDependencies {
+  orm: OrmProvider | null;
+  authMode: AuthMode | null;
+  aiInstructions: boolean | null;
+}
+
+//? docs/cli-flags.md: invalid combinations fail before a partial project is
+//? written. Every message names a flag the user passed that resolution would
+//? otherwise drop. Defaulted or wizard-chosen values are not conflicts on
+//? their own — those keep the silent normalisation in normalizeChoices.
+export const findFlagConflicts = (args: CliArgs, resolved: FlagDependencies): string[] => {
+  const conflicts: string[] = [];
+  if (args.authMode && args.authMode !== 'none' && resolved.orm === 'none') {
+    conflicts.push(`--auth=${args.authMode} needs a data layer, but the ORM is 'none'. Pick --orm=prisma, --orm=drizzle or --orm=mikro-orm, or add auth later with \`npx luckystack add login\`.`);
+  }
+  if (args.oauthProviders && args.oauthProviders.length > 0 && resolved.authMode !== null && resolved.authMode !== 'credentials+oauth') {
+    conflicts.push(`--oauth=${args.oauthProviders.join(',')} needs --auth=credentials+oauth, but auth is '${resolved.authMode}'.`);
+  }
+  if (args.aiBrowserTooling && args.aiBrowserTooling !== 'none' && resolved.aiInstructions === false) {
+    conflicts.push(`--ai-browser=${args.aiBrowserTooling} needs the AI dev instructions, but they are off (--no-ai-docs). Drop one of the two flags.`);
+  }
+  return conflicts;
+};
+
+const exitOnFlagConflicts = (conflicts: readonly string[]): void => {
+  if (conflicts.length === 0) return;
+  console.error('Invalid combination of flags — nothing was written:');
+  for (const conflict of conflicts) console.error(`  - ${conflict}`);
+  process.exit(2);
+};
+
+//? Flag-only view for the check before the prompts, so the wizard never asks
+//? questions for a run that is going to be rejected anyway.
+export const flagOnlyDependencies = (args: CliArgs): FlagDependencies => ({
+  orm: args.orm,
+  authMode: args.authMode,
+  aiInstructions: args.aiInstructions,
+});
 
 //? `--no-prompt` choice resolution: typed flag values layered over DEFAULT_CHOICES.
 const buildNoPromptChoices = (args: CliArgs): ScaffoldChoices => {
@@ -1099,14 +1220,9 @@ const buildNoPromptChoices = (args: CliArgs): ScaffoldChoices => {
     choices.dbProvider = 'postgresql';
     console.log("orm=drizzle has no MongoDB support — database defaulted to 'postgresql'.");
   }
-  //? Explicit `--orm=none --auth=<mode>` is a hard reject (mirrors the
-  //? drizzle+mongodb combo above): there is no data layer to write a
+  //? Explicit `--orm=none --auth=<mode>` is rejected by `findFlagConflicts`
+  //? (run in main() before this): there is no data layer to write a
   //? UserAdapter against, so silently scaffolding auth would ship a broken app.
-  if (choices.orm === 'none' && args.authMode && args.authMode !== 'none') {
-    console.error('Invalid combination: --orm=none does not support --auth (no data layer for a UserAdapter).');
-    console.error('Wire functions/db.ts first and add auth later with `npx luckystack add login`, or pick --orm=drizzle / --orm=mikro-orm.');
-    process.exit(2);
-  }
   if (args.authMode) choices.authMode = args.authMode;
   if (args.oauthProviders) choices.oauthProviders = args.oauthProviders;
   if (args.emailProvider) choices.emailProvider = args.emailProvider;
@@ -1149,7 +1265,8 @@ Options:
   --auth=<none|credentials|credentials+oauth> Authentication mode (default 'none' = no auth).
   --oauth=<google,github,discord,facebook,microsoft>  OAuth providers (comma list; needs --auth=credentials+oauth).
   --email=<none|console|resend|smtp>          Transactional email adapter (default 'none').
-  --monitoring=<none|sentry|datadog|posthog>  Observability backend (default 'none').
+  --monitoring=<none|sentry|datadog|posthog>  Observability backend (default 'none'). A backend also
+                                              installs @luckystack/error-tracking (it feeds the backend).
   --presence     Install @luckystack/presence (AFK / presence / socket-status).
   --error-tracking  Install @luckystack/error-tracking (error capture + auto-instrumentation).
   --docs-ui      Install @luckystack/docs-ui (in-app API docs viewer).
@@ -1182,6 +1299,20 @@ export const titleCase = (raw: string): string =>
     .filter(Boolean)
     .map((p) => p.charAt(0).toUpperCase() + p.slice(1))
     .join(' ') || 'My LuckyStack App';
+
+//? The title comes from the raw project name (only the slug is sanitised), so
+//? it is escaped for each place it lands: a quote or backslash must not end or
+//? alter the config.ts string literal, and markup must not reach index.html.
+export const escapeSingleQuotedString = (raw: string): string =>
+  raw.replaceAll('\\', '\\\\').replaceAll("'", String.raw`\'`);
+
+export const escapeHtml = (raw: string): string =>
+  raw
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
 
 export const readSelfVersion = (): string => {
   //? Fail loudly if the scaffolder can't read its own version — silently
@@ -1978,6 +2109,38 @@ const prunePresence = (targetDir: string): void => {
   ]);
 };
 
+//? Edits that strip the login guard from a dashboard-page generator (auth
+//? 'none'). The dev template injector's page template and scaffoldPage.mjs
+//? differ only in their ts-ignore wording and in that the .mjs keeps the page
+//? inside a template literal (escaped backticks).
+const guardlessDashboardEdits = (tsIgnoreLine: string, backtick: string): [string, string][] => [
+  [
+    `//? Includes a login-required middleware as a sane default — adjust the role
+//? check or remove the middleware if this page is public.`,
+    `//? No auth in this project, so the page is public: add an
+//? ${backtick}export const middleware${backtick} when it needs a guard.`,
+  ],
+  [
+    `import type { PageMiddleware } from '@luckystack/core/client';
+${tsIgnoreLine}
+import type { SessionLayout } from '{{REL_PATH}}config';
+
+`,
+    '',
+  ],
+  [
+    `//? Default: require login. Customize for role checks
+//? (e.g. ${backtick}if (!session.admin) return undefined;${backtick} to bounce non-admins back).
+export const middleware: PageMiddleware<SessionLayout> = ({ session }) => {
+  if (!session) return { success: false, redirect: '/login' };
+  return { success: true };
+};
+
+`,
+    '',
+  ],
+];
+
 //? Remove all built-in auth UI/flows for the authMode:'none' scaffold.
 export const pruneAuthNone = (targetDir: string): void => {
   //? The framework's (anonymous) session plumbing stays — `session_v1` returns a
@@ -2083,6 +2246,20 @@ export default Dashboard;`,
 export default Dashboard;`,
     ],
   ]);
+
+  //? New pages get the same treatment: the dashboard page template (applied by
+  //? the dev template injector to admin/dashboard/settings/... folders) and the
+  //? dashboard variant of `npm run scaffold:page` both default to a guard that
+  //? sends a null session to /login. Without auth the session is always null and
+  //? /login does not exist, so such a page could never be opened.
+  editScaffoldFile(targetDir, '.luckystack/templates/page_dashboard.template.tsx', guardlessDashboardEdits(
+    '//@ts-ignore We replace {{REL_PATH}} with the relative path to the project root at scaffold time.',
+    '`',
+  ));
+  editScaffoldFile(targetDir, 'scripts/scaffoldPage.mjs', guardlessDashboardEdits(
+    "//@ts-ignore Relative import: '{{REL_PATH}}' is replaced at scaffold time.",
+    '\\`',
+  ));
 
   //? Home shell: drop the settings + sign-out links (those routes no longer
   //? exist) and the now-unused translator wiring.
@@ -2477,7 +2654,14 @@ const wirePackageManager = (targetDir: string, choices: ScaffoldChoices): void =
   fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
 };
 
-const wireRouter = (targetDir: string, luckystackVersion: string): void => {
+//? The router CLI exits 2 without --deploy/--services, and the two topology
+//? files are TypeScript, so the script runs the CLI through tsx (the same
+//? loader as `server:once`) and passes both paths. One string for npm and bun:
+//? every other TypeScript script in the template also runs through tsx.
+//? `luckystack add router` (cli addRouter.ts) must write the same script.
+export const ROUTER_SCRIPT = 'tsx --tsconfig tsconfig.server.json node_modules/@luckystack/router/dist/cli.js --deploy ./deploy.config.ts --services ./services.config.ts';
+
+export const wireRouter = (targetDir: string, luckystackVersion: string): void => {
   const pkgPath = path.join(targetDir, 'package.json');
   if (!fs.existsSync(pkgPath)) return;
   let pkg: { name?: string; dependencies?: Record<string, string>; scripts?: Record<string, string> };
@@ -2489,7 +2673,7 @@ const wireRouter = (targetDir: string, luckystackVersion: string): void => {
     return;
   }
   pkg.dependencies = { ...pkg.dependencies, '@luckystack/router': `^${luckystackVersion}` };
-  pkg.scripts = { ...pkg.scripts, router: 'luckystack-router' };
+  pkg.scripts = { ...pkg.scripts, router: ROUTER_SCRIPT };
   fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
   editScaffoldFile(targetDir, 'config.ts', [
     ["invocation: 'socket' as 'socket' | 'routed-http',", "invocation: 'routed-http' as 'socket' | 'routed-http',"],
@@ -2821,7 +3005,21 @@ export { schema };
 `;
 };
 
-const DRIZZLE_CLIENTS_STUB = `//? Data-layer registration hooks (orm: 'drizzle'). Your handler-facing client
+//? The auth paragraph of the drizzle/mikro-orm clients.ts stub. Auth on these
+//? ORMs is supported (adaptAuthNonPrisma writes a starter UserAdapter), so
+//? "auth is off" must only be said when it really is — otherwise the developer
+//? registers a second adapter here next to the starter.
+const nonPrismaClientsAuthNote = (orm: 'drizzle' | 'mikro-orm', authMode: AuthMode): string =>
+  authMode === 'none'
+    ? `//? Auth was scaffolded OFF: the built-in login UserAdapter is Prisma-backed.
+//? To enable auth on ${orm}, run \`npx luckystack add login\`, which writes a
+//? starter UserAdapter to luckystack/login/userAdapter.ts
+//? (node_modules/@luckystack/login/docs/user-adapter.md explains the interface).`
+    : `//? Auth is ON: finish the starter UserAdapter in luckystack/login/userAdapter.ts
+//? (two steps in its header) before sign-in works. Register no second adapter
+//? here — that file is the one the login overlay loads at boot.`;
+
+const drizzleClientsStub = (authMode: AuthMode): string => `//? Data-layer registration hooks (orm: 'drizzle'). Your handler-facing client
 //? lives in functions/db.ts (\`functions.db.db\` in handlers). Two optional
 //? registrations belong here:
 //?
@@ -2838,10 +3036,7 @@ const DRIZZLE_CLIENTS_STUB = `//? Data-layer registration hooks (orm: 'drizzle')
 //?    auth/reset/cron/multi-instance features may also require it. A deliberate
 //?    single-instance app can set config.rateLimiting.store to 'memory'.
 //?
-//? Auth was scaffolded OFF: the built-in login UserAdapter is Prisma-backed.
-//? To enable auth on drizzle, install @luckystack/login and register a custom
-//? UserAdapter here (node_modules/@luckystack/login/docs/user-adapter.md has a
-//? complete drizzle example).
+${nonPrismaClientsAuthNote('drizzle', authMode)}
 
 export {};
 `;
@@ -2954,7 +3149,7 @@ export const getOrm = (): Promise<MikroORM> => {
 export const getEm = async (): Promise<EntityManager> => (await getOrm()).em.fork();
 `;
 
-const MIKRO_CLIENTS_STUB = `//? Data-layer registration hooks (orm: 'mikro-orm'). Your handler-facing
+const mikroClientsStub = (authMode: AuthMode): string => `//? Data-layer registration hooks (orm: 'mikro-orm'). Your handler-facing
 //? helpers live in functions/db.ts (\`functions.db.getEm()\` in handlers).
 //? Two optional registrations belong here:
 //?
@@ -2969,10 +3164,7 @@ const MIKRO_CLIENTS_STUB = `//? Data-layer registration hooks (orm: 'mikro-orm')
 //?    auth/reset/cron/multi-instance features may also require it. A deliberate
 //?    single-instance app can set config.rateLimiting.store to 'memory'.
 //?
-//? Auth was scaffolded OFF: the built-in login UserAdapter is Prisma-backed.
-//? To enable auth on mikro-orm, install @luckystack/login and register a
-//? custom UserAdapter here (implement the small UserAdapter interface with an
-//? EntityManager — node_modules/@luckystack/login/docs/user-adapter.md).
+${nonPrismaClientsAuthNote('mikro-orm', authMode)}
 
 export {};
 `;
@@ -3038,7 +3230,7 @@ export const applyOrmChoice = (targetDir: string, choices: ScaffoldChoices, data
     fs.writeFileSync(path.join(dbDir, 'schema.ts'), drizzleSchemaFor(choices.dbProvider));
     fs.writeFileSync(path.join(targetDir, 'drizzle.config.ts'), drizzleKitConfigFor(choices.dbProvider, databaseUrl));
     fs.writeFileSync(path.join(targetDir, 'functions', 'db.ts'), drizzleDbShimFor(choices.dbProvider, databaseUrl));
-    fs.writeFileSync(path.join(targetDir, 'luckystack', 'core', 'clients.ts'), DRIZZLE_CLIENTS_STUB);
+    fs.writeFileSync(path.join(targetDir, 'luckystack', 'core', 'clients.ts'), drizzleClientsStub(choices.authMode));
     //? mongodb is unreachable here (rejected/coerced during choice resolution).
     const sqlDb = choices.dbProvider === 'mongodb' ? 'postgresql' : choices.dbProvider;
     const driver = DRIZZLE_DRIVER_DEPS[sqlDb];
@@ -3061,7 +3253,7 @@ export const applyOrmChoice = (targetDir: string, choices: ScaffoldChoices, data
   fs.writeFileSync(path.join(dbDir, 'entities.ts'), mikroEntitiesFor(choices.dbProvider));
   fs.writeFileSync(path.join(dbDir, 'mikro-orm.config.ts'), mikroConfigFor(choices.dbProvider, databaseUrl));
   fs.writeFileSync(path.join(targetDir, 'functions', 'db.ts'), MIKRO_DB_SHIM);
-  fs.writeFileSync(path.join(targetDir, 'luckystack', 'core', 'clients.ts'), MIKRO_CLIENTS_STUB);
+  fs.writeFileSync(path.join(targetDir, 'luckystack', 'core', 'clients.ts'), mikroClientsStub(choices.authMode));
   fs.writeFileSync(path.join(targetDir, 'scripts', 'mikroOrmSchema.ts'), MIKRO_SCHEMA_SCRIPT);
   const driverPackage = MIKRO_DRIVER_PACKAGES[choices.dbProvider];
   mutateScaffoldPackageJson(targetDir, (pkg) => {
@@ -3330,9 +3522,40 @@ export const buildDockerTemplateVars = (
   };
 };
 
+//? CI files (.github/workflows/ci.yml, .gitlab-ci.yml) per package manager. A
+//? bun project has only bun.lock, and setup-node's npm cache fails the job when
+//? it finds no npm lockfile — so bun gets setup-bun + `bun install` instead.
+//? The rest of each pipeline stays `npm run …`: the template's own scripts chain
+//? `npm run`, and Node stays installed for them either way.
+export const buildCiTemplateVars = (packageManager: PackageManager): Record<string, string> => {
+  if (packageManager === 'bun') {
+    return {
+      CI_GITHUB_PM_SETUP: [
+        '',
+        '      - name: Setup Bun',
+        '        uses: oven-sh/setup-bun@v2',
+        '        with:',
+        `          bun-version: '${BUN_VERSION_FLOOR}'`,
+      ].join('\n'),
+      CI_INSTALL_COMMAND: 'bun install',
+      CI_FROZEN_INSTALL_COMMAND: 'bun install --frozen-lockfile',
+      //? The GitLab job image is node:alpine, which has no bun.
+      CI_GITLAB_INSTALL_COMMAND: `npm install -g bun@${BUN_VERSION_FLOOR} && bun install`,
+      CI_LOCKFILE: 'bun.lock',
+    };
+  }
+  return {
+    CI_GITHUB_PM_SETUP: "          cache: 'npm'",
+    CI_INSTALL_COMMAND: 'npm install',
+    CI_FROZEN_INSTALL_COMMAND: 'npm ci --prefer-offline',
+    CI_GITLAB_INSTALL_COMMAND: 'npm install',
+    CI_LOCKFILE: 'package-lock.json',
+  };
+};
+
 //? Build the {{TOKEN}} substitution map for the template tree. DATABASE_URL
-//? embeds `slug`, so it must be built per-run (not a module constant).
-const buildTemplateVars = (
+//? embeds `slug`, so it must be built per-run (not a module constant). Exported for tests.
+export const buildTemplateVars = (
   slug: string,
   args: CliArgs,
   choices: ScaffoldChoices,
@@ -3358,9 +3581,13 @@ const buildTemplateVars = (
   //? Only vars that are actually used as {{TOKEN}} in the template tree are
   //? listed here. If you add a new placeholder to a template file, add it here
   //? first — unused entries are silently skipped by replacePlaceholders.
+  const projectTitle = titleCase(args.projectName);
   return {
     PROJECT_NAME: slug,
-    PROJECT_TITLE: titleCase(args.projectName),
+    //? Markdown (README, docs/PRODUCT.md) shows the title as typed.
+    PROJECT_TITLE: projectTitle,
+    PROJECT_TITLE_TS_STRING: escapeSingleQuotedString(projectTitle),
+    PROJECT_TITLE_HTML: escapeHtml(projectTitle),
     LUCKYSTACK_VERSION: luckystackVersion,
     DB_PROVIDER: choices.dbProvider,
     //? MongoDB's Prisma connector does NOT support `migrate dev` — it needs
@@ -3379,6 +3606,7 @@ const buildTemplateVars = (
     EMAIL_ENV_VARS: buildEmailEnvVars(choices.emailProvider),
     MONITORING_ENV_VARS: buildMonitoringEnvVars(choices.monitoringProvider),
     ...buildDockerTemplateVars(slug, choices),
+    ...buildCiTemplateVars(choices.packageManager),
   };
 };
 
@@ -3613,6 +3841,9 @@ const main = async (): Promise<void> => {
 
   const { slug, targetDir } = validateArgsOrExit(args);
 
+  //? Flags that contradict each other fail before any question is asked.
+  exitOnFlagConflicts(findFlagConflicts(args, flagOnlyDependencies(args)));
+
   //? Choice resolution. Every wizard option also has a CLI flag (CFG-01):
   //?   - interactive (`--prompt`, default): flags PRE-FILL the matching wizard
   //?     steps (which are then skipped) and the user is only asked for the rest;
@@ -3620,6 +3851,10 @@ const main = async (): Promise<void> => {
   const choices: ScaffoldChoices = args.prompt
     ? await runPrompts(buildPresetAnswers(args))
     : buildNoPromptChoices(args);
+
+  //? A passed flag can also clash with a default or a wizard answer (e.g.
+  //? `--oauth=google` while auth stayed 'none'). Still before anything is written.
+  exitOnFlagConflicts(findFlagConflicts(args, choices));
 
   const luckystackVersion = readSelfVersion();
   const vars = buildTemplateVars(slug, args, choices, luckystackVersion);

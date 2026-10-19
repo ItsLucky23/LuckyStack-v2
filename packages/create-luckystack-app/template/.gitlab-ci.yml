@@ -20,16 +20,16 @@ prepare_artifacts:
   cache:
     - key:
         files:
-          - package-lock.json
+          - {{CI_LOCKFILE}}
       paths:
         - node_modules/
         - .npm/
   script:
-    # Use npm install rather than npm ci because the scaffold ships no
-    # package-lock.json — the lockfile is created on the user's first
-    # `npm install` and should be committed before CI runs. Once the
-    # lockfile is committed, switch this line to: npm ci --prefer-offline
-    - npm install
+    # Plain install rather than the frozen-lockfile variant because the
+    # scaffold ships no lockfile — it is created on the user's first install
+    # and should be committed before CI runs. Once the lockfile is committed,
+    # switch the install to: {{CI_FROZEN_INSTALL_COMMAND}}
+    - {{CI_GITLAB_INSTALL_COMMAND}}
     - npm run generateArtifacts
     - test -s src/_sockets/apiTypes.generated.ts
     - test -s src/docs/apiDocs.generated.json
@@ -56,14 +56,14 @@ lint:
   cache:
     - key:
         files:
-          - package-lock.json
+          - {{CI_LOCKFILE}}
       paths:
         - node_modules/
         - .npm/
   script:
-    # See prepare_artifacts: npm install because the scaffold ships no
-    # lockfile. Switch to `npm ci --prefer-offline` once it is committed.
-    - npm install
+    # See prepare_artifacts: plain install because the scaffold ships no
+    # lockfile. Switch to `{{CI_FROZEN_INSTALL_COMMAND}}` once it is committed.
+    - {{CI_GITLAB_INSTALL_COMMAND}}
     - npm run lint
   rules:
     - if: '$PIPELINE_RUN_LINT == "true"'
@@ -77,14 +77,14 @@ build:
   cache:
     - key:
         files:
-          - package-lock.json
+          - {{CI_LOCKFILE}}
       paths:
         - node_modules/
         - .npm/
   script:
-    # See prepare_artifacts: npm install because the scaffold ships no
-    # lockfile. Switch to `npm ci --prefer-offline` once it is committed.
-    - npm install
+    # See prepare_artifacts: plain install because the scaffold ships no
+    # lockfile. Switch to `{{CI_FROZEN_INSTALL_COMMAND}}` once it is committed.
+    - {{CI_GITLAB_INSTALL_COMMAND}}
     - npm run build
   artifacts:
     name: "dist-$CI_COMMIT_SHORT_SHA"
@@ -107,14 +107,14 @@ test:sweep:
   cache:
     - key:
         files:
-          - package-lock.json
+          - {{CI_LOCKFILE}}
       paths:
         - node_modules/
         - .npm/
   script:
-    # See prepare_artifacts: npm install because the scaffold ships no
-    # lockfile. Switch to `npm ci --prefer-offline` once it is committed.
-    - npm install
+    # See prepare_artifacts: plain install because the scaffold ships no
+    # lockfile. Switch to `{{CI_FROZEN_INSTALL_COMMAND}}` once it is committed.
+    - {{CI_GITLAB_INSTALL_COMMAND}}
     - npm run test
 
 test:e2e:
@@ -126,14 +126,14 @@ test:e2e:
   cache:
     - key:
         files:
-          - package-lock.json
+          - {{CI_LOCKFILE}}
       paths:
         - node_modules/
         - .npm/
   script:
-    # See prepare_artifacts: npm install because the scaffold ships no
-    # lockfile. Switch to `npm ci --prefer-offline` once it is committed.
-    - npm install
+    # See prepare_artifacts: plain install because the scaffold ships no
+    # lockfile. Switch to `{{CI_FROZEN_INSTALL_COMMAND}}` once it is committed.
+    - {{CI_GITLAB_INSTALL_COMMAND}}
     - if [ -f "node_modules/@playwright/test/package.json" ]; then npm run test:e2e; else echo "Skipping e2e — @playwright/test not installed."; fi
   allow_failure: true
 

@@ -16,21 +16,16 @@ import { useTheme, useSession, useTranslator } from '@luckystack/core/client';
 import type { SessionLayout } from 'config';
 import { useSocketStatus } from 'src/_providers/socketStatusProvider';
 import Home from './Home';
+import Plain from './Plain';
 
 export type Template = 'home' | 'plain';
 
+//? Every template must mount <Middleware> (Home and Plain both do): it is what
+//? evaluates a page's `export const middleware`.
 const Templates = {
   home: Home,
-  plain: PlainTemplate,
+  plain: Plain,
 } satisfies Record<Template, React.ComponentType<{ children: React.ReactNode }>>;
-
-function PlainTemplate({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="w-full h-full">
-      {children}
-    </div>
-  );
-}
 
 export default function TemplateProvider({
   children,

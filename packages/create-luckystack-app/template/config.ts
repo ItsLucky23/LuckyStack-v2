@@ -68,7 +68,7 @@ export const backendUrl = browserOrigin ?? publicUrl;
 export const oauthCallbackBase = dev ? backendOrigin : publicUrl;
 
 const createConfig = (isDev: boolean) => ({
-  pageTitle: '{{PROJECT_TITLE}}',
+  pageTitle: '{{PROJECT_TITLE_TS_STRING}}',
   loginPageUrl: '/login',
   loginRedirectUrl: '/dashboard',
   defaultLanguage: 'en' as const,

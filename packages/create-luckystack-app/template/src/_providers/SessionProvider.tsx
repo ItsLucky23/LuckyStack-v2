@@ -17,6 +17,7 @@ import {
   proposeLogin,
   getCurrentSession as coreGetCurrentSession,
   socketEventNames,
+  tryCatch,
 } from '@luckystack/core/client';
 
 import { dev, pageTitle, SessionLayout } from 'config';
@@ -62,33 +63,65 @@ export function SessionProvider({ children }: { children: ReactNode }) {
     document.title = dev ? `[DEV] ${pageTitle}` : pageTitle;
   }, [session?.email]);
 
+  //? Resolves the initial session with retry-with-backoff. A single failed
+  //? fetch (rate limit during an HMR burst, backend restart, network blip)
+  //? used to leave `sessionLoaded` false for good: Middleware then waited 5s on
+  //? every guarded navigation and sent a signed-in user to /login until a full
+  //? reload. Now a success (even with a null result = anonymous) marks loaded
+  //? at once; errors retry with exponential backoff (~7.5s in total) and the
+  //? session is marked loaded either way.
   useEffect(() => {
+    const run = { cancelled: false };
     void (async () => {
-      const response = await apiRequest({ name: 'system/session', version: 'v1' });
-      //? Discriminate on the success branch before reading `.result`: on the
-      //? raw union the error branch's `[key: string]: unknown` widens `.result`
-      //? to `{}` (a tsc error). A successful response with a null result is the
-      //? anonymous session — still mark loaded so Middleware doesn't hang.
-      if (response.status !== 'success') return;
-      if (response.result) setSession(response.result);
-      setSessionLoaded(true);
+      const maxAttempts = 5;
+      for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+        const response = await apiRequest({ name: 'system/session', version: 'v1' });
+        if (run.cancelled) return;
+
+        //? Discriminate on the success branch before reading `.result`: on the
+        //? raw union the error branch's `[key: string]: unknown` widens `.result`
+        //? to `{}` (a tsc error).
+        if (response.status === 'success') {
+          if (response.result) setSession(response.result);
+          setSessionLoaded(true);
+          return;
+        }
+
+        if (dev) {
+          console.warn(`[session] system/session attempt ${String(attempt)}/${String(maxAttempts)} failed`, response);
+        }
+        if (attempt === maxAttempts) break;
+        const delay = Math.min(500 * 2 ** (attempt - 1), 4000);
+        await new Promise<void>((resolve) => { setTimeout(resolve, delay); });
+      }
+      if (!run.cancelled) setSessionLoaded(true);
     })();
+    return () => { run.cancelled = true; };
   }, []);
 
   useEffect(() => {
     if (!socket) return;
 
     const handler = (data: string) => {
-      if (dev) { console.log('updateSession', JSON.parse(data)); }
-      const parsed = JSON.parse(data) as SessionLayout;
-      setSession(prev => {
-        if (!prev) return parsed;
-        return {
-          ...prev,
-          ...parsed,
-          avatar: `${parsed.avatar}?v=${String(Date.now())}`,
-        };
-      });
+      //? Never raw `JSON.parse`: a malformed payload would throw inside the
+      //? socket listener. Parse once through `tryCatch` and bail on error.
+      //? `void (async …)()` keeps the `.on` callback itself synchronous.
+      void (async () => {
+        const [error, parsed] = await tryCatch<SessionLayout>(() => JSON.parse(data) as SessionLayout);
+        if (error || !parsed) {
+          if (dev) console.warn('[session] updateSession: malformed payload', error);
+          return;
+        }
+        if (dev) { console.log('updateSession', parsed); }
+        setSession(prev => {
+          if (!prev) return parsed;
+          return {
+            ...prev,
+            ...parsed,
+            avatar: `${parsed.avatar}?v=${String(Date.now())}`,
+          };
+        });
+      })();
     };
 
     socket.on(socketEventNames.updateSession, handler);
