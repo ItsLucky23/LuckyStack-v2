@@ -2,17 +2,30 @@ import { randomUUID } from 'node:crypto';
 import { redis } from './redis';
 import { getDeployConfig } from './deployConfigRegistry';
 import { getLogger } from './loggerRegistry';
+import { getProjectName } from './projectConfig';
 
 //? @adr 0036
-//? Writes a fresh UUID to `luckystack:boot:<envKey>` on startup. Any router
-//? in another env that's truly sharing this Redis can read the same key.
+//? Writes a fresh UUID to `luckystack:boot:<project>:<envKey>` on startup. Any
+//? router in another env that's truly sharing this Redis can read the same key.
 //? Router boot handshake cross-checks against the /_health endpoint to catch
 //? the "two Redis URLs that both respond" failure mode.
 
-//? Single source of truth — also consumed by `@luckystack/router`'s
-//? `bootHandshake.ts` so the prefix can never drift between writer and reader.
 export const BOOT_KEY_PREFIX = 'luckystack:boot:';
 const DEFAULT_BOOT_KEY_TTL_SECONDS = 3600;
+
+/**
+ * The Redis key holding an environment's boot UUID. Single source of truth —
+ * also used by `@luckystack/router`'s `bootHandshake.ts`, so writer and reader
+ * can never drift.
+ *
+ * The project name is part of the key for the same reason it is part of the
+ * Socket.io adapter key: two projects with the same environment name on one
+ * Redis would otherwise overwrite each other's UUID, rotating the other
+ * project's health HMAC and faking a handshake mismatch. Router and backends
+ * must therefore resolve the same project name (`PROJECT_NAME`).
+ */
+export const bootUuidKey = (envKey: string): string =>
+  `${BOOT_KEY_PREFIX}${getProjectName()}:${envKey}`;
 
 const getBootKeyTtlSeconds = (): number =>
   getDeployConfig().routing?.bootKeyTtlSeconds ?? DEFAULT_BOOT_KEY_TTL_SECONDS;
@@ -27,13 +40,13 @@ export const resolveEnvKey = (): string => {
 export const writeBootUuid = async (envKey?: string): Promise<string> => {
   const key = envKey ?? resolveEnvKey();
   const uuid = randomUUID();
-  await redis.set(`${BOOT_KEY_PREFIX}${key}`, uuid, 'EX', getBootKeyTtlSeconds());
+  await redis.set(bootUuidKey(key), uuid, 'EX', getBootKeyTtlSeconds());
   return uuid;
 };
 
 export const readBootUuid = async (envKey?: string): Promise<string | null> => {
   const key = envKey ?? resolveEnvKey();
-  return redis.get(`${BOOT_KEY_PREFIX}${key}`);
+  return redis.get(bootUuidKey(key));
 };
 
 /**
@@ -45,7 +58,7 @@ export const readBootUuid = async (envKey?: string): Promise<string | null> => {
  */
 export const refreshBootUuid = async (envKey?: string): Promise<void> => {
   const key = envKey ?? resolveEnvKey();
-  const refreshed = await redis.expire(`${BOOT_KEY_PREFIX}${key}`, getBootKeyTtlSeconds());
+  const refreshed = await redis.expire(bootUuidKey(key), getBootKeyTtlSeconds());
   if (refreshed === 0) await writeBootUuid(key);
 };
 
@@ -74,7 +87,7 @@ export const startBootUuidHeartbeat = (envKey?: string): BootUuidHeartbeat => {
         () => { schedule(); },
         (error: unknown) => {
           getLogger().error(
-            `[boot-uuid] failed to refresh ${BOOT_KEY_PREFIX}${key}; readiness may degrade if the TTL expires`,
+            `[boot-uuid] failed to refresh ${bootUuidKey(key)}; readiness may degrade if the TTL expires`,
             error instanceof Error ? error : new Error(String(error)),
           );
           schedule();

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import Redis from 'ioredis';
 import {
-  BOOT_KEY_PREFIX,
+  bootUuidKey,
   collectSynchronizedEnvKeys,
   getDeployConfig,
   getLogger,
@@ -16,7 +16,7 @@ import type { HealthHashDescriptor } from '@luckystack/core';
 
 //? Detects "two Redis URLs that both respond" — a failure mode where two
 //? environments think they share Redis but don't. Protocol:
-//?   1. Write a fresh boot UUID under `luckystack:boot:<envKey>`.
+//?   1. Write a fresh boot UUID under `luckystack:boot:<project>:<envKey>`.
 //?   2. If the current env declares a fallback, hit `fallback/system/_health`
 //?      and assert the returned `bootUuid` matches our write.
 //?
@@ -151,7 +151,7 @@ export const runBootHandshake = async (input: RunBootHandshakeInput): Promise<vo
 
   const [writeError] = await tryCatch(async () => {
     await client.connect();
-    await client.set(`${BOOT_KEY_PREFIX}${input.envKey}`, bootUuid, 'EX', getBootKeyTtlSeconds());
+    await client.set(bootUuidKey(input.envKey), bootUuid, 'EX', getBootKeyTtlSeconds());
   });
   client.disconnect();
   if (writeError) {
@@ -199,7 +199,7 @@ export const runBootHandshake = async (input: RunBootHandshakeInput): Promise<vo
   });
   const [compareError, localReadOfFallbackKey] = await tryCatch(async () => {
     await compareClient.connect();
-    return await compareClient.get(`${BOOT_KEY_PREFIX}${input.fallbackEnvKey}`);
+    return await compareClient.get(bootUuidKey(input.fallbackEnvKey));
   });
   compareClient.disconnect();
 
@@ -210,7 +210,7 @@ export const runBootHandshake = async (input: RunBootHandshakeInput): Promise<vo
   } else {
     reportIssue(
       `boot handshake MISMATCH: fallback env '${input.fallbackEnvKey}' is connected to a different Redis than this router. ` +
-      `Expected key ${BOOT_KEY_PREFIX}${input.fallbackEnvKey} to equal '${fallbackHealth.bootUuid}' but got '${localReadOfFallbackKey ?? 'null'}'.`,
+      `Expected key ${bootUuidKey(input.fallbackEnvKey)} to equal '${fallbackHealth.bootUuid}' but got '${localReadOfFallbackKey ?? 'null'}'.`,
     );
     return;
   }
