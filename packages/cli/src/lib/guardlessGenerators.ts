@@ -13,7 +13,7 @@ import { editFile, type FileEdit } from './project';
 //? The dev template injector's page template and scaffoldPage.mjs differ only
 //? in their ts-ignore wording and in that the .mjs keeps the page inside a
 //? template literal (escaped backticks).
-const guardlessDashboardEdits = (tsIgnoreLine: string, backtick: string): FileEdit[] => [
+const guardlessDashboardEdits = (tsIgnoreLine: string, backtick: string): [FileEdit, FileEdit, FileEdit] => [
   {
     find: `//? Includes a login-required middleware as a sane default — adjust the role
 //? check or remove the middleware if this page is public.`,
@@ -44,7 +44,7 @@ export const middleware: PageMiddleware<SessionLayout> = ({ session }) => {
 //? The inverse for re-enabling auth. Two of the strip edits only delete text, so
 //? they cannot be reversed one by one: one edit swaps the guardless comment and
 //? the `template` line around it back to the comment, imports and middleware.
-const guardedDashboardEdit = ([comment, imports, middleware]: readonly FileEdit[]): FileEdit => {
+const guardedDashboardEdit = ([comment, imports, middleware]: readonly [FileEdit, FileEdit, FileEdit]): FileEdit => {
   const templateLine = "export const template = 'home';\n\n";
   return {
     find: `${comment.replace}\n\n${templateLine}`,
