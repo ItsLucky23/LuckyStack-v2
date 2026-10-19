@@ -166,6 +166,7 @@ const addLoginChange = (): Change => ({
   effects: [
     `+ ${LOGIN_PKG}`,
     '+ src/login, src/register, src/reset-password, src/settings, src/_components/LoginForm.tsx',
+    '+ restore the /login guard in the generators for new pages (.luckystack/templates/page_dashboard.template.tsx, scripts/scaffoldPage.mjs)',
   ],
   apply: (ctx) => addLogin(ctx.project, { install: false, cliVersion: ctx.cliVersion }),
 });

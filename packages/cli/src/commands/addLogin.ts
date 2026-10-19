@@ -32,6 +32,9 @@ import type { AddOptions } from './addPresence';
 import { deriveOrm, readScaffoldOrm } from '../lib/state';
 //? Clears the empty src/settings/_api shells left after the Prisma-bound withdraw.
 import { removeDirIfEmptyDeep } from '../lib/shippedFiles';
+import { restoreGeneratorLoginGuards } from '../lib/guardlessGenerators';
+import type { SourceFile } from '../lib/scan';
+import { harvestUsedKeys, loadLocaleKeys } from './checkI18n';
 
 //? The auth-hooks block a credentials scaffold ships in luckystack/server/index.ts.
 //? Mirror of the scaffolder's pre-prune content (so add+prune are inverse).
@@ -304,7 +307,26 @@ const adaptAuthToDataLayer = (project: ConsumerProject, orm: string): void => {
   );
 };
 
-const CONFIRM_EMAIL_PAGE = 'src/settings/confirm-email/page.tsx';
+const EN_LOCALE = 'src/_locales/en.json';
+
+//? Locale keys the files this call copied use and the project's English locale
+//? lacks (each release adds some, and the CLI ships no locale files to merge).
+//? Harvested like `check-i18n` does; `session.notFound` is added by hand because
+//? it arrives as the errorCode of an `onlyIfExists` session save, not as a
+//? literal. `null` when the project has no English locale to compare against.
+const missingLocaleKeys = (root: string, written: readonly string[]): string[] | null => {
+  const english = loadLocaleKeys(root).get(EN_LOCALE);
+  if (!english) return null;
+  const files: SourceFile[] = written
+    .filter((abs) => /\.tsx?$/.test(abs))
+    .map((abs) => {
+      const text = fs.readFileSync(abs, 'utf8').replaceAll('\r\n', '\n');
+      return { abs, rel: path.relative(root, abs).replaceAll('\\', '/'), text, lines: text.split('\n') };
+    });
+  const used = harvestUsedKeys(files).keys;
+  if (files.some(({ text }) => text.includes('onlyIfExists: true'))) used.add('session.notFound');
+  return [...used].filter((key) => !english.has(key)).toSorted();
+};
 
 //? The asset-bundle paths that are Prisma-bound (see adaptAuthToDataLayer) —
 //? on a non-Prisma layer they are removed from the copy again so `add login`
@@ -345,12 +367,21 @@ export const addLogin = (project: ConsumerProject, options: AddOptions): Result<
   } else {
     console.log('• auth files already present — skipped copy (kept your edits).');
   }
-  //? These keys reached the scaffold's locales in 0.12.1 and cannot be merged
-  //? from here (the CLI ships no locale files), so name them instead.
-  if (written.some((file) => path.relative(project.root, file).replaceAll('\\', '/') === CONFIRM_EMAIL_PAGE)) {
-    console.log(`• ${CONFIRM_EMAIL_PAGE} uses the locale keys settings.emailChange.confirmPrompt and`);
-    console.log('  settings.emailChange.confirmButton. A project scaffolded before 0.12.1 lacks them and shows the raw');
-    console.log('  keys: add both to every locale file, then run `npx luckystack check-i18n` to find any other missing key.');
+  if (written.length > 0) {
+    const missingKeys = missingLocaleKeys(project.root, written);
+    if (missingKeys === null) {
+      console.log(`• no ${EN_LOCALE} found: run \`npx luckystack check-i18n\` to find the locale keys the auth pages need.`);
+    } else if (missingKeys.length > 0) {
+      console.log(`• the copied auth files use ${String(missingKeys.length)} locale key(s) missing from ${EN_LOCALE}, so they show the raw key:`);
+      for (const key of missingKeys) console.log(`    ${key}`);
+      console.log('  Add them to every locale file, then run `npx luckystack check-i18n` to check the rest.');
+    }
+  }
+
+  //? An `--auth=none` scaffold or `manage` → Auth: none stripped the /login
+  //? guard from the generators for new pages; put it back now that /login exists.
+  for (const rel of restoreGeneratorLoginGuards(project.root)) {
+    console.warn(`⚠ ${rel} was edited, so its /login guard was not restored — add it by hand if new admin/dashboard/settings pages should require login.`);
   }
 
   const range = resolveLuckyStackRange(project.pkg, options.cliVersion);

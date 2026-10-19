@@ -8,7 +8,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pruneAuthNone } from '../../../create-luckystack-app/src/index';
-import { GUARDLESS_GENERATORS, stripGeneratorLoginGuards, unmatchedGuardedGenerators } from './guardlessGenerators';
+import { GUARDLESS_GENERATORS, restoreGeneratorLoginGuards, stripGeneratorLoginGuards, unmatchedGuardedGenerators } from './guardlessGenerators';
 
 const TEMPLATE = path.resolve(import.meta.dirname, '..', '..', '..', 'create-luckystack-app', 'template');
 const created: string[] = [];
@@ -50,6 +50,36 @@ describe('stripGeneratorLoginGuards', () => {
 
     expect(unmatchedGuardedGenerators(managed)).toEqual([rel]);
     expect(stripGeneratorLoginGuards(managed)).toEqual([rel]);
+    expect(fs.readFileSync(file, 'utf8')).toBe(edited);
+  });
+});
+
+//? Review 2 T2: `add login` after an `--auth=none` scaffold left the generators
+//? guardless, so new admin/dashboard/settings pages skipped the login check.
+describe('restoreGeneratorLoginGuards', () => {
+  it('turns the --auth=none generators back into the credentials ones', () => {
+    const scaffolded = copyTemplate();
+    pruneAuthNone(scaffolded);
+    const credentials = copyTemplate();
+
+    expect(restoreGeneratorLoginGuards(scaffolded)).toEqual([]);
+    for (const { rel } of GUARDLESS_GENERATORS) {
+      expect(fs.readFileSync(path.join(scaffolded, rel), 'utf8'), rel).toBe(fs.readFileSync(path.join(credentials, rel), 'utf8'));
+    }
+    //? Already guarded: a second run changes and reports nothing.
+    expect(restoreGeneratorLoginGuards(scaffolded)).toEqual([]);
+    expect(restoreGeneratorLoginGuards(credentials)).toEqual([]);
+  });
+
+  it('leaves an edited guardless generator alone and reports it', () => {
+    const scaffolded = copyTemplate();
+    pruneAuthNone(scaffolded);
+    const rel = 'scripts/scaffoldPage.mjs';
+    const file = path.join(scaffolded, rel);
+    const edited = fs.readFileSync(file, 'utf8').replace('so the page is public', 'so our pages are public');
+    fs.writeFileSync(file, edited);
+
+    expect(restoreGeneratorLoginGuards(scaffolded)).toEqual([rel]);
     expect(fs.readFileSync(file, 'utf8')).toBe(edited);
   });
 });

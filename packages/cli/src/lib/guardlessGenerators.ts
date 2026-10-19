@@ -1,7 +1,8 @@
 //? Without auth there is no /login route and the session is always null, so a
 //? new page generated with the default login guard could never be opened. The
 //? scaffolder strips that guard for `--auth=none` (finding 098); `manage` →
-//? Auth: none must leave the same generators behind. These edits mirror
+//? Auth: none must leave the same generators behind, and `add login` puts the
+//? guard back. These edits mirror
 //? create-luckystack-app's `guardlessDashboardEdits`; guardlessGenerators.test.ts
 //? applies both to the template and requires identical output.
 
@@ -40,18 +41,29 @@ export const middleware: PageMiddleware<SessionLayout> = ({ session }) => {
   },
 ];
 
-export const GUARDLESS_GENERATORS: readonly { rel: string; edits: readonly FileEdit[] }[] = [
-  {
-    rel: '.luckystack/templates/page_dashboard.template.tsx',
-    edits: guardlessDashboardEdits(
-      '//@ts-ignore We replace {{REL_PATH}} with the relative path to the project root at scaffold time.',
-      '`',
-    ),
-  },
-  {
-    rel: 'scripts/scaffoldPage.mjs',
-    edits: guardlessDashboardEdits("//@ts-ignore Relative import: '{{REL_PATH}}' is replaced at scaffold time.", '\\`'),
-  },
+//? The inverse for re-enabling auth. Two of the strip edits only delete text, so
+//? they cannot be reversed one by one: one edit swaps the guardless comment and
+//? the `template` line around it back to the comment, imports and middleware.
+const guardedDashboardEdit = ([comment, imports, middleware]: readonly FileEdit[]): FileEdit => {
+  const templateLine = "export const template = 'home';\n\n";
+  return {
+    find: `${comment.replace}\n\n${templateLine}`,
+    replace: `${comment.find}\n\n${imports.find}${templateLine}${middleware.find}`,
+  };
+};
+
+const generator = (rel: string, tsIgnoreLine: string, backtick: string): { rel: string; edits: readonly FileEdit[]; restore: FileEdit } => {
+  const edits = guardlessDashboardEdits(tsIgnoreLine, backtick);
+  return { rel, edits, restore: guardedDashboardEdit(edits) };
+};
+
+export const GUARDLESS_GENERATORS: readonly { rel: string; edits: readonly FileEdit[]; restore: FileEdit }[] = [
+  generator(
+    '.luckystack/templates/page_dashboard.template.tsx',
+    '//@ts-ignore We replace {{REL_PATH}} with the relative path to the project root at scaffold time.',
+    '`',
+  ),
+  generator('scripts/scaffoldPage.mjs', "//@ts-ignore Relative import: '{{REL_PATH}}' is replaced at scaffold time.", '\\`'),
 ];
 
 //? A live (uncommented) guard line; scaffoldPage.mjs also carries a commented
@@ -85,6 +97,25 @@ export const stripGeneratorLoginGuards = (root: string): string[] => {
     const content = readLf(file);
     if (!LIVE_LOGIN_GUARD.test(content)) continue;
     if (appliesCleanly(content, edits)) editFile(file, edits);
+    else unmatched.push(rel);
+  }
+  return unmatched;
+};
+
+/**
+ * Put the login guard back into every generator that still matches the
+ * guardless text (`add login` after an `--auth=none` scaffold or `manage` →
+ * Auth: none). Returns the generators without a guard that had to be left
+ * alone because the project edited them.
+ */
+export const restoreGeneratorLoginGuards = (root: string): string[] => {
+  const unmatched: string[] = [];
+  for (const { rel, restore } of GUARDLESS_GENERATORS) {
+    const file = path.join(root, rel);
+    if (!fs.existsSync(file)) continue;
+    const content = readLf(file);
+    if (LIVE_LOGIN_GUARD.test(content)) continue;
+    if (appliesCleanly(content, [restore])) editFile(file, [restore]);
     else unmatched.push(rel);
   }
   return unmatched;
