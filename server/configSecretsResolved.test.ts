@@ -14,7 +14,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 //?     http.cors.allowedOrigins  -> ["ORIGINS_BASE_V1"]   (CORS fails CLOSED)
 //?   ...while process.env already held the resolved values.
 
-const ENV_KEYS = ['EMAIL_FROM', 'EXTERNAL_ORIGINS', 'DNS'] as const;
+const ENV_KEYS = ['EMAIL_FROM', 'EXTERNAL_ORIGINS', 'DNS', 'NODE_ENV'] as const;
 const saved: Record<string, string | undefined> = {};
 
 //? Import core BEFORE stubbing anything. Importing it runs `env.ts`, whose dotenv
@@ -46,7 +46,10 @@ afterEach(() => {
 
 describe('config.ts survives late secret resolution (C-04)', () => {
   it('refreshes every env-derived URL without resetting unrelated project policy', async () => {
+    //? NODE_ENV=production: the production-only values asserted below (no
+    //? localhost CORS, public OAuth callback) follow the runtime mode (ADR 0040).
     await loadCoreThenStub({
+      NODE_ENV: 'production',
       EMAIL_FROM: 'EMAIL_FROM_BASE_V1',
       EXTERNAL_ORIGINS: 'ORIGINS_BASE_V1',
       DNS: 'DNS_BASE_V1',
