@@ -2,7 +2,6 @@ import { randomUUID } from 'node:crypto';
 import { redis } from './redis';
 import { getDeployConfig } from './deployConfigRegistry';
 import { getLogger } from './loggerRegistry';
-import { getProjectName } from './projectConfig';
 
 //? @adr 0036
 //? Writes a fresh UUID to `luckystack:boot:<project>:<envKey>` on startup. Any
@@ -23,9 +22,15 @@ const DEFAULT_BOOT_KEY_TTL_SECONDS = 3600;
  * Redis would otherwise overwrite each other's UUID, rotating the other
  * project's health HMAC and faking a handshake mismatch. Router and backends
  * must therefore resolve the same project name (`PROJECT_NAME`).
+ *
+ * The name comes from `PROJECT_NAME` only, never `session.projectName`: the
+ * standalone router CLI does not load `config.ts`, so a config-only name would
+ * give the backend a different key than the router reads.
  */
-export const bootUuidKey = (envKey: string): string =>
-  `${BOOT_KEY_PREFIX}${getProjectName()}:${envKey}`;
+export const bootUuidKey = (envKey: string): string => {
+  const projectName = process.env.PROJECT_NAME;
+  return `${BOOT_KEY_PREFIX}${projectName && projectName.length > 0 ? projectName : 'luckystack'}:${envKey}`;
+};
 
 const getBootKeyTtlSeconds = (): number =>
   getDeployConfig().routing?.bootKeyTtlSeconds ?? DEFAULT_BOOT_KEY_TTL_SECONDS;

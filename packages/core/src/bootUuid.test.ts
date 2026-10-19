@@ -24,6 +24,7 @@ import {
   startBootUuidHeartbeat,
   writeBootUuid,
 } from './bootUuid';
+import { registerProjectConfig } from './projectConfig';
 
 const KEY = bootUuidKey('production');
 
@@ -43,6 +44,16 @@ describe('boot UUID key', () => {
 
     expect(alpha).toBe('luckystack:boot:alpha:production');
     expect(beta).toBe('luckystack:boot:beta:production');
+  });
+
+  it('ignores session.projectName, which the standalone router CLI never loads', () => {
+    //? Review 1 finding 4: a config-only name gave the backend a different key
+    //? than the router read, failing a strict boot handshake.
+    registerProjectConfig({ session: { projectName: 'from-config' } });
+    vi.stubEnv('PROJECT_NAME', 'alpha');
+    expect(bootUuidKey('production')).toBe('luckystack:boot:alpha:production');
+    vi.stubEnv('PROJECT_NAME', '');
+    expect(bootUuidKey('production')).toBe('luckystack:boot:luckystack:production');
   });
 
   it('is the key the writer uses', async () => {

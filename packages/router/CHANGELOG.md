@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Breaking:** the boot-handshake Redis key is `luckystack:boot:<project>:<env>` (was `luckystack:boot:<env>`), so projects that share one Redis no longer overwrite each other's boot UUID (ADR 0074). Upgrade: upgrade the router and every backend together and run them with the same `PROJECT_NAME`; a mixed pair reports a handshake mismatch, which is a startup failure with `strictBootHandshake`.
+- **Breaking:** the boot-handshake Redis key is `luckystack:boot:<project>:<env>` (was `luckystack:boot:<env>`), so projects that share one Redis no longer overwrite each other's boot UUID (ADR 0074). Upgrade: upgrade the router and every backend together and run them with the same `PROJECT_NAME`. The key reads `PROJECT_NAME` only, never `session.projectName` from `config.ts`, which the router CLI does not load. A mixed pair reports a handshake mismatch, which is a startup failure with `strictBootHandshake`.
 
 ### Fixed
 

@@ -22,7 +22,10 @@ is already scoped by project for the same shared-Redis case.
 
 The boot UUID key includes the project name next to the environment, and one
 core function builds it for every reader and writer: the backend that writes
-and refreshes it and the router handshake that reads it.
+and refreshes it and the router handshake that reads it. The project name in
+this key comes from `PROJECT_NAME` (default `luckystack`) only, never from
+`session.projectName` in `config.ts`, because the standalone router CLI does
+not load `config.ts`.
 
 ## Rejected alternatives
 
@@ -30,12 +33,17 @@ and refreshes it and the router handshake that reads it.
   project's key-formatting rules, which ties an infrastructure key to
   application key policy.
 - **Add the prefix in the router only.** Writer and reader would drift apart.
+- **Use the general project name (`session.projectName` before
+  `PROJECT_NAME`).** The router CLI cannot see a name set only in config, so
+  backend and router would build different keys.
 
 ## Consequences
 
 - Router and backends must be upgraded together and resolve the same project
   name; a mixed pair reports a handshake mismatch, which is a startup failure
   with the strict boot handshake.
-- The standalone router CLI does not load the project's `config.ts`. A project
-  name set only in config, and not through `PROJECT_NAME`, can therefore differ
-  between router and backend.
+- Router and backend always agree when they share `PROJECT_NAME`, which the
+  scaffold's `deploy.config.ts` synchronizes. A project that names itself only
+  through `session.projectName` uses `luckystack` in this key, so two such
+  projects on one Redis and environment still share a boot UUID; set
+  `PROJECT_NAME` to separate them.
