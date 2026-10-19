@@ -4,6 +4,7 @@ import { type AddressInfo } from 'node:net';
 import { clearAllHooks, registerHook } from '@luckystack/core';
 
 import { createHttpProxy } from './httpProxy';
+import { createTrustedProxyMatcher } from './proxyUtils';
 import type { ServiceTargetResolver, ResolveTargetResult } from './resolveTarget';
 
 //? Minimal stub resolver. The HTTP proxy only calls `resolve(service)`; the
@@ -294,5 +295,50 @@ describe('httpProxy — socket.io polling handshake pins to the websocket servic
     const h = await bootSpy();
     await get(h.port, '/socket.iox/thing');
     expect(h.asked).toEqual(['socket.iox']);
+  });
+});
+
+//? REGRESSION (sweep 054): behind a trusted TLS proxy every visitor reached the
+//? backend with the proxy's address as X-Forwarded-For.
+describe('httpProxy — x-forwarded-for behind a trusted proxy', () => {
+  const bootXff = async (trustedCidrs: string[]): Promise<{ port: number; seen: (string | undefined)[] }> => {
+    const seen: (string | undefined)[] = [];
+    const upstream = http.createServer((req, res) => {
+      const xff = req.headers['x-forwarded-for'];
+      seen.push(Array.isArray(xff) ? xff.join('|') : xff);
+      res.end('ok');
+    });
+    await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve));
+    const upstreamPort = (upstream.address() as AddressInfo).port;
+    const proxy = createHttpProxy({
+      resolver: makeResolver({ target: `http://127.0.0.1:${String(upstreamPort)}`, viaFallback: false, resolvedEnvKey: 'test' }),
+      missingServiceErrorCode: 'serviceNotAssigned',
+      isTrustedProxy: createTrustedProxyMatcher(trustedCidrs),
+    });
+    const server = http.createServer(proxy);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    cleanups.push(() => { server.close(); upstream.close(); });
+    return { port: (server.address() as AddressInfo).port, seen };
+  };
+
+  const getWithXff = (port: number, xff: string): Promise<void> =>
+    new Promise((resolve, reject) => {
+      const req = http.get(
+        { host: '127.0.0.1', port, path: '/api/system/ping/v1', headers: { 'x-forwarded-for': xff } },
+        (res) => { res.resume(); res.on('end', () => { resolve(); }); },
+      );
+      req.on('error', reject);
+    });
+
+  it('forwards the last address a trusted proxy appended', async () => {
+    const h = await bootXff(['127.0.0.1/32']);
+    await getWithXff(h.port, '198.51.100.7, 203.0.113.9');
+    expect(h.seen).toEqual(['203.0.113.9']);
+  });
+
+  it('ignores the inbound chain from a peer that is not a trusted proxy', async () => {
+    const h = await bootXff([]);
+    await getWithXff(h.port, '203.0.113.9');
+    expect(h.seen).toEqual(['127.0.0.1']);
   });
 });

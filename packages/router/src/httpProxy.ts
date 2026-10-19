@@ -245,8 +245,9 @@ const handleRequest = async (
       //? `x-luckystack-*` markers and have them survive via spread order.
       ...stripForwardedHeaders(stripHopByHopHeaders(req.headers, HTTP_HOP_BY_HOP_HEADERS)),
       //? Router-authoritative: XFF is the router's own peer view of the
-      //? client, not a trusted inbound chain. Backends must trust only this.
-      'x-forwarded-for': buildForwardedFor(req.socket.remoteAddress),
+      //? client, or the visitor address a trusted proxy in front appended.
+      //? Backends must trust only this.
+      'x-forwarded-for': buildForwardedFor(req.socket.remoteAddress, req.headers['x-forwarded-for'], ctx.isTrustedProxy),
       // Preserve the original host so the upstream knows the public hostname.
       'x-forwarded-host': req.headers.host ?? '',
       'x-forwarded-proto': resolveForwardedProto(

@@ -163,8 +163,9 @@ export const startRouter = async (input: StartRouterInput): Promise<RunningRoute
   //? terminating Socket.io on a non-system service was silently ignored.
   const websocketService = deployConfig.routing?.websocketService;
   //? The router itself is plain HTTP. Only an explicitly trusted immediate TLS
-  //? proxy may assert `x-forwarded-proto: https`; direct clients always resolve
-  //? to http. Compile CIDRs once instead of parsing on every HTTP/WS request.
+  //? proxy may assert `x-forwarded-proto: https` or name the visitor in
+  //? `x-forwarded-for`; direct clients always resolve to http and to their own
+  //? socket address. Compile CIDRs once instead of parsing on every HTTP/WS request.
   const isTrustedProxy = createTrustedProxyMatcher(deployConfig.routing?.trustedProxyCidrs);
 
   const envMap = (deployConfig.environments ?? {}) as Record<string, EnvironmentDefinition | undefined>;

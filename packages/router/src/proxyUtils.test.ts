@@ -259,4 +259,24 @@ describe('buildForwardedFor (shared by HTTP + WS proxy)', () => {
   it('returns an empty string when the address is undefined', () => {
     expect(buildForwardedFor(undefined)).toBe('');
   });
+
+  //? REGRESSION (sweep 054).
+  const trusted = createTrustedProxyMatcher(['10.0.0.0/8']);
+
+  it('ignores an inbound chain from a peer that is not a trusted proxy', () => {
+    expect(buildForwardedFor('203.0.113.42', '198.51.100.1', trusted)).toBe('203.0.113.42');
+    expect(buildForwardedFor('203.0.113.42', '198.51.100.1')).toBe('203.0.113.42');
+  });
+
+  it('takes only the last hop a trusted proxy appended', () => {
+    expect(buildForwardedFor('10.0.0.5', '1.2.3.4, 198.51.100.1', trusted)).toBe('198.51.100.1');
+    expect(buildForwardedFor('::ffff:10.0.0.5', ['1.2.3.4', '198.51.100.1'], trusted)).toBe('198.51.100.1');
+    expect(buildForwardedFor('10.0.0.5', '2001:db8::7', trusted)).toBe('2001:db8::7');
+  });
+
+  it('falls back to the trusted peer when its last hop is missing or not an IP', () => {
+    expect(buildForwardedFor('10.0.0.5', undefined, trusted)).toBe('10.0.0.5');
+    expect(buildForwardedFor('10.0.0.5', ' , ', trusted)).toBe('10.0.0.5');
+    expect(buildForwardedFor('10.0.0.5', '198.51.100.1, evil\r\nx-injected: 1', trusted)).toBe('10.0.0.5');
+  });
 });

@@ -224,10 +224,11 @@ const openUpstream = async (
       connection: 'Upgrade',
       upgrade: 'websocket',
       //? Router-authoritative forwarding values. The client's copies were
-      //? stripped above; XFF is the router's own peer view of the client so a
-      //? client cannot forge its source IP, and the scheme is normalized
-      //? rather than trusted from the inbound header.
-      'x-forwarded-for': buildForwardedFor(req.socket.remoteAddress),
+      //? stripped above; XFF is the router's own peer view of the client (or
+      //? the visitor address a trusted proxy in front appended) so a client
+      //? cannot forge its source IP, and the scheme is normalized rather than
+      //? trusted from the inbound header.
+      'x-forwarded-for': buildForwardedFor(req.socket.remoteAddress, req.headers['x-forwarded-for'], isTrustedProxy),
       'x-forwarded-host': req.headers.host ?? '',
       'x-forwarded-proto': resolveForwardedProto(
         req.headers['x-forwarded-proto'],
