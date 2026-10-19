@@ -5,7 +5,7 @@
 > `docs/FINDINGS_PROTOCOL.md` for the rules. This index lists them all so open
 > items are never lost during a cleanup.
 
-Last updated: 2026-10-13
+Last updated: 2026-10-19
 
 | Date | Folder | Topic | Items | Rollup status |
 | --- | --- | --- | --- | --- |
@@ -38,7 +38,7 @@ Last updated: 2026-10-13
 | 2026-07-15 | [2026-07-15-scaffold-e2e/](./2026-07-15-scaffold-e2e/) | Real-registry scaffold + install e2e (`npm run e2e:verdaccio`) | 1 | 0 open · 1 fixed |
 | 2026-07-15 | [2026-07-15-type-generation/](./2026-07-15-type-generation/) | Wire-type lie + ORM degradation — **projection shipped, T1/T2/T11/T14 all closed** | 18 | 0 open · 11 fixed · 3 wontfix · 2 informational · 1 false-positive · 1 superseded |
 | 2026-07-15 | [2026-07-15-bun-feasibility/](./2026-07-15-bun-feasibility/) | Bun runtime + PM + **router WS proxy** — runtime, PM, all 4 databases verified on both runtimes; router proxies WS on node, refuses on bun (upstream) | 22 | 0 open · 20 fixed · 1 wontfix · 1 mitigated |
-| 2026-07-02 | [2026-07-02-security/](./2026-07-02-security/) | Security & correctness scan (10 agents, full codebase) | 13 | 0 open · 10 fixed · 3 wontfix |
+| 2026-07-02 | [2026-07-02-security/](./2026-07-02-security/) | Security & correctness scan (10 agents, full codebase) | 14 | 0 open · 11 fixed · 3 wontfix |
 
 > All release, runtime, audit, and CI publication findings currently listed here are terminal or
 > explicitly tracked as open in their own ledger. Release identity belongs in package metadata and release history, not this findings rollup.
