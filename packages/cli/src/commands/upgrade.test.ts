@@ -41,6 +41,23 @@ describe('buildUpgradePlan', () => {
     }
   });
 
+  it('carries the 0.15 router step, binding new services in deploy.config.ts, in both changelogs', () => {
+    //? Declaring `settings` / `reset-password` in services.config.ts is not enough:
+    //? without a deploy.config.ts binding the router answers serviceNotAssigned.
+    const cliDir = path.resolve(import.meta.dirname, '../..');
+    const firstStep = (file: string, heading: string): string => {
+      const changelog = fs.readFileSync(file, 'utf8');
+      const start = changelog.indexOf(heading);
+      expect(start).toBeGreaterThan(-1);
+      return changelog.slice(start).split('\n').find((line) => line.startsWith('1. ')) ?? '';
+    };
+    const cliStep = firstStep(path.join(cliDir, 'CHANGELOG.md'), '### Upgrading a project scaffolded before 0.15');
+    const scaffoldStep = firstStep(path.resolve(cliDir, '../create-luckystack-app/CHANGELOG.md'), '### Upgrading an existing project');
+    expect(cliStep).toContain('deploy.config.ts');
+    expect(cliStep).toContain('serviceNotAssigned');
+    expect(cliStep).toBe(scaffoldStep);
+  });
+
   it('handles zero installed packages gracefully', () => {
     const plan = buildUpgradePlan([], '2026-07-14', false, null);
     expect(plan).toContain('unknown');
