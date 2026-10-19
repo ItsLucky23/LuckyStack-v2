@@ -23,6 +23,7 @@ import {
   dispatchHook,
   normalizeErrorResponse,
   readSession,
+  resolveClientIp,
   writeSession,
   tryCatch,
   type apiMessage,
@@ -71,6 +72,13 @@ const getSessionRoomCodes = (session: BaseSessionLayout): string[] => {
   return [...new Set(roomCodes)];
 };
 
+//? Socket event arguments are untyped client input: a missing or `null` payload
+//? must not reach a property read. socket.io dispatches listeners inside
+//? `process.nextTick`, so a TypeError there is an uncaughtException that takes
+//? the whole process down — for an unauthenticated client, before any auth check.
+const asPayload = (data: unknown): Record<string, unknown> =>
+  typeof data === 'object' && data !== null ? data as Record<string, unknown> : {};
+
 const sanitizeSessionRoomKeys = (session: BaseSessionLayout): BaseSessionLayout => {
   const { code: _legacyCode, codes: _legacyCodes, ...sanitizedSession } = session as BaseSessionLayout & {
     code?: string;
@@ -116,7 +124,7 @@ interface SocketContext {
 
 const validateRoomRequest = (
   socket: Socket,
-  responseIndex: number | undefined,
+  responseIndex: unknown,
   token: string | null,
   group: string,
   preferredLocale: string | undefined,
@@ -208,7 +216,20 @@ const executeRoomMutation = async (opts: RoomMutationOptions): Promise<void> => 
   const nextRoomCodes = await mutate(socket, physicalRoom, group, existingRoomCodes, session.id);
 
   const sanitizedSession = sanitizeSessionRoomKeys(session);
-  await writeSession(token, { ...sanitizedSession, roomCodes: nextRoomCodes });
+  //? `onlyIfExists`: the session was read before the awaited pre-hook and room
+  //? mutation. When a logout/revoke deleted it meanwhile, a plain write would
+  //? resurrect the revoked token with a full TTL. Abort instead, and undo a join
+  //? so the socket does not stay in a room its (now gone) session never recorded.
+  const saved = await writeSession(token, { ...sanitizedSession, roomCodes: nextRoomCodes }, undefined, { onlyIfExists: true });
+  if (!saved.ok) {
+    if (preHook === 'preRoomJoin') await socket.leave(physicalRoom);
+    socket.emit(buildResponseEventName(responseIndex), normalizeErrorResponse({
+      response: { status: 'error', errorCode: saved.errorCode ?? 'session.notFound' },
+      preferredLocale,
+      userLanguage: session.language,
+    }));
+    return;
+  }
 
   const visibleRooms = getVisibleSocketRooms(socket, token);
   socket.emit(buildResponseEventName(responseIndex), { rooms: visibleRooms });
@@ -251,13 +272,13 @@ const registerCancellationEvents = (ctx: SocketContext): void => {
   //? the in-flight AbortController by `${socket.id}:<key>` and abort it.
   //? Server-side handler chains gate further chunk emits on the signal
   //? and exit early via the cleanup paths registered in each handler.
-  socket.on(socketEventNames.syncCancel, (data: { cb?: string }) => {
-    const cb = typeof data.cb === 'string' ? data.cb : null;
-    if (!cb) return;
+  socket.on(socketEventNames.syncCancel, (data: unknown) => {
+    const { cb } = asPayload(data);
+    if (typeof cb !== 'string' || !cb) return;
     abortSyncByCb(socket.id, cb);
   });
-  socket.on(socketEventNames.apiCancel, (data: { responseIndex?: number | string }) => {
-    const responseIndex = data.responseIndex;
+  socket.on(socketEventNames.apiCancel, (data: unknown) => {
+    const { responseIndex } = asPayload(data);
     if (typeof responseIndex !== 'number' && typeof responseIndex !== 'string') return;
     abortApiByResponseIndex(socket.id, responseIndex);
   });
@@ -266,9 +287,10 @@ const registerCancellationEvents = (ctx: SocketContext): void => {
 const registerRoomEvents = (ctx: SocketContext): void => {
   const { socket, token, preferredLocale, shouldLogDev } = ctx;
 
-  socket.on(socketEventNames.joinRoom, (data: { group?: string; responseIndex?: number }) => {
-    const group = typeof data.group === 'string' ? data.group.trim() : '';
-    const responseIndex = data.responseIndex;
+  socket.on(socketEventNames.joinRoom, (data: unknown) => {
+    const payload = asPayload(data);
+    const group = typeof payload.group === 'string' ? payload.group.trim() : '';
+    const responseIndex = payload.responseIndex;
 
     if (!validateRoomRequest(socket, responseIndex, token, group, preferredLocale, buildJoinRoomResponseEventName)) return;
     // validateRoomRequest already rejects null tokens, so this guard is redundant but narrows the type
@@ -312,9 +334,10 @@ const registerRoomEvents = (ctx: SocketContext): void => {
     });
   });
 
-  socket.on(socketEventNames.leaveRoom, (data: { group?: string; responseIndex?: number }) => {
-    const group = typeof data.group === 'string' ? data.group.trim() : '';
-    const responseIndex = data.responseIndex;
+  socket.on(socketEventNames.leaveRoom, (data: unknown) => {
+    const payload = asPayload(data);
+    const group = typeof payload.group === 'string' ? payload.group.trim() : '';
+    const responseIndex = payload.responseIndex;
 
     if (!validateRoomRequest(socket, responseIndex, token, group, preferredLocale, buildLeaveRoomResponseEventName)) return;
     // validateRoomRequest already rejects null tokens, so this guard is redundant but narrows the type
@@ -342,8 +365,8 @@ const registerRoomEvents = (ctx: SocketContext): void => {
     });
   });
 
-  socket.on(socketEventNames.getJoinedRooms, (data: { responseIndex?: number }) => {
-    const responseIndex = data.responseIndex;
+  socket.on(socketEventNames.getJoinedRooms, (data: unknown) => {
+    const { responseIndex } = asPayload(data);
     if (typeof responseIndex !== 'number') return;
 
     if (!token) {
@@ -400,25 +423,30 @@ const registerUpdateLocationEvent = (ctx: SocketContext): void => {
 
   socket.on(
     socketEventNames.updateLocation,
-    (newLocation: { pathName: string; searchParams?: Record<string, string> }) => {
+    (data: unknown) => {
       if (!token) return;
       if (!locationProviderEnabled) return;
       //? SEC: validate client-supplied location fields before persisting in session.
       //? pathName must start with '/', be at most 2048 chars, and contain no
       //? null bytes. searchParams keys + values are capped to prevent session bloat.
+      const { pathName, searchParams } = asPayload(data);
       if (
-        typeof newLocation.pathName !== 'string'
-        || !newLocation.pathName.startsWith('/')
-        || newLocation.pathName.length > 2048
-        || newLocation.pathName.includes('\0')
+        typeof pathName !== 'string'
+        || !pathName.startsWith('/')
+        || pathName.length > 2048
+        || pathName.includes('\0')
       ) return;
-      if (newLocation.searchParams !== undefined) {
-        if (typeof newLocation.searchParams !== 'object' || Array.isArray(newLocation.searchParams)) return;
-        const entries = Object.entries(newLocation.searchParams);
+      const newLocation: { pathName: string; searchParams?: Record<string, string> } = { pathName };
+      if (searchParams !== undefined) {
+        if (typeof searchParams !== 'object' || searchParams === null || Array.isArray(searchParams)) return;
+        const entries = Object.entries(searchParams);
         if (entries.length > 50) return;
+        const validated: Record<string, string> = {};
         for (const [k, v] of entries) {
-          if (typeof k !== 'string' || k.length > 256 || typeof v !== 'string' || v.length > 1024) return;
+          if (k.length > 256 || typeof v !== 'string' || v.length > 1024) return;
+          validated[k] = v;
         }
+        newLocation.searchParams = validated;
       }
       if (shouldLogDev) {
         getLogger().debug('updating location', { pathName: newLocation.pathName });
@@ -441,7 +469,10 @@ const registerUpdateLocationEvent = (ctx: SocketContext): void => {
         //? Spread into a fresh object (no in-place mutation) and sanitize
         //? legacy `code`/`codes` keys — same hygiene as the join/leave paths.
         const sanitizedUser = sanitizeSessionRoomKeys({ ...extendedUser, location: newLocation });
-        await writeSession(token, sanitizedUser);
+        //? `onlyIfExists`: a logout/revoke between the read above and this write
+        //? must win — a plain write would resurrect the deleted session.
+        const saved = await writeSession(token, sanitizedUser, undefined, { onlyIfExists: true });
+        if (!saved.ok) return;
 
         void dispatchHook('onLocationUpdate', { token, oldLocation, newLocation });
       });
@@ -619,7 +650,14 @@ export const loadSocket = (httpServer: HttpServer, options: LoadSocketOptions = 
     void dispatchHook('onSocketConnect', {
       socketId: socket.id,
       token,
-      ip: socket.handshake.address,
+      //? Same resolution as the api/sync socket paths, so behind a trusted proxy
+      //? the hook sees the client and not the proxy address.
+      ip: resolveClientIp({
+        rawAddress: socket.handshake.address,
+        headers: socket.handshake.headers,
+        trustProxy: config.http.trustProxy,
+        trustedProxyHopCount: config.http.trustedProxyHopCount,
+      }),
     });
 
     const ctx: SocketContext = {

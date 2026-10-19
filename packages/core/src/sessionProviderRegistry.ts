@@ -28,13 +28,26 @@ export interface SessionLogoutInput {
   skipSessionDelete?: boolean;
 }
 
+export interface SessionSaveOptions {
+  supersedeToken?: string;
+  /**
+   * Update an EXISTING session only. When the session was deleted in the
+   * meantime (logout, revoke, sign-out-everywhere) the provider must not
+   * recreate it and returns `{ ok: false, errorCode: 'session.notFound' }`.
+   * Used by read-modify-write updates (socket room joins, location) whose read
+   * can race a concurrent delete — a plain write would resurrect the revoked
+   * token with a fresh TTL.
+   */
+  onlyIfExists?: boolean;
+}
+
 export interface SessionProvider {
   getSession: (token: string | null) => Promise<BaseSessionLayout | null>;
   saveSession: (
     token: string,
     data: BaseSessionLayout,
     newUser?: boolean,
-    options?: { supersedeToken?: string },
+    options?: SessionSaveOptions,
   ) => Promise<SessionSaveResult>;
   deleteSession: (token: string, options?: { skipSocketLogout?: boolean }) => Promise<boolean>;
   logout: (input: SessionLogoutInput) => Promise<void>;
@@ -76,7 +89,7 @@ export const writeSession = async (
   token: string,
   data: BaseSessionLayout,
   newUser?: boolean,
-  options?: { supersedeToken?: string },
+  options?: SessionSaveOptions,
 ): Promise<SessionSaveResult> =>
   provider ? provider.saveSession(token, data, newUser, options) : { ok: true };
 
