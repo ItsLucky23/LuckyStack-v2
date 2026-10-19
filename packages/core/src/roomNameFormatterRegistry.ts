@@ -21,10 +21,12 @@ export interface RoomNameFormatterContext {
    * and streamed to under the SINGLE canonical `'broadcast'` purpose (M5); the
    * framework never varies a content room's physical name by operation, because a
    * socket physically IN `f(R,'join')` could never receive a fanout targeting
-   * `f(R,'broadcast')`. `'presence'` is the one genuinely-separate family (its own
-   * rooms). `'join'`/`'leave'` remain in the union for backward-compat but the
-   * framework no longer emits them for room-NAME formatting — treat them, if ever
-   * seen, identically to `'broadcast'`.
+   * `f(R,'broadcast')`. `'join'`/`'leave'` remain in the union for backward-compat
+   * but the framework no longer emits them for room-NAME formatting — treat them,
+   * if ever seen, identically to `'broadcast'`. `'presence'` is no longer emitted
+   * by the framework (presence fan-out addresses content rooms under
+   * `'broadcast'`); like `'join'`/`'leave'` it stays in the union for backward
+   * compatibility — treat it identically to `'broadcast'`.
    */
   purpose: 'join' | 'leave' | 'broadcast' | 'presence';
   //? @adr 0060
@@ -36,7 +38,7 @@ export interface RoomNameFormatterContext {
    * room. A formatter must therefore never fold `userId` into a content room's
    * physical name: join and fan-out would resolve to different rooms and every
    * broadcast would reach nobody, silently. Per-user isolation belongs in the
-   * raw room code the consumer chooses, or in the separate `'presence'` family.
+   * raw room code the consumer chooses.
    */
   userId?: string | null;
 }

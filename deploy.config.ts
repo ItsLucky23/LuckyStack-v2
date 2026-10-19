@@ -113,8 +113,13 @@ const deployConfig = defineDeploy<'development' | 'staging' | 'production'>({
       redis: 'redisShared',
       mongo: 'mongoShared',
       fallback: 'staging',
+      //? `settings` and `reset-password` share the `core-preset` bundle with
+      //? `system`, so they bind to the same backend. A service without a binding
+      //? is unreachable through the router.
       bindings: {
         system: 'http://localhost:4100',
+        settings: 'http://localhost:4100',
+        'reset-password': 'http://localhost:4100',
         vehicles: 'http://localhost:4101',
         billing: 'http://localhost:4102',
       },
@@ -128,6 +133,8 @@ const deployConfig = defineDeploy<'development' | 'staging' | 'production'>({
       //? target. Writing `:443` is how you say you meant it.
       bindings: {
         system: 'https://staging-api.luckystack.com:443/system',
+        settings: 'https://staging-api.luckystack.com:443/system',
+        'reset-password': 'https://staging-api.luckystack.com:443/system',
         vehicles: 'https://staging-api.luckystack.com:443/vehicles',
         billing: 'https://staging-api.luckystack.com:443/billing',
       },
@@ -137,6 +144,8 @@ const deployConfig = defineDeploy<'development' | 'staging' | 'production'>({
       mongo: 'mongoShared',
       bindings: {
         system: 'https://api.luckystack.com:443/system',
+        settings: 'https://api.luckystack.com:443/system',
+        'reset-password': 'https://api.luckystack.com:443/system',
         vehicles: 'https://api.luckystack.com:443/vehicles',
         billing: 'https://api.luckystack.com:443/billing',
       },
@@ -149,6 +158,8 @@ const deployConfig = defineDeploy<'development' | 'staging' | 'production'>({
     enableUnhealthyFallback: true,
     //? Secure default: direct clients cannot claim HTTPS. Add only the immediate
     //? TLS load-balancer/nginx CIDRs when production terminates TLS upstream.
+    //? Such a proxy may also name the visitor in x-forwarded-for: the router
+    //? forwards the last hop that proxy appended.
     trustedProxyCidrs: [],
   },
 

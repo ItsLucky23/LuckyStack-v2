@@ -67,7 +67,9 @@ export interface DeployRoutingShape {
    * `x-forwarded-proto: https`. Empty/undefined trusts nobody, so a client
    * directly reaching the router cannot spoof secure-scheme backend logic.
    * Examples: `['127.0.0.1/32', '::1/128']` for same-host nginx/Caddy, or the
-   * private subnet of a managed load balancer.
+   * private subnet of a managed load balancer. Such a proxy may also name the
+   * visitor in `x-forwarded-for`: the router forwards the last hop that proxy
+   * appended.
    */
   trustedProxyCidrs?: string[];
   /**

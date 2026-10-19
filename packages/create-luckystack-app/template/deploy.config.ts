@@ -74,19 +74,32 @@ const deployConfig: DeployConfig = {
   //?   environments: {
   //?     development: {
   //?       redis: 'redisShared', mongo: 'mongoShared',
-  //?       bindings: { system: 'http://localhost:4100' },
+  //?       bindings: {
+  //?         system: 'http://localhost:4100',
+  //?         settings: 'http://localhost:4100',
+  //?         'reset-password': 'http://localhost:4100',
+  //?       },
   //?     },
   //?   },
   //?   routing: {
   //?     defaultRouterPort: 4000,
   //?     // Add ONLY the immediate TLS proxy/load-balancer subnet. Empty = trust none.
+  //?     // Such a proxy may also name the visitor in x-forwarded-for: the router
+  //?     // forwards the last hop that proxy appended.
   //?     trustedProxyCidrs: ['127.0.0.1/32', '::1/128'],
   //?   },
   environments: {
     docker: {
       redis: 'redisShared',
       mongo: 'mongoShared',
-      bindings: { system: 'http://app:4100' },
+      //? `settings` and `reset-password` ship in the same `default` preset as
+      //? `system`, so they bind to the same backend. A service without a
+      //? binding is unreachable through the router.
+      bindings: {
+        system: 'http://app:4100',
+        settings: 'http://app:4100',
+        'reset-password': 'http://app:4100',
+      },
     },
   },
 };

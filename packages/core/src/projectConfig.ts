@@ -566,7 +566,8 @@ export interface ApiConfig {
    * Default response timeout (ms) for `apiRequest`. After this elapses with no
    * response (e.g. server restart/crash between emit and reply) the request
    * settles with `{ status:'error', errorCode:'api.timeout', httpStatus:504 }`
-   * instead of hanging forever. Set `false` to disable the timeout. A per-call
+   * instead of hanging forever. Set `false` (or `0` / a negative number) to
+   * disable the timeout. A per-call
    * `timeoutMs` overrides this. Default 30000.
    */
   requestTimeoutMs: number | false;
@@ -598,8 +599,8 @@ export interface SyncConfig {
   /**
    * Default response timeout (ms) for `syncRequest`'s acknowledgement. Same
    * semantics as `api.requestTimeoutMs` but for sync. Settles with
-   * `sync.requestTimeout` / httpStatus 504 on expiry. `false` to disable.
-   * Default 30000.
+   * `sync.requestTimeout` / httpStatus 504 on expiry. `false` (or `0` / a
+   * negative number) to disable. Default 30000.
    */
   requestTimeoutMs: number | false;
   /**
