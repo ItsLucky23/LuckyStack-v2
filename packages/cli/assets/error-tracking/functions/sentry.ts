@@ -6,8 +6,8 @@
 //?
 //? Framework-internal error-tracking is now hook-based (see
 //? `node_modules/@luckystack/error-tracking/docs/auto-instrumentation.md`).
-//? Editing this shim does NOT change the framework's automatic `setSentryUser`
-//? / `startSpan` wiring on the API + sync hot paths.
+//? Editing this shim does NOT change the framework's automatic request-identity /
+//? span wiring on the API + sync hot paths.
 //?
 //? For framework-wide error-tracker override: use `registerErrorTracker()` or
 //? `registerErrorTrackers([])` from @luckystack/error-tracking. That registry is

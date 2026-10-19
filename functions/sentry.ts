@@ -6,8 +6,8 @@
 //?
 //? Framework-internal error-tracking is now hook-based (see
 //? `packages/error-tracking/src/autoInstrumentation.ts`). Editing this shim does
-//? NOT change the framework's automatic `setSentryUser` / `startSpan` wiring on
-//? the API + sync hot paths.
+//? NOT change the framework's automatic request-identity / span wiring on the
+//? API + sync hot paths.
 //?
 //? For framework-wide error-tracker override: use `registerErrorTracker()` or
 //? `registerErrorTrackers([])` from @luckystack/error-tracking. That registry is

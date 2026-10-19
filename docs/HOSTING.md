@@ -23,6 +23,8 @@ npx luckystack add docker
 npm run docker:check
 ```
 
+The database service comes from the recorded scaffold choice or the Prisma schema. When neither records it, the command refuses to guess; pass it with `npx luckystack add docker --db=<mongodb|postgresql|mysql|sqlite>`. The command also adds `.env.docker` to `.gitignore`.
+
 Review the generated `docs/DOCKER.md`, templates and Compose topology before starting it. A local process talking to remote infrastructure is **not** a disposable local environment: do not run resets, seeds or migrations without authorization.
 
 ## Security pre-flight

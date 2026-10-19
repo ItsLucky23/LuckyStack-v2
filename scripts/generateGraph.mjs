@@ -393,6 +393,7 @@ const build = async () => {
 
   return {
     version: 3,
+    roots: { dirs: GRAPH_ROOT_DIRS, files: GRAPH_ROOT_FILES },
     note: "Dependency graph, ids relative to the REPO root (src/, server/, shared/, functions/, luckystack/, config.ts). File level: edges are importer->imported. Symbol level: callEdges are function->function calls; <module> = file top-level scope. Transitive closures (blastRadius, symbolBlastRadius) are NOT stored — @luckystack/mcp derives them from edges/callEdges on load. functions.* injection-proxy / dynamic-import / interface-typed calls are intentionally not resolved. See docs/decisions/0002,0004,0006,0046.",
     counts: {
       nodes: nodes.length,

@@ -16,7 +16,7 @@
 //? `npm publish` attaches a signed provenance attestation linking the tarball to
 //? the building workflow + commit. This REQUIRES a provenance-capable CI with an
 //? OIDC id-token (GitHub Actions `permissions: id-token: write` — see the
-//? `publish` job in `.github/workflows/ci.yml`). The `--provenance` flag is only
+//? `publish` job in `.github/workflows/publish.yml`). The `--provenance` flag is only
 //? passed on a real publish; a local `--dry-run` skips it because there is no
 //? OIDC token outside CI and npm would otherwise abort.
 //?

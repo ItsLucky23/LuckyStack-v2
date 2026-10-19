@@ -47,6 +47,8 @@ const summary = await runAllTests({
   baseUrl,
   authToken,
   skip,
+  //? Playground routes that throw on purpose; their shaped 5xx is the expected answer.
+  expectServerError: ['playground/throwError', 'playground/throwSync'],
   filter,
   noSweep,
   noFuzz,
