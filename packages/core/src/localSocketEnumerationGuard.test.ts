@@ -22,13 +22,16 @@ const makeFakeServer = () => {
     },
   };
   const fetchSockets = vi.fn(() => Promise.resolve([socketA, socketB]));
+  const defaultNamespace = { adapter, sockets: socketsMap, emit: vi.fn() };
+  const chatNamespace = { adapter: { rooms: new Map<string, Set<string>>(), sids: new Map<string, Set<string>>() }, sockets: new Map<string, unknown>(), emit: vi.fn() };
   const server = {
-    sockets: { adapter, sockets: socketsMap },
+    sockets: defaultNamespace,
+    of: vi.fn((name: string) => (name === '/' ? defaultNamespace : chatNamespace)),
     fetchSockets,
     in: vi.fn((_room: string) => ({ fetchSockets })),
     to: vi.fn((_room: string) => ({ emit: vi.fn() })),
   };
-  return { server, socketA, adapter, fetchSockets };
+  return { server, socketA, adapter, fetchSockets, defaultNamespace };
 };
 
 describe('guardLocalSocketEnumeration', () => {
@@ -66,6 +69,27 @@ describe('guardLocalSocketEnumeration', () => {
     expect(server.to).toHaveBeenCalledWith('room-1');
     //? Methods must run against the REAL adapter, not the proxy.
     expect(io.sockets.adapter.roomCount()).toBe(adapter.rooms.size);
+  });
+
+  it('guards the namespaces returned by `io.of()` the same way', () => {
+    const { server, socketA, defaultNamespace } = makeFakeServer();
+    const io = guardLocalSocketEnumeration(server);
+    expect(() => io.of('/').adapter.rooms).toThrow(LocalSocketEnumerationError);
+    expect(() => io.of('/').adapter.sids).toThrow(LocalSocketEnumerationError);
+    expect(() => io.of('/').adapter.rooms).toThrow(/io\.of\('\/'\)\.adapter\.rooms/);
+    expect(() => io.of('/').sockets.values()).toThrow(LocalSocketEnumerationError);
+    expect(() => io.of('/').sockets.forEach(() => undefined)).toThrow(LocalSocketEnumerationError);
+    //? Destructuring is exactly what the lint rule cannot see.
+    expect(() => {
+      const { rooms } = io.of('/').adapter;
+      return rooms;
+    }).toThrow(LocalSocketEnumerationError);
+    expect(() => io.of('/chat').adapter.rooms).toThrow(LocalSocketEnumerationError);
+    //? Local lookups and other namespace members keep working.
+    expect(io.of('/').sockets.get('a')).toBe(socketA);
+    io.of('/').emit('ping');
+    expect(defaultNamespace.emit).toHaveBeenCalledWith('ping');
+    expect(server.of).toHaveBeenCalledWith('/');
   });
 });
 

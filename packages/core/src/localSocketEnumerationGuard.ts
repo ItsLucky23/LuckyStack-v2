@@ -15,7 +15,8 @@
 //?
 //? Scope is deliberately narrow: only the value `getIoInstance()` returns is
 //? wrapped, only outside production, and only the three per-instance surfaces
-//? throw. `sockets.sockets.get(id)` stays allowed — a local lookup from a local
+//? throw (on `io.sockets` and on any namespace reached through `io.of()`).
+//? `sockets.sockets.get(id)` stays allowed — a local lookup from a local
 //? socket handler is correct by definition; only ENUMERATION is the bug. The
 //? raw server stays reachable through `getIoInstance({ raw: true })` for the
 //? deliberate per-instance cases (backpressure sampling, a sweep cleaning up its
@@ -66,38 +67,47 @@ const readBound = (target: object, prop: PropertyKey): unknown => {
   return typeof value === 'function' ? value.bind(target) : value;
 };
 
-const guardSocketsMap = <T extends Map<string, unknown>>(map: T): T =>
+//? `label` names the namespace as the consumer reached it (`io.sockets` or
+//? `io.of('/chat')`) so the error points at the expression they wrote.
+const guardSocketsMap = <T extends Map<string, unknown>>(map: T, label: string): T =>
   new Proxy(map, {
     get(target, prop) {
       if (ENUMERATING_MAP_MEMBERS.has(prop)) {
-        throw new LocalSocketEnumerationError('Enumerating `io.sockets.sockets`');
+        throw new LocalSocketEnumerationError(`Enumerating \`${label}.sockets\``);
       }
       return readBound(target, prop);
     },
   });
 
-const guardAdapter = <T extends object>(adapter: T): T =>
+const guardAdapter = <T extends object>(adapter: T, label: string): T =>
   new Proxy(adapter, {
     get(target, prop) {
       if (PER_INSTANCE_ADAPTER_MEMBERS.has(prop)) {
-        throw new LocalSocketEnumerationError(`\`io.sockets.adapter.${String(prop)}\``);
+        throw new LocalSocketEnumerationError(`\`${label}.adapter.${String(prop)}\``);
       }
       return readBound(target, prop);
     },
   });
 
-const guardNamespace = <T extends GuardableSocketServer['sockets']>(namespace: T): T =>
+const guardNamespace = <T extends GuardableSocketServer['sockets']>(namespace: T, label: string): T =>
   new Proxy(namespace, {
     get(target, prop) {
-      if (prop === 'adapter') return guardAdapter(target.adapter);
-      if (prop === 'sockets') return guardSocketsMap(target.sockets);
+      if (prop === 'adapter') return guardAdapter(target.adapter, label);
+      if (prop === 'sockets') return guardSocketsMap(target.sockets, label);
       return readBound(target, prop);
     },
   });
 
+const isGuardableNamespace = (value: unknown): value is GuardableSocketServer['sockets'] =>
+  typeof value === 'object'
+  && value !== null
+  && typeof Reflect.get(value, 'adapter') === 'object'
+  && Reflect.get(value, 'sockets') instanceof Map;
+
 /**
  * Wrap a Socket.io server so that the per-instance surfaces
- * (`sockets.adapter.rooms`, `sockets.adapter.sids`, enumerating `sockets.sockets`)
+ * (`sockets.adapter.rooms`, `sockets.adapter.sids`, enumerating `sockets.sockets`,
+ * and the same members of any namespace returned by `of()`)
  * throw {@link LocalSocketEnumerationError}. Everything else — `in()`, `to()`,
  * `fetchSockets()`, `emit()`, `sockets.sockets.get(id)` — passes through
  * unchanged. Identity of the wrapper is NOT stable across calls; callers cache it.
@@ -105,7 +115,20 @@ const guardNamespace = <T extends GuardableSocketServer['sockets']>(namespace: T
 export const guardLocalSocketEnumeration = <T extends GuardableSocketServer>(io: T): T =>
   new Proxy(io, {
     get(target, prop) {
-      if (prop === 'sockets') return guardNamespace(target.sockets);
+      if (prop === 'sockets') return guardNamespace(target.sockets, 'io.sockets');
+      const value: unknown = Reflect.get(target, prop);
+      //? `io.of('/')` is Socket.io's standard way to reach a namespace and returns
+      //? the RAW one, which left every guarded map one call away. Wrap whatever
+      //? namespace `of()` returns (any name, not only '/'); a return value that is
+      //? not a namespace passes through untouched.
+      if (prop === 'of' && typeof value === 'function') {
+        return (...args: unknown[]): unknown => {
+          const namespace: unknown = Reflect.apply(value, target, args);
+          if (!isGuardableNamespace(namespace)) return namespace;
+          const name = args[0];
+          return guardNamespace(namespace, typeof name === 'string' ? `io.of('${name}')` : 'io.of(…)');
+        };
+      }
       return readBound(target, prop);
     },
   });
