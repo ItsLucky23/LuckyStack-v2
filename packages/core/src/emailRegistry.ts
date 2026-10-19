@@ -164,13 +164,17 @@ export const registerEmailSender = (sender: EmailSender): void => {
  * types through different adapters — e.g. Resend for marketing and SMTP
  * for transactional. The framework picks adapter slots by convention
  * (see `EmailSenderRegistry`); consumer code can pick explicitly via
- * `sendEmail({ adapter: 'foo', ... })`.
+ * `sendEmail({ adapter: 'foo', ... })`. Omitting `default` leaves no
+ * default sender, even if `registerEmailSender` ran earlier.
  */
 export const registerEmailSenders = (senders: EmailSenderRegistry): void => {
   registry = { ...senders };
-  if (senders.default) {
-    activeSender = senders.default;
-  }
+  //? Clear the legacy single sender too: `@luckystack/email/register` installs
+  //? an auto-selected sender (ConsoleSender without provider env) before
+  //? consumer overlays run, and keeping it would silently route every
+  //? un-hinted mail to that boot-time sender behind a registry that doesn't
+  //? list it.
+  activeSender = senders.default ?? null;
 };
 
 /** Read the legacy single sender (or the `default` slot of the registry). */
