@@ -52,6 +52,7 @@ Last updated: 2026-07-15
 ## Refuted
 
 - ❌ **"`.env.local` secrets lose to Bun's preloaded `.env`"** — the feared severe case. **Doubly protected**: Bun's own precedence already ranks `.env.local` above `.env`, AND LuckyStack loads `.env.local` with `override: true` (force-overwrite). `.env` also holds no secrets (`NODE_ENV, SERVER_IP, SECURE, EXTERNAL_ORIGINS, PROJECT_NAME, REDIS_HOST, REDIS_PORT`).
+  - *2026-10-19 (v0.15.0):* the second protection no longer holds. A real environment variable now beats every env file, `.env.local` included, so under Bun auto-load (no `env = false`) only Bun's own precedence keeps `.env.local` above `.env`.
 - ❌ **"Secret-manager pointer resolution / Redis breaks under Bun"** — no new risk. `capturePointers` scans `process.env` at resolve time, `constructRedisClient` reads at **call** time, the default resolver is lazy, and `registerSecretsResolvedListener → rebuildDefaultRedisClient()` re-registers eagerly. The 0.6.5 fix holds. (See B9 for the *separate* pre-existing gap.)
 
 ## Mitigation (env) — ✅ SHIPPED 2026-07-15

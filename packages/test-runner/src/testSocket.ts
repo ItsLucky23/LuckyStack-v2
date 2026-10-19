@@ -13,6 +13,7 @@
 
 import { io as createSocketIoClient, Socket } from 'socket.io-client';
 import {
+  applyCookiePrefixConstraints,
   buildApiResponseEventName,
   buildJoinRoomResponseEventName,
   buildSyncResponseEventName,
@@ -23,6 +24,15 @@ import {
 
 const DEFAULT_CONNECT_TIMEOUT_MS = 3000;
 const DEFAULT_JOIN_TIMEOUT_MS = 3000;
+
+//? The session cookie name the server sets and reads includes
+//? `http.sessionCookiePrefix` (`__Host-` / `__Secure-`). A header built from
+//? the bare `sessionCookieName` made every authenticated probe anonymous on a
+//? project that configures a prefix.
+export const projectSessionCookieName = (): string => {
+  const { http } = getProjectConfig();
+  return applyCookiePrefixConstraints(http.sessionCookieName, http.sessionCookiePrefix).name;
+};
 
 //? Monotonic per-process counter. Every request that needs a correlated reply
 //? (`joinRoom-<n>`, `sync-<n>`) takes a fresh index so concurrent sockets and
@@ -84,7 +94,7 @@ export const connectTestSocket = async (input: ConnectTestSocketInput): Promise<
   //? `acceptBearerInCookieMode`), so without the Cookie header the socket would
   //? connect anonymously. In Node, socket.io-client honours `extraHeaders` on the
   //? websocket handshake, so the cookie is set there.
-  const sessionCookieName = input.sessionCookieName ?? getProjectConfig().http.sessionCookieName;
+  const sessionCookieName = input.sessionCookieName ?? projectSessionCookieName();
   const socket: Socket = createSocketIoClient(input.baseUrl, {
     transports: ['websocket'],
     forceNew: true,

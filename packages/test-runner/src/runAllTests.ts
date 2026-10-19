@@ -18,7 +18,7 @@ import { resetServerState } from './resetServerState';
 import { createHttpProbeTransport } from './probeRequest';
 import type { ProbeTransport } from './probeRequest';
 import { createSocketProbeTransport } from './socketProbeTransport';
-import { connectTestSocket, joinTestRoom, releaseTestSocket } from './testSocket';
+import { connectTestSocket, joinTestRoom, projectSessionCookieName, releaseTestSocket } from './testSocket';
 import { runContractTests } from './runContractTests';
 import { runAuthEnforcementTests } from './runAuthEnforcementTests';
 import { runRateLimitTests } from './runRateLimitTests';
@@ -79,7 +79,7 @@ export interface RunAllTestsInput {
   apiMetaMap: ApiMetaMap;
   apiInputSchemas: InputSchemaMap;
   baseUrl: string;
-  /** Cookie name for the session token. Defaults to the project's configured session cookie name (`projectConfig.http.sessionCookieName`). */
+  /** Cookie name for the session token. Defaults to the project's configured session cookie name (`projectConfig.http.sessionCookieName`, with `http.sessionCookiePrefix` applied). */
   sessionCookieName?: string;
   /**
    * Session token for sweep-layer requests that need a session: sent as the
@@ -170,7 +170,7 @@ const buildAuthHeaders = async (input: RunAllTestsInput): Promise<Record<string,
     return headers;
   }
 
-  const cookieName = input.sessionCookieName ?? getProjectConfig().http.sessionCookieName;
+  const cookieName = input.sessionCookieName ?? projectSessionCookieName();
   headers.Cookie = `${cookieName}=${input.authToken}`;
 
   //? Resolve the CSRF token lazily — import @luckystack/login at call time so
@@ -223,7 +223,7 @@ const resolveProbeMode = (override: 'socket' | 'http' | undefined): 'socket' | '
 //? anonymous client sees.
 const prepareSweepTransports = async (input: RunAllTestsInput, hasSyncRoutes: boolean): Promise<SweepTransports> => {
   const receiver = `lstest-room-${crypto.randomUUID()}`;
-  const sessionCookieName = input.sessionCookieName ?? getProjectConfig().http.sessionCookieName;
+  const sessionCookieName = input.sessionCookieName ?? projectSessionCookieName();
   const syncMode = resolveProbeMode(input.syncTransport);
   const apiMode = resolveProbeMode(input.apiTransport);
   const http = createHttpProbeTransport({ syncReceiver: receiver });

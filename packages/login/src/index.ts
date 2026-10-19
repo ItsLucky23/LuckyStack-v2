@@ -25,6 +25,13 @@ registerSessionProvider({
 import { registerAuthLockoutHook } from './authLockout';
 registerAuthLockoutHook();
 
+//? Mask the 2FA secrets this package's routes receive. Neither the core
+//? defaults nor the sensitive suffixes cover them. The bare `code` stays
+//? unregistered: core redacts case-insensitively by key, so it would also hide
+//? every unrelated `code` field (error codes, country codes) in all logs.
+import { registerRedactedLogKeys } from '@luckystack/core';
+registerRedactedLogKeys(['recoverycode', 'totp', 'totpcode']);
+
 export type { BaseSessionLayout, SessionLocation, AuthProps } from './sessionLayout';
 export type {
   PreLoginPayload,

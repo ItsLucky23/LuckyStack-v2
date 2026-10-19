@@ -30,7 +30,7 @@ import {
   type StreamChunkFrame,
   type StreamWatcher,
 } from './streamWatcher';
-import { connectTestSocket, emitApiOverSocket, emitSyncOverSocket, joinTestRoom } from './testSocket';
+import { connectTestSocket, emitApiOverSocket, emitSyncOverSocket, joinTestRoom, projectSessionCookieName } from './testSocket';
 //? `ApiMethodMap` mirrors the generated `apiMethodMap` shape (page → name →
 //? version → method) and is a type-only import, so there's still no import-time
 //? coupling to the consumer's generated artifact.
@@ -519,7 +519,7 @@ const buildContext = (
   //? Default to the PROJECT's configured session cookie name (the server reads
   //? the token from this cookie). Hardcoding a name silently breaks every
   //? authenticated custom test when the project uses a different name.
-  const cookieName = input.sessionCookieName ?? getProjectConfig().http.sessionCookieName;
+  const cookieName = input.sessionCookieName ?? projectSessionCookieName();
   const routePath = `${discovery.route.page}/${discovery.route.name}/${discovery.route.version}`;
   const routeFullName = `sync/${routePath}`;
   //? API routes are invoked with their declared HTTP method; sync routes always

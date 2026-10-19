@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 //? CRITICAL INVARIANT: this process must NEVER merge `.env` files into its own
 //? `process.env`. The child is spawned with `{ ...process.env }`, and the
-//? child's own `loadEnvFiles()` loads `.env` with `override: false` — any
-//? `.env`-derived value that leaks into the supervisor's env would therefore
+//? child's `loadEnvFiles()` lets any value already in `process.env` beat every
+//? env file — any `.env`-derived value that leaks into the supervisor's env would therefore
 //? WIN over freshly edited file values on every restart (stale-env bug).
 //? That is why this file imports NOTHING from `@luckystack/core` (core runs
 //? `bootstrapEnv()` as an import side-effect) and reads env files via

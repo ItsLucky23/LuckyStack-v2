@@ -42,7 +42,7 @@ const runFuzzTests = vi.fn((_input: unknown): Promise<RunContractSummary> => { o
 const runCustomTests = vi.fn((_input: unknown): Promise<RunCustomTestsSummary> => { order.push('custom'); return Promise.resolve(customSummaryOf(6, 3)); });
 const clearAllRateLimits = vi.fn((): Promise<void> => { order.push('clear'); return Promise.resolve(); });
 const defaultProjectConfig = () => ({
-  http: { sessionCookieName: 'cfg_cookie' },
+  http: { sessionCookieName: 'cfg_cookie', sessionCookiePrefix: undefined as '__Host-' | '__Secure-' | undefined },
   transport: { invocation: 'socket' as 'socket' | 'routed-http' },
   session: { basedToken: false },
 });
@@ -78,6 +78,7 @@ vi.mock('@luckystack/core', async (importOriginal) => {
     clearAllRateLimits: () => clearAllRateLimits(),
     getProjectConfig: () => getProjectConfig(),
     getCsrfConfig: () => getCsrfConfig(),
+    applyCookiePrefixConstraints: actual.applyCookiePrefixConstraints,
     tryCatch: actual.tryCatch,
     tryCatchSync: actual.tryCatchSync,
   };
@@ -230,6 +231,16 @@ describe('runAllTests orchestration (characterization)', () => {
   it('falls back to the project config cookie name when authToken is set but sessionCookieName is not', async () => {
     await runAllTests({ ...baseInput, authToken: 'tok123' });
     expect(runContractTests.mock.calls[0]?.[0]).toMatchObject({ headers: { Cookie: 'cfg_cookie=tok123' } });
+  });
+
+  it('applies the configured session cookie prefix to the fallback cookie name', async () => {
+    //? The server sets and reads `__Host-<name>`; the bare name made every
+    //? authenticated probe anonymous on a prefixed project.
+    projectConfig = { ...defaultProjectConfig(), http: { sessionCookieName: 'cfg_cookie', sessionCookiePrefix: '__Host-' } };
+
+    await runAllTests({ ...baseInput, authToken: 'tok123' });
+
+    expect(runContractTests.mock.calls[0]?.[0]).toMatchObject({ headers: { Cookie: '__Host-cfg_cookie=tok123' } });
   });
 
   it('skips the CSRF layer when no authToken is supplied (no session to probe past the auth guard)', async () => {
