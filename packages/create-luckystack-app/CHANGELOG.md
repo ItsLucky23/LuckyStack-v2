@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **Breaking:** piped or CI runs without `--no-prompt` no longer lose answers that arrive in one chunk. If stdin ends before every question is answered, the scaffolder now exits 1 with "stdin closed … pass --no-prompt" and writes nothing; before, it exited 0 without creating a project. Upgrade: a CI step that relied on that silent exit 0 should pass `--no-prompt` with explicit flags.
+- **`--orm=drizzle --db=mongodb` without `--no-prompt` exits 2 before the wizard asks anything.** It used to ask every question first and reject the pair at the end.
 - **A project name with an apostrophe or backslash** (`"bob's app"`) no longer produces a `config.ts` that does not parse. The title is escaped for the TypeScript string and HTML-escaped in `index.html`.
 - **`npm run router` works in a `--router` scaffold.** It runs the router CLI through tsx with `--deploy ./deploy.config.ts --services ./services.config.ts`; before, it always exited 2.
 - **With the router, the production build includes the settings and password-reset routes:** `services.config.ts` declares `settings` and `reset-password` in the `default` preset.

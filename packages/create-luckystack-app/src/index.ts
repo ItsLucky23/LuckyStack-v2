@@ -1177,6 +1177,11 @@ interface FlagDependencies {
 //? their own — those keep the silent normalisation in normalizeChoices.
 export const findFlagConflicts = (args: CliArgs, resolved: FlagDependencies): string[] => {
   const conflicts: string[] = [];
+  //? Both passed explicitly: known before the prompts, so the wizard never asks
+  //? its questions for a run that exits 2 afterwards.
+  if (args.orm && args.dbProvider && !ormSupportsDb(args.orm, args.dbProvider)) {
+    conflicts.push(`--orm=${args.orm} does not support --db=${args.dbProvider} (drizzle is SQL-only). Pick one of: ${SQL_DB_PROVIDERS.join(', ')} — or use --orm=mikro-orm for a TypeScript-first ORM with MongoDB support.`);
+  }
   if (args.authMode && args.authMode !== 'none' && resolved.orm === 'none') {
     conflicts.push(`--auth=${args.authMode} needs a data layer, but the ORM is 'none'. Pick --orm=prisma, --orm=drizzle or --orm=mikro-orm, or add auth later with \`npx luckystack add login\`.`);
   }

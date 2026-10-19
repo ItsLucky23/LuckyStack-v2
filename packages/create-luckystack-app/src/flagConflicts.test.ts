@@ -69,6 +69,18 @@ describe('findFlagConflicts', () => {
     expect(findFlagConflicts(emptyOauth, resolvedFrom({}))).toEqual([]);
   });
 
+  it('rejects an explicit --orm=drizzle --db=mongodb before any prompt', () => {
+    //? Review 1 finding 9: the interactive path asked every wizard question
+    //? before exiting 2 on this pair.
+    const args = parseArgs(['app', '--orm=drizzle', '--db=mongodb']);
+    expect(args.prompt).toBe(true);
+    const conflicts = findFlagConflicts(args, flagOnlyDependencies(args));
+    expect(conflicts).toHaveLength(1);
+    expect(conflicts[0]).toContain('--orm=drizzle does not support --db=mongodb');
+    const sql = parseArgs(['app', '--orm=drizzle', '--db=postgresql']);
+    expect(findFlagConflicts(sql, flagOnlyDependencies(sql))).toEqual([]);
+  });
+
   it('only reports a dependency that is already known', () => {
     const args = parseArgs(['app', '--oauth=google']);
     expect(findFlagConflicts(args, flagOnlyDependencies(args))).toEqual([]);
@@ -105,6 +117,15 @@ describe('create-luckystack-app flag handling (end to end)', () => {
     const { result, appDir } = run(['--no-prompt', '--oauth=google,github']);
     expect(result.status).toBe(2);
     expect(result.stderr).toContain('--oauth=google,github needs --auth=credentials+oauth');
+    expect(fs.existsSync(appDir)).toBe(false);
+  }, 120_000);
+
+  it('exits 2 on --orm=drizzle --db=mongodb in prompt mode without asking anything', () => {
+    //? No --no-prompt: on the old code the wizard started (and here, with no
+    //? stdin, exited 1 on closed input) before the pair was rejected.
+    const { result, appDir } = run(['--orm=drizzle', '--db=mongodb']);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain('--orm=drizzle does not support --db=mongodb');
     expect(fs.existsSync(appDir)).toBe(false);
   }, 120_000);
 
