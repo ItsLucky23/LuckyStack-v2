@@ -150,6 +150,7 @@ const readScaffoldChoices = (root: string): { orm?: unknown; dbProvider?: unknow
 };
 
 export const readScaffoldOrm = (root: string): unknown => readScaffoldChoices(root).orm;
+export const readScaffoldDbProvider = (root: string): unknown => readScaffoldChoices(root).dbProvider;
 
 //? Parse `datasource { provider = "..." }` out of prisma/schema.prisma —
 //? a project FILE (not an env value), so the value-blind rule doesn't apply.

@@ -14,6 +14,7 @@ import {
   type ConsumerProject,
   type Result,
 } from '../lib/project';
+import { readPrismaSchemaProvider, readScaffoldDbProvider } from '../lib/state';
 
 type DatabaseProvider = 'mongodb' | 'postgresql' | 'mysql' | 'sqlite';
 
@@ -28,19 +29,28 @@ interface DatabaseRender {
   remoteExample: string;
 }
 
-const detectDatabaseProvider = (root: string): DatabaseProvider => {
-  const schemaPath = path.join(root, 'prisma', 'schema.prisma');
-  if (fs.existsSync(schemaPath)) {
-    const match = /provider\s*=\s*"(mongodb|postgresql|mysql|sqlite)"/.exec(fs.readFileSync(schemaPath, 'utf8'));
-    if (match?.[1]) return match[1] as DatabaseProvider;
-  }
+const DATABASE_PROVIDERS: readonly DatabaseProvider[] = ['mongodb', 'postgresql', 'mysql', 'sqlite'];
+
+export const parseDatabaseProvider = (value: unknown): DatabaseProvider | null =>
+  DATABASE_PROVIDERS.find((provider) => provider === value) ?? null;
+
+//? The recorded scaffold choice wins (same order as lib/state's deriveDbProvider):
+//? drizzle / mikro-orm / none projects have no schema.prisma, and a scaffold keeps
+//? DATABASE_URL in .env.local, which this never reads. The public .env URL only
+//? helps hand-rolled projects. Unknown is null, never a guess: a MongoDB stack
+//? for a SQL project gives an app container that cannot connect.
+export const detectDatabaseProvider = (root: string): DatabaseProvider | null => {
+  const recorded = parseDatabaseProvider(readScaffoldDbProvider(root))
+    ?? parseDatabaseProvider(readPrismaSchemaProvider(root));
+  if (recorded) return recorded;
   const envPath = path.join(root, '.env');
   const env = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
   const url = /^DATABASE_URL\s*=\s*["']?([^\r\n"']+)/m.exec(env)?.[1] ?? '';
   if (url.startsWith('postgres')) return 'postgresql';
   if (url.startsWith('mysql')) return 'mysql';
   if (url.startsWith('file:')) return 'sqlite';
-  return 'mongodb';
+  if (url.startsWith('mongodb')) return 'mongodb';
+  return null;
 };
 
 const databaseRender = (provider: DatabaseProvider, projectName: string): DatabaseRender => {
@@ -129,11 +139,21 @@ const routerService = (projectName: string, databaseUrl: string): string => [
   '    restart: unless-stopped', '', '',
 ].join('\n');
 
-export const renderDockerVariables = (project: ConsumerProject): Record<string, string> => {
+export const renderDockerVariables = (
+  project: ConsumerProject,
+  dbProvider: DatabaseProvider | null = detectDatabaseProvider(project.root),
+): Record<string, string> => {
+  if (dbProvider === null) {
+    throw new Error(
+      'Could not determine this project\'s database (no dbProvider in .luckystack/scaffold.json, no provider in ' +
+        'prisma/schema.prisma, no DATABASE_URL in .env). Re-run with ' +
+        `\`npx luckystack add docker --db=<${DATABASE_PROVIDERS.join('|')}>\`.`,
+    );
+  }
   const rawName = typeof project.pkg.name === 'string' ? project.pkg.name : path.basename(project.root);
   const normalizedName = rawName.toLowerCase().replaceAll(/[^a-z0-9-]+/g, '-').replaceAll(/^-+|-+$/g, '');
   const projectName = normalizedName.length > 0 ? normalizedName : 'luckystack-app';
-  const database = databaseRender(detectDatabaseProvider(project.root), projectName);
+  const database = databaseRender(dbProvider, projectName);
   const hasRouter = Boolean(project.pkg.dependencies?.['@luckystack/router'] ?? project.pkg.devDependencies?.['@luckystack/router']);
   return {
     PROJECT_NAME: projectName,
@@ -172,10 +192,18 @@ const assetFiles = (root: string): string[] => {
   return files;
 };
 
-export const addDocker = (project: ConsumerProject): Result<void> => {
+//? `dbProvider` is the `--db=` flag: the answer when detection finds nothing.
+export const addDocker = (project: ConsumerProject, options: { dbProvider?: string } = {}): Result<void> => {
   try {
+    let dbProvider = detectDatabaseProvider(project.root);
+    if (options.dbProvider !== undefined) {
+      dbProvider = parseDatabaseProvider(options.dbProvider);
+      if (dbProvider === null) {
+        throw new Error(`Unknown --db value "${options.dbProvider}". Use one of: ${DATABASE_PROVIDERS.join(', ')}.`);
+      }
+    }
     const sourceRoot = assetPath('docker');
-    const variables = renderDockerVariables(project);
+    const variables = renderDockerVariables(project, dbProvider);
     const written: string[] = [];
     for (const relative of assetFiles(sourceRoot)) {
       const destinationRelative = relative.replaceAll('_dot_', '.');
@@ -211,7 +239,7 @@ export const checkDocker = (project: ConsumerProject): Result<void> => {
     console.log(`Docker check: project=${typeof project.pkg.name === 'string' ? project.pkg.name : path.basename(project.root)}`);
     console.log(`  router=${hasRouter ? 'enabled' : 'disabled'} invocation=${hasRouter ? 'routed-http' : 'socket'}`);
     console.log(`  preset=${process.env.LUCKYSTACK_PRESET ?? 'default'} public=http://127.0.0.1:${process.env.LUCKYSTACK_PORT ?? '8080'}`);
-    console.log(`  database=${detectDatabaseProvider(project.root)} redis=${process.env.LUCKYSTACK_REDIS_HOST ?? 'local-compose'}`);
+    console.log(`  database=${detectDatabaseProvider(project.root) ?? 'unknown'} redis=${process.env.LUCKYSTACK_REDIS_HOST ?? 'local-compose'}`);
     console.log('✓ Docker assets and transport wiring are consistent.');
     return ok();
   } catch (error) {

@@ -30,6 +30,8 @@ import {
 } from '../lib/project';
 import type { AddOptions } from './addPresence';
 import { deriveOrm, readScaffoldOrm } from '../lib/state';
+//? Clears the empty src/settings/_api shells left after the Prisma-bound withdraw.
+import { removeDirIfEmptyDeep } from '../lib/shippedFiles';
 
 //? The auth-hooks block a credentials scaffold ships in luckystack/server/index.ts.
 //? Mirror of the scaffolder's pre-prune content (so add+prune are inverse).
@@ -310,17 +312,6 @@ const CONFIRM_EMAIL_PAGE = 'src/settings/confirm-email/page.tsx';
 const isPrismaBoundAssetPath = (root: string, absolutePath: string): boolean => {
   const relative = path.relative(root, absolutePath).replaceAll('\\', '/');
   return relative.startsWith('src/settings/') || relative === 'server/hooks/notifications.ts';
-};
-
-//? Remove a directory tree that holds no files anymore (leftover empty
-//? src/settings/_api shells after the withdraw above). Consumer files keep
-//? the tree alive — only truly-empty directories go.
-const removeDirIfEmptyDeep = (dir: string): void => {
-  if (!fs.existsSync(dir)) return;
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (entry.isDirectory()) removeDirIfEmptyDeep(path.join(dir, entry.name));
-  }
-  if (fs.readdirSync(dir).length === 0) fs.rmdirSync(dir);
 };
 
 export const addLogin = (project: ConsumerProject, options: AddOptions): Result<void> => {

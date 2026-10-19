@@ -18,7 +18,7 @@ import {
 import {
   hashFileContent as scaffolderHash,
 } from '../../../create-luckystack-app/src/scaffoldManifest';
-import { isTextFile as scaffolderIsTextFile, VALID_FLAGS, DEFAULT_CHOICES } from '../../../create-luckystack-app/src/index';
+import { isTextFile as scaffolderIsTextFile, normalizeChoices, VALID_FLAGS, DEFAULT_CHOICES } from '../../../create-luckystack-app/src/index';
 
 const SAMPLE_PATHS = [
   'AGENTS.md',
@@ -34,6 +34,14 @@ const SAMPLE_PATHS = [
   'assets/logo.png',
   'eval/scoreEval.mjs',
   'branch-logs/README.md',
+  //? `update --app` covers the Docker/CI baseline too; these shapes drifted
+  //? once (the scaffolder learned them, the cli did not) with this test green.
+  'Dockerfile',
+  'compose.yaml',
+  'docker/start.sh',
+  'docker/nginx.conf',
+  '.github/workflows/ci.yml',
+  'docs/NOTES.MD',
 ];
 
 const SAMPLE_CONTENTS = [
@@ -134,6 +142,15 @@ describe('choicesToFlags parity with the scaffolder flag surface', () => {
     //? lands in DEFAULT_CHOICES, this fails, and whoever added it must either
     //? wire the replay or consciously document why it needs none.
     expect(Object.keys(REPLAY_PROBES).toSorted()).toEqual(Object.keys(DEFAULT_CHOICES).toSorted());
+  });
+
+  it('drops auth on orm none exactly where the scaffolder would force it off anyway', () => {
+    //? The replay may only omit --auth because the scaffolder's normalizeChoices
+    //? renders orm 'none' without auth regardless — if that ever changes, this
+    //? omission would silently re-render a login project without its auth files.
+    const recorded = { ...DEFAULT_CHOICES, orm: 'none' as const, authMode: 'credentials' as const };
+    expect(normalizeChoices(recorded).authMode).toBe('none');
+    expect(choicesToFlags(recorded).some((flag) => flag.startsWith('--auth='))).toBe(false);
   });
 
   it('a manifest predating the --pm axis replays no package-manager flag', () => {

@@ -4,7 +4,10 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import type { ConsumerProject } from '../lib/project';
+import { detectProjectState } from '../lib/state';
+import { configFromState, planChanges } from '../transitions';
 import { addLogin } from './addLogin';
+import { LOGIN_COPIED_PATHS } from './remove';
 
 describe('addLogin locale-key hint', () => {
   let root: string;
@@ -49,5 +52,37 @@ describe('addLogin locale-key hint', () => {
     addLogin(project(), { install: false, cliVersion: '0.14.0' });
 
     expect(lines.join('\n')).not.toContain('settings.emailChange.confirmPrompt');
+  });
+});
+
+describe('add login ↔ manage auth → none symmetry (finding 005)', () => {
+  let root: string;
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'ls-add-login-sym-'));
+    vi.spyOn(console, 'log').mockImplementation(() => { /* quiet */ });
+    vi.spyOn(console, 'warn').mockImplementation(() => { /* quiet */ });
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it('delivers src/_api/logout_v1.ts, and auth → none removes every unedited file the add copied', () => {
+    const pkg = { name: 'app', dependencies: { '@prisma/client': '^6.0.0' } };
+    const pkgPath = path.join(root, 'package.json');
+    fs.writeFileSync(pkgPath, JSON.stringify(pkg));
+    const project: ConsumerProject = { root, pkg, pkgPath };
+
+    expect(addLogin(project, { install: false, cliVersion: '0.14.0' }).ok).toBe(true);
+    expect(fs.existsSync(path.join(root, 'src', '_api', 'logout_v1.ts'))).toBe(true);
+
+    const change = planChanges(
+      { ...configFromState(detectProjectState(project)), authMode: 'credentials' },
+      { ...configFromState(detectProjectState(project)), authMode: 'none' },
+    ).find((c) => c.summary.includes('Auth: → none'));
+    expect(change?.apply({ project, cliVersion: '0.14.0', declaredKeys: new Set() }).ok).toBe(true);
+
+    const leftovers = LOGIN_COPIED_PATHS.filter((rel) => fs.existsSync(path.join(root, rel)));
+    expect(leftovers).toEqual([]);
   });
 });

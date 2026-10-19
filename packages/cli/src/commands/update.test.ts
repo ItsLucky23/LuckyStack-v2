@@ -6,6 +6,7 @@ import {
   applyUpdate,
   choicesToFlags,
   createIgnoreMatcher,
+  describeScaffolderExit,
   hashFileContent,
   isSafeSurfacePath,
   isUpdatablePath,
@@ -535,5 +536,48 @@ describe('.luckystackignore opt-out', () => {
 
     const written = readScaffoldManifest(consumerDir);
     expect(written?.files.some((entry) => entry.path === 'compose.yaml')).toBe(false);
+  });
+});
+
+describe('baseline refresh for files already at the new version (finding 020)', () => {
+  it('records the fresh hash for an unchanged file whose recorded hash is older, so the next release overwrites it', () => {
+    //? v1 recorded; the user took the v2 `.new` as-is, so local == v2 render.
+    write(consumerDir, 'AGENTS.md', 'v2 guidance\n');
+    manifestFor(consumerDir, { 'AGENTS.md': 'v1 guidance\n' });
+    write(freshDir, 'AGENTS.md', 'v2 guidance\n');
+    manifestFor(freshDir, { 'AGENTS.md': 'v2 guidance\n' }, { luckystackVersion: '0.5.0' });
+
+    expect(runUpdate(project(), {
+      cliVersion: '0.5.0',
+      renderFreshScaffold: () => ({ projectDir: freshDir, cleanup: () => undefined }),
+    }).ok).toBe(true);
+    const hashes = Object.fromEntries((readScaffoldManifest(consumerDir)?.files ?? []).map((f) => [f.path, f.sha256]));
+    expect(hashes['AGENTS.md']).toBe(sha('v2 guidance\n'));
+
+    //? The v3 release must now see a pristine file, not a user edit.
+    const v3Dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ls-upd-v3-'));
+    try {
+      write(v3Dir, 'AGENTS.md', 'v3 guidance\n');
+      const v3Manifest = manifestFor(v3Dir, { 'AGENTS.md': 'v3 guidance\n' }, { luckystackVersion: '0.6.0' });
+      const plan = planUpdate(consumerDir, readScaffoldManifest(consumerDir), v3Manifest);
+      expect(plan.entries).toEqual([{ path: 'AGENTS.md', action: 'overwrite', freshSha256: sha('v3 guidance\n') }]);
+    } finally {
+      fs.rmSync(v3Dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe('orm none + auth replay (finding 004)', () => {
+  it('leaves --auth/--oauth out when the recorded orm is none, because the scaffolder rejects that pair', () => {
+    const flags = choicesToFlags({ orm: 'none', authMode: 'credentials+oauth', oauthProviders: ['google'] });
+    expect(flags).toContain('--orm=none');
+    expect(flags.some((flag) => flag.startsWith('--auth=') || flag.startsWith('--oauth='))).toBe(false);
+  });
+
+  it('names the scaffolder rejection instead of blaming the network', () => {
+    expect(describeScaffolderExit(0)).toBeNull();
+    expect(describeScaffolderExit(2)).toContain('rejected the recorded choices');
+    expect(describeScaffolderExit(2)).not.toContain('network');
+    expect(describeScaffolderExit(1)).toContain('network');
   });
 });

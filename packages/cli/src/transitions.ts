@@ -25,7 +25,8 @@ import { findRegistryEntry } from './registry';
 import { runAddByKind } from './commands/addDispatch';
 import { addLogin, AUTH_SERVER_HOOKS, AUTH_NONE_SERVER_PLACEHOLDER } from './commands/addLogin';
 import { copySentryShim, removeSentryShim } from './commands/addErrorTracking';
-import { removeFeature, pruneLoginDocs, LOGIN_COPIED_PATHS } from './commands/remove';
+import { removeFeature, pruneLoginDocs, splitLoginFiles, keptFilesNeedingLogin, LOGIN_COPIED_PATHS } from './commands/remove';
+import { removeDirIfEmptyDeep } from './lib/shippedFiles';
 import type { DetectedDbProvider, DetectedOrm, ProjectState } from './lib/state';
 import { switchOrm, ORM_SURFACES } from './commands/switchOrm';
 import {
@@ -100,12 +101,12 @@ const LOGIN_PKG = '@luckystack/login';
 const EMAIL_PKG = '@luckystack/email';
 const ERROR_TRACKING_PKG = '@luckystack/error-tracking';
 
-//? Auth UI deleted on a reconfigure→none = exactly the files `addLogin` copies
-//? (shared LOGIN_COPIED_PATHS from remove.ts — single source of truth, so add+remove
-//? stay symmetric per ADR 0014 D2). The scaffolder ALSO emits functions/session.ts +
-//? server/hooks/notifications.ts at creation, but `addLogin` never creates them — so
-//? we do NOT auto-delete those (we'd destroy server code the wizard never wrote);
-//? they're flagged for manual cleanup in the preview instead.
+//? Auth files deleted on a reconfigure→none = the files `addLogin` copies (shared
+//? LOGIN_COPIED_PATHS from remove.ts — single source of truth, so add+remove stay
+//? symmetric per ADR 0014 D2), and of those ONLY the ones still byte-identical to
+//? what the framework shipped. A file the user added inside those folders, or
+//? edited, is kept and listed in both the preview and the result (owner decision
+//? on finding 018: deleting user work is not "reversing the add").
 
 const wrap =(fn: (ctx: ApplyContext) => void): ((ctx: ApplyContext) => Result<void>) =>
   (ctx) => {
@@ -168,24 +169,39 @@ const addLoginChange = (): Change => ({
   apply: (ctx) => addLogin(ctx.project, { install: false, cliVersion: ctx.cliVersion }),
 });
 
-const removeLoginChange = (): Change => ({
+//? Lines naming the files a reconfigure→none keeps. Shared by the preview and the
+//? apply output so both list exactly the same files.
+const keptLoginFileLines = (root: string, kept: readonly string[]): string[] => {
+  if (kept.length === 0) return [];
+  const needLogin = new Set(keptFilesNeedingLogin(root, kept));
+  return [
+    `• keep ${String(kept.length)} file(s) you added or edited (not deleted):`,
+    ...kept.map((rel) => `    ${rel}${needLogin.has(rel) ? '  ⚠ uses @luckystack/login / functions.session — port or delete it, or the build fails' : ''}`),
+  ];
+};
+
+//? `root` is optional so the pure preview tests can plan without a project; the
+//? wizard passes it so the preview lists the files that will be kept.
+const removeLoginChange = (root?: string): Change => ({
   summary: 'Auth: → none (remove login)',
   effects: [
     `- ${LOGIN_PKG}`,
-    '- delete the auth UI (login / register / reset-password / settings + LoginForm) + functions/session.ts + server/hooks/notifications.ts',
+    '- delete the auth files the framework shipped and you never edited (login / register / reset-password / settings + LoginForm + src/_api/logout_v1.ts + functions/session.ts + server/hooks/notifications.ts)',
+    ...(root === undefined ? [] : keptLoginFileLines(root, splitLoginFiles(root).kept)),
     "- config.ts: credentials → false, forgotPassword → 'disabled'",
     '- unregister the notification hooks in luckystack/server/index.ts',
     '- strip login sections from README.md (best-effort)',
     '⚠ if a page redirects to /login (e.g. src/page.tsx middleware), update it — the auth routes are gone',
   ],
   apply: wrap((ctx) => {
-    //? Full clean removal (vs the guarded `remove login` which keeps files): delete
-    //? everything `add login` copied — incl. the framework shims — so the project
-    //? stays BUILDABLE once @luckystack/login is gone.
-    for (const rel of LOGIN_COPIED_PATHS) {
-      const target = path.join(ctx.project.root, rel);
-      if (fs.existsSync(target)) fs.rmSync(target, { recursive: true, force: true });
-    }
+    //? Clean removal (vs the guarded `remove login` which keeps every file): delete
+    //? the unedited framework copies — incl. the shims — so the project stays
+    //? BUILDABLE once @luckystack/login is gone; keep + name everything else.
+    const { shipped, kept } = splitLoginFiles(ctx.project.root);
+    for (const rel of shipped) fs.rmSync(path.join(ctx.project.root, rel), { force: true });
+    for (const rel of LOGIN_COPIED_PATHS) removeDirIfEmptyDeep(path.join(ctx.project.root, rel));
+    console.log(`• deleted ${String(shipped.length)} auth file(s) the framework shipped`);
+    for (const line of keptLoginFileLines(ctx.project.root, kept)) console.warn(line);
     dropDependency(ctx.project, LOGIN_PKG);
     //? Reverse addLogin's config + server-index wiring (best-effort, line-level so it
     //? matches both a verbose auth-scaffold block and the short add-login block).
@@ -231,10 +247,14 @@ const removeLoginChange = (): Change => ({
     );
     tryEdit(ctx.project.root, 'luckystack/server/index.ts', AUTH_SERVER_HOOKS, AUTH_NONE_SERVER_PLACEHOLDER);
     //? If the server overlay was hand-edited, the tryEdit above couldn't revert it —
-    //? but we just deleted server/hooks/notifications.ts, so a lingering import would
+    //? and if we just deleted server/hooks/notifications.ts, a lingering import would
     //? break the build. Detect + warn so the user can fix the one line by hand.
     const serverIndex = path.join(ctx.project.root, 'luckystack', 'server', 'index.ts');
-    if (fs.existsSync(serverIndex) && fs.readFileSync(serverIndex, 'utf8').includes('server/hooks/notifications')) {
+    if (
+      shipped.includes('server/hooks/notifications.ts')
+      && fs.existsSync(serverIndex)
+      && fs.readFileSync(serverIndex, 'utf8').includes('server/hooks/notifications')
+    ) {
       console.warn('⚠ luckystack/server/index.ts still imports the deleted server/hooks/notifications — remove that import line (the build will fail until you do).');
     }
     //? Mirror the single-feature `remove login`: strip login-as-installed prose from
@@ -244,7 +264,7 @@ const removeLoginChange = (): Change => ({
 });
 
 //? Auth + OAuth providers as a set of granular changes.
-const planAuth = (current: DesiredConfig, desired: DesiredConfig): Change[] => {
+const planAuth = (current: DesiredConfig, desired: DesiredConfig, root?: string): Change[] => {
   const changes: Change[] = [];
   const loginNow = current.authMode !== 'none';
   const loginWant = desired.authMode !== 'none';
@@ -267,7 +287,7 @@ const planAuth = (current: DesiredConfig, desired: DesiredConfig): Change[] => {
   for (const p of desiredProviders.filter((x) => !currentProviders.includes(x))) changes.push(addProviderChange(p));
   for (const p of currentProviders.filter((x) => !desiredProviders.includes(x))) changes.push(removeProviderChange(p));
 
-  if (loginNow && !loginWant) changes.push(removeLoginChange());
+  if (loginNow && !loginWant) changes.push(removeLoginChange(root));
   return changes;
 };
 
@@ -394,7 +414,7 @@ const TOGGLE_EFFECTS: Record<ToggleId, { on: string[]; off: string[] }> = {
   },
   router: {
     on: ['+ @luckystack/router + the `router` npm script + routed HTTP/SSE invocation + the topology config (services.config.ts / deploy.config.ts / server/config/presetLoader.ts) + wire their server.ts imports'],
-    off: ['- @luckystack/router + the `router` npm script + restore socket invocation + delete the topology config files + un-wire their server.ts imports'],
+    off: ['- @luckystack/router + the `router` npm script + restore socket invocation + delete the topology config files you never edited (edited ones are kept + listed) + un-wire their server.ts imports'],
   },
   mcp: {
     on: ['+ @luckystack/mcp (devDep) + register the graph server in .mcp.json'],
@@ -458,10 +478,11 @@ const planOrm = (current: DesiredConfig, desired: DesiredConfig): Change[] => {
 
 //? Full diff current → desired as an ordered list of granular changes. The
 //? ORM switch runs FIRST so every later change (enable auth, …) lands on the
-//? NEW data layer — the dimensions react to each other.
-export const planChanges = (current: DesiredConfig, desired: DesiredConfig): Change[] => [
+//? NEW data layer — the dimensions react to each other. `root` (the project) lets
+//? a preview name project-specific consequences, e.g. auth files that are kept.
+export const planChanges = (current: DesiredConfig, desired: DesiredConfig, root?: string): Change[] => [
   ...planOrm(current, desired),
-  ...planAuth(current, desired),
+  ...planAuth(current, desired, root),
   ...planEmail(current, desired),
   ...planMonitoring(current, desired),
   ...planToggles(current, desired),

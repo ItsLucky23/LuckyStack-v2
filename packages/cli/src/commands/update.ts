@@ -216,15 +216,18 @@ export const createIgnoreMatcher = (patterns: readonly string[]): ((relativePath
 };
 
 //? Same text-extension heuristic + CRLF normalization as the scaffolder's
-//? manifest writer (kept in sync by the update e2e — the hashes must agree or
-//? every file would read as modified).
+//? manifest writer (kept in sync by updateParity.test.ts — the hashes must
+//? agree or every file would read as modified). Byte-for-byte the scaffolder's
+//? rule, including its case-sensitive extension match: the manifest it wrote
+//? is the baseline, so a "better" rule here would only create disagreements.
 const TEXT_EXTENSIONS = new Set([
   '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.json', '.md', '.css', '.html', '.prisma',
+  '.yaml', '.yml', '.sh', '.conf',
 ]);
 export const isTextFile = (filePath: string): boolean => {
+  if (TEXT_EXTENSIONS.has(path.extname(filePath))) return true;
   const base = path.basename(filePath);
-  if (base.startsWith('.')) return true;
-  return TEXT_EXTENSIONS.has(path.extname(filePath).toLowerCase());
+  return base.startsWith('.') || base === 'Dockerfile';
 };
 
 export const hashFileContent = (buffer: Buffer, isText: boolean): string => {
@@ -277,13 +280,19 @@ export const choicesToFlags = (choices: Record<string, unknown>): string[] => {
   if (orm) flags.push(`--orm=${orm}`);
   const db = readChoice(choices, 'dbProvider', DB_CHOICES);
   if (db) flags.push(`--db=${db}`);
-  const auth = readChoice(choices, 'authMode', AUTH_MODES);
-  if (auth) flags.push(`--auth=${auth}`);
-  const rawOauth = choices.oauthProviders;
-  const oauth = Array.isArray(rawOauth)
-    ? OAUTH_PROVIDERS.filter((provider) => rawOauth.includes(provider))
-    : [];
-  if (oauth.length > 0) flags.push(`--oauth=${oauth.join(',')}`);
+  //? orm 'none' + auth is a real project state (`add login` and the manage
+  //? wizard both allow it; the auth files are then app-owned), but the
+  //? scaffolder hard-rejects `--orm=none --auth=…` with exit 2. Mirror its
+  //? normalizeChoices instead: with orm 'none' it renders auth off anyway.
+  if (orm !== 'none') {
+    const auth = readChoice(choices, 'authMode', AUTH_MODES);
+    if (auth) flags.push(`--auth=${auth}`);
+    const rawOauth = choices.oauthProviders;
+    const oauth = Array.isArray(rawOauth)
+      ? OAUTH_PROVIDERS.filter((provider) => rawOauth.includes(provider))
+      : [];
+    if (oauth.length > 0) flags.push(`--oauth=${oauth.join(',')}`);
+  }
   const email = readChoice(choices, 'emailProvider', EMAIL_PROVIDERS);
   if (email) flags.push(`--email=${email}`);
   const monitoring = readChoice(choices, 'monitoringProvider', MONITORING_PROVIDERS);
@@ -361,8 +370,9 @@ export const planUpdate = (
 /**
  * Execute a plan: copy adds + pristine overwrites from the fresh render,
  * write `.new` sidecars for user-modified files, refresh the consumer
- * manifest (only the files we actually wrote get their new hash; sidecarred
- * files keep the old baseline), and drop a dump/ report.
+ * manifest (files we wrote, and files already identical to the new render,
+ * get their new hash; sidecarred files keep the old baseline), and drop a
+ * dump/ report.
  */
 export const applyUpdate = (
   project: ConsumerProject,
@@ -377,7 +387,7 @@ export const applyUpdate = (
   const added: string[] = [];
   const overwritten: string[] = [];
   const ignored: string[] = [];
-  const written: UpdatePlanEntry[] = [];
+  const rebaselined: UpdatePlanEntry[] = [];
 
   for (const entry of plan.entries) {
     counts[entry.action] += 1;
@@ -388,7 +398,7 @@ export const applyUpdate = (
       case 'overwrite': {
         fs.mkdirSync(path.dirname(localAbsolute), { recursive: true });
         fs.copyFileSync(freshAbsolute, localAbsolute);
-        written.push(entry);
+        rebaselined.push(entry);
         if (entry.action === 'add') added.push(entry.path);
         else overwritten.push(entry.path);
         break;
@@ -404,16 +414,22 @@ export const applyUpdate = (
         break;
       }
       case 'unchanged': {
+        //? Local bytes equal the fresh render, so the file is provably pristine
+        //? at the NEW version even when the recorded hash is older (a merged
+        //? `.new`, or a CLI edit the render now reproduces). Without this the
+        //? stale baseline makes the next release see it as user-modified.
+        rebaselined.push(entry);
         break;
       }
     }
   }
 
-  //? Refresh the manifest baseline for what we wrote; never fabricate a
-  //? manifest for a stamp-less project (we cannot attest files we didn't write).
+  //? Refresh the manifest baseline for what we wrote or proved pristine; never
+  //? fabricate a manifest for a stamp-less project (we cannot attest files we
+  //? didn't write).
   if (consumerManifest) {
     const byPath = new Map(consumerManifest.files.map((entry) => [entry.path, entry]));
-    for (const entry of written) {
+    for (const entry of rebaselined) {
       byPath.set(entry.path, { path: entry.path, sha256: entry.freshSha256 });
     }
     const nextManifest: ScaffoldManifest = {
@@ -568,14 +584,24 @@ const SAFE_WINDOWS_SCAFFOLD_ARG = /^[A-Za-z0-9@./,=+_-]+$/;
 export const isSafeWindowsScaffoldArg = (value: string): boolean =>
   SAFE_WINDOWS_SCAFFOLD_ARG.test(value);
 
-const runScaffolderCli = (cwd: string, args: string[]): boolean => {
+//? Returns null on success, else the reason the render failed. The scaffolder's
+//? own output is inherited, so the reason points at it rather than guessing:
+//? exit 2 is its "invalid choices" exit, which no network fix can cure.
+export const describeScaffolderExit = (status: number | null): string | null => {
+  if (status === 0) return null;
+  if (status === 2) {
+    return 'create-luckystack-app rejected the recorded choices in .luckystack/scaffold.json (exit 2) — its message is printed above.';
+  }
+  return `create-luckystack-app exited with status ${String(status)} — see its output above (often network/registry access).`;
+};
+
+const runScaffolderCli = (cwd: string, args: string[]): string | null => {
   const resolved = resolveCommandPath('npx');
-  if (!resolved) return false;
+  if (!resolved) return 'npx was not found on PATH.';
   const needsShell = process.platform === 'win32' && /\.(cmd|bat)$/i.test(resolved);
   if (needsShell) {
     if (!args.every((argument) => isSafeWindowsScaffoldArg(argument))) {
-      console.error('[luckystack update] refusing an unsafe scaffold argument before invoking npx.cmd');
-      return false;
+      return 'refused an unsafe scaffold argument before invoking npx.cmd.';
     }
     const comspec = process.env.ComSpec ?? 'cmd.exe';
     const shellResult = spawnSync(comspec, ['/d', '/s', '/c', `""${resolved}" ${args.join(' ')}"`], {
@@ -583,10 +609,10 @@ const runScaffolderCli = (cwd: string, args: string[]): boolean => {
       stdio: 'inherit',
       windowsVerbatimArguments: true,
     });
-    return shellResult.status === 0;
+    return describeScaffolderExit(shellResult.status);
   }
   const result = spawnSync(resolved, args, { cwd, stdio: 'inherit' });
-  return result.status === 0;
+  return describeScaffolderExit(result.status);
 };
 
 //? Must stay byte-equivalent to create-luckystack-app's slugify(): the
@@ -635,9 +661,10 @@ export const renderScaffoldToTemp: NonNullable<UpdateOptions['renderFreshScaffol
     ...choicesToFlags(choices),
   ];
   console.log(`\nRendering a fresh scaffold (${args.join(' ')})…`);
-  const ok = runScaffolderCli(tempRoot, args);
+  const failure = runScaffolderCli(tempRoot, args);
   const projectDir = path.join(tempRoot, projectSlug);
-  if (!ok || !fs.existsSync(projectDir)) {
+  if (failure !== null || !fs.existsSync(projectDir)) {
+    console.error(`[luckystack] fresh scaffold render failed: ${failure ?? 'the scaffolder wrote no project directory.'}`);
     fs.rmSync(tempRoot, { recursive: true, force: true });
     return null;
   }
@@ -698,7 +725,7 @@ export const runUpdate = (project: ConsumerProject, options: UpdateOptions): Res
     return {
       ok: false,
       error: new Error(
-        `could not render a fresh scaffold via npx create-luckystack-app@${options.cliVersion} — check network/registry access.`,
+        `could not render a fresh scaffold via npx create-luckystack-app@${options.cliVersion} — the reason is printed above.`,
       ),
     };
   }
