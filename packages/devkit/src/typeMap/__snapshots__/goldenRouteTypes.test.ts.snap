@@ -30,7 +30,7 @@ exports[`golden baseline — generated route types > pins the inlined input + ou
     avatar: string;
     language: 'de' | 'en' | 'fr' | 'nl';
     theme: 'dark' | 'light';
-    provider: 'apple' | 'credentials' | 'discord' | 'facebook' | 'github' | 'google' | 'instagram' | 'linkedIn' | 'x';
+    provider: 'apple' | 'credentials' | 'discord' | 'facebook' | 'github' | 'google' | 'instagram' | 'linkedIn' | 'microsoft' | 'x';
     preferences: JsonValue;
     lastLogin: null | string;
     createdAt: string;
@@ -184,19 +184,13 @@ exports[`golden baseline — generated route types > pins the inlined input + ou
   errorCode: 'login.empty'
 } | {
   status: 'error';
-  errorCode: 'login.passwordCharacterMinimum'
-} | {
-  status: 'error';
-  errorCode: 'login.passwordCharacterLimit'
+  errorCode: string
 } | {
   status: 'error';
   errorCode: 'login.passwordNotMatch'
 } | {
   status: 'error';
   errorCode: 'login.wrongPassword'
-} | {
-  status: 'error';
-  errorCode: string
 } | {
   status: 'success';
   result: {
@@ -211,6 +205,9 @@ exports[`golden baseline — generated route types > pins the inlined input + ou
     "output": "{
   status: 'error';
   errorCode: 'settings.emailChange.invalidToken'
+} | {
+  status: 'error';
+  errorCode: 'settings.emailChange.managedByProvider'
 } | {
   status: 'error';
   errorCode: 'settings.emailChange.emailTaken'
@@ -268,6 +265,9 @@ exports[`golden baseline — generated route types > pins the inlined input + ou
 }",
     "output": "{
   status: 'error';
+  errorCode: 'settings.emailChange.managedByProvider'
+} | {
+  status: 'error';
   errorCode: 'settings.emailChange.invalidEmail'
 } | {
   status: 'error';
@@ -279,13 +279,10 @@ exports[`golden baseline — generated route types > pins the inlined input + ou
   status: 'error';
   errorCode: 'settings.emailChange.wrongCurrentPassword'
 } | {
-  status: 'success'
-} | {
   status: 'error';
   errorCode: string
 } | {
-  status: 'error';
-  errorCode: 'settings.emailChange.emailSendFailed'
+  status: 'success'
 }",
   },
   "settings/_api/revokeSession_v1.ts": {
