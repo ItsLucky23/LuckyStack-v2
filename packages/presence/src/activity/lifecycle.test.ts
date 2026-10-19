@@ -27,7 +27,10 @@ const socketLeaveRoomMock = vi.fn();
 //? Default: presence fully enabled + no live sockets in the token room. Tests
 //? that need a cold/disabled/multi-tab path tweak these per-case.
 let socketActivityBroadcasterMock = true;
+//? Sockets in the token room on THIS instance vs. cluster-wide (adapter-aware
+//? `io.in(token).fetchSockets()`, which also counts the local ones).
 let liveTokenRoomSizeMock = 0;
+let remoteTokenRoomSizeMock = 0;
 
 vi.mock('@luckystack/core', async (importOriginal) => ({
   ...(await importOriginal<typeof import('@luckystack/core')>()),
@@ -42,6 +45,10 @@ vi.mock('@luckystack/core', async (importOriginal) => ({
         rooms: { get: () => (liveTokenRoomSizeMock > 0 ? { size: liveTokenRoomSizeMock } : undefined) },
       },
     },
+    in: () => ({
+      fetchSockets: async () =>
+        Array.from({ length: liveTokenRoomSizeMock + remoteTokenRoomSizeMock }, (_, index) => ({ id: `s${index}` })),
+    }),
   }),
   getLogger: () => ({
     debug: vi.fn(),
@@ -97,6 +104,7 @@ describe('lifecycle (presence grace timers)', () => {
     deleteSessionMock.mockResolvedValue(undefined);
     socketActivityBroadcasterMock = true;
     liveTokenRoomSizeMock = 0;
+    remoteTokenRoomSizeMock = 0;
   });
 
   afterEach(() => {
@@ -256,6 +264,79 @@ describe('lifecycle (presence grace timers)', () => {
       await socketDisconnecting({ token: 'tok', reason: 'transport close', socket: socketStub });
       await vi.advanceTimersByTimeAsync(60_000);
       expect(informRoomPeersLeftMock).not.toHaveBeenCalled();
+    });
+
+    //? 028 — a reconnect that lands on ANOTHER instance cannot cancel this
+    //? instance's in-memory timer; only the adapter-aware token-room check sees it.
+    it('keeps the session when the reconnect landed on another instance (028)', async () => {
+      remoteTokenRoomSizeMock = 1;
+      getSessionMock.mockResolvedValue({ id: 'u1', roomCodes: ['room-1'] });
+      await socketDisconnecting({ token: 'tok', reason: 'transport close', socket: socketStub });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(informRoomPeersLeftMock).not.toHaveBeenCalled();
+      expect(deleteSessionMock).not.toHaveBeenCalled();
+      expect(tempDisconnectedSockets.has('tok')).toBe(false);
+      expect(disconnectTimers.has('tok')).toBe(false);
+    });
+
+    //? 027 — a local reconnect while the teardown awaits the session read gets
+    //? userBack and must NOT then get userLeft + a deleted session.
+    it('aborts the teardown when the user reconnects during the session read (027)', async () => {
+      let releaseRead: () => void = () => undefined;
+      const readGate = new Promise<void>((resolve) => { releaseRead = resolve; });
+      getSessionMock.mockImplementationOnce(async () => {
+        await readGate;
+        return { id: 'u1', roomCodes: ['room-1'] };
+      });
+      getSessionMock.mockResolvedValue({ id: 'u1', roomCodes: ['room-1'] });
+      await socketDisconnecting({ token: 'tok', reason: 'transport close', socket: socketStub });
+      await vi.advanceTimersByTimeAsync(60_000); // teardown blocks on readSession
+
+      await socketConnected({ token: 'tok', io: ioStub });
+      releaseRead();
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(informRoomPeersMock).toHaveBeenCalledWith(expect.objectContaining({ event: 'userBack' }));
+      expect(informRoomPeersLeftMock).not.toHaveBeenCalled();
+      expect(deleteSessionMock).not.toHaveBeenCalled();
+      expect(dispatchHookMock).not.toHaveBeenCalledWith('postDisconnectGraceExpired', expect.anything());
+    });
+
+    it('keeps the session when the user reconnects during the userLeft fan-out (027)', async () => {
+      getSessionMock.mockResolvedValue({ id: 'u1', roomCodes: ['room-1'] });
+      informRoomPeersLeftMock.mockImplementation(async () => {
+        await socketConnected({ token: 'tok', io: ioStub });
+        return 0;
+      });
+      await socketDisconnecting({ token: 'tok', reason: 'transport close', socket: socketStub });
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      expect(informRoomPeersLeftMock).toHaveBeenCalledOnce();
+      expect(deleteSessionMock).not.toHaveBeenCalled();
+    });
+
+    //? 027 — the stale teardown's cleanup must not wipe the grace flag that a
+    //? newer disconnect (after the mid-teardown reconnect) armed.
+    it('leaves a newer grace window intact after an aborted teardown (027)', async () => {
+      let releaseRead: () => void = () => undefined;
+      const readGate = new Promise<void>((resolve) => { releaseRead = resolve; });
+      getSessionMock.mockImplementationOnce(async () => {
+        await readGate;
+        return { id: 'u1', roomCodes: [] };
+      });
+      getSessionMock.mockResolvedValue({ id: 'u1', roomCodes: [] });
+      await socketDisconnecting({ token: 'tok', reason: 'transport close', socket: socketStub });
+      await vi.advanceTimersByTimeAsync(60_000);
+
+      await socketConnected({ token: 'tok', io: ioStub });
+      await socketDisconnecting({ token: 'tok', reason: 'transport close', socket: socketStub });
+      releaseRead();
+      await vi.advanceTimersByTimeAsync(1);
+      expect(tempDisconnectedSockets.has('tok')).toBe(true);
+      expect(deleteSessionMock).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(deleteSessionMock).toHaveBeenCalledOnce();
     });
   });
 

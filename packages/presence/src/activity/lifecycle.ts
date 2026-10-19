@@ -98,23 +98,29 @@ const handleGraceExpiry = async ({
   time: number,
 }): Promise<void> => {
   //? Only the timer that is still the registered one for this token may run
-  //? teardown; a newer disconnect (re-armed timer) supersedes this one.
-  if (!tempDisconnectedSockets.has(token)) { return; }
-  if (disconnectTimers.get(token) !== timeout) { return; }
+  //? teardown; a newer disconnect (re-armed timer) supersedes this one, and a
+  //? local reconnect (`socketConnected`) deletes it. Re-checked after every
+  //? await below: the teardown spans several Redis/adapter round trips, and a
+  //? reconnect landing in that window must not get `userLeft` + a deleted
+  //? session after it already received `userBack`.
+  const ownsTeardown = (): boolean =>
+    tempDisconnectedSockets.has(token) && disconnectTimers.get(token) === timeout;
+  if (!ownsTeardown()) { return; }
 
   const [error] = await tryCatch(async () => {
-    //? Multi-tab guard: two tabs share one session token but hold two sockets,
-    //? each joined to the token's private room. Closing tab B arms this timer,
-    //? but tab A is still connected — `socketConnected` never re-fires to cancel
-    //? it because the session was never gone. Without this check we would leave
-    //? rooms + delete the shared session out from under the live tab A. Every
-    //? socket joins `socket.join(token)`, so a non-empty token room = a live tab.
-    //? `{ raw: true }` + the disable: this reads the per-instance room map on
-    //? purpose. A live tab for this token on ANOTHER instance is not seen here
-    //? (known limitation, reported in the 0.10.0 handoff, not fixed here).
-    // eslint-disable-next-line luckystack/no-local-socket-enumeration -- per-instance multi-tab guard; see the comment above
-    const liveSockets = getIoInstance({ raw: true })?.sockets.adapter.rooms.get(token)?.size ?? 0;
-    if (liveSockets > 0) { return; }
+    //? Live-connection guard: every socket joins its token's private room, so a
+    //? non-empty token room = the user is still (or again) connected — a second
+    //? tab, or a reconnect that landed on ANOTHER instance, which cannot cancel
+    //? this instance's in-memory timer. Adapter-aware `fetchSockets()` sees the
+    //? whole cluster; the per-instance room map would miss that reconnect and
+    //? log the live user out.
+    const hasLiveSocket = async (): Promise<boolean> => {
+      const io = getIoInstance();
+      if (!io) { return false; }
+      const liveSockets = await io.in(token).fetchSockets();
+      return liveSockets.length > 0;
+    };
+    if (await hasLiveSocket()) { return; }
 
     //? Resolve the session BEFORE teardown so the grace-expiry hook + any
     //? `userLeft`-style peer notification can still see the userId/roomCodes.
@@ -130,12 +136,19 @@ const handleGraceExpiry = async ({
     //? forever. Gated on `socketActivityBroadcaster` (same contract as
     //? userBack/userAfk: a consumer who disabled peer fan-out stays silent), and
     //? done BEFORE `removeSession` while userId/roomCodes are still resolved.
+    if (!ownsTeardown()) { return; }
     if (userId && roomCodes.length > 0 && (getProjectConfig().socketActivityBroadcaster ?? false)) {
       await informRoomPeersLeft({ token, userId, roomCodes, io: getIoInstance() });
     }
 
+    if (!ownsTeardown()) { return; }
     await socketLeaveRoom({ token, socket, newPath: null });
 
+    //? Last gate before the irreversible step: a reconnect (local or on another
+    //? instance) during the fan-out above keeps its session.
+    if (!ownsTeardown()) { return; }
+    if (await hasLiveSocket()) { return; }
+    if (!ownsTeardown()) { return; }
     if (deleteSessionOnDisconnect) {
       await removeSession(token);
     }
@@ -162,11 +175,13 @@ const handleGraceExpiry = async ({
     getLogger().error('presence: grace-expiry teardown failed', { tokenFingerprint: tokenFingerprint(token), reason, error });
   }
 
-  //? Idempotent cleanup — always drop the grace-window flag + timer so a
-  //? teardown reject (handled above) can never leave the token stuck in the
-  //? grace set or its timer dangling in the map.
-  tempDisconnectedSockets.delete(token);
-  if (disconnectTimers.get(token) === timeout) {
+  //? Idempotent cleanup — drop the grace-window flag + timer so a teardown
+  //? reject (handled above) can never leave the token stuck in the grace set or
+  //? its timer dangling in the map. Only while this timer still owns them: after
+  //? a mid-teardown reconnect + a NEW disconnect, the flag belongs to the newer
+  //? timer, and clearing it would make that timer bail and never tear down.
+  if (ownsTeardown()) {
+    tempDisconnectedSockets.delete(token);
     disconnectTimers.delete(token);
   }
 };

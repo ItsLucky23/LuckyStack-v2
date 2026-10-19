@@ -13,14 +13,10 @@
 //? non-sensitive query keys (e.g. `?tab=`) opts in via `searchParamFilter`,
 //? an allowlist of keys (or a predicate). Never blanket-forward the whole query.
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
-import {
-  getProjectConfig,
-  socket,
-  socketEventNames,
-  waitForSocket,
-} from '@luckystack/core/client';
+import { getProjectConfig } from '@luckystack/core/client';
+import { createLocationSender } from './locationSender';
 
 export interface LocationProviderProps {
   /**
@@ -31,35 +27,12 @@ export interface LocationProviderProps {
   searchParamFilter?: string[] | ((key: string, value: string) => boolean);
 }
 
-const buildSearchParams = (
-  search: string,
-  filter: LocationProviderProps['searchParamFilter'],
-): Record<string, string> => {
-  if (!filter) return {};
-  const allow = Array.isArray(filter)
-    ? (key: string): boolean => filter.includes(key)
-    : (key: string, value: string): boolean => filter(key, value);
-
-  const searchParams: Record<string, string> = {};
-  for (const [key, value] of new URLSearchParams(search)) {
-    if (allow(key, value)) searchParams[key] = value;
-  }
-  return searchParams;
-};
-
-const sendLocationUpdate = async (
-  pathname: string,
-  search: string,
-  filter: LocationProviderProps['searchParamFilter'],
-): Promise<void> => {
-  const searchParams = buildSearchParams(search, filter);
-  if (!await waitForSocket()) return;
-  if (!socket) return;
-  socket.emit(socketEventNames.updateLocation, { pathName: pathname, searchParams });
-};
-
 export default function LocationProvider({ searchParamFilter }: LocationProviderProps = {}) {
   const location = useLocation();
+  //? One de-duplicating sender per mount: an inline `searchParamFilter` array
+  //? re-runs the effect on every parent render, but only a changed location is
+  //? sent to the server.
+  const [sendLocationUpdate] = useState(createLocationSender);
 
   useEffect(() => {
     if (!getProjectConfig().locationProviderEnabled) return;
@@ -67,7 +40,7 @@ export default function LocationProvider({ searchParamFilter }: LocationProvider
     //? current navigation) rather than `globalThis.location.search` (which may
     //? lag or be absent in SSR/test environments).
     void sendLocationUpdate(location.pathname, location.search, searchParamFilter);
-  }, [location.pathname, location.search, searchParamFilter]);
+  }, [location.pathname, location.search, searchParamFilter, sendLocationUpdate]);
 
   return <Outlet />;
 }

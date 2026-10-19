@@ -26,7 +26,9 @@ export interface CronJobDefinition<TTenant = unknown> {
   /**
    * A 5/6-field cron expression (croner syntax, DST-correct) or a plain
    * interval `{ everyMs }` (min 1000ms). Intervals anchor on "previous fire +
-   * everyMs" — they drift with long-running handlers by design.
+   * everyMs" — they drift with long-running handlers by design. The previous
+   * fire is persisted, so a restart or leader change resumes the period; an
+   * overdue interval runs once straight away (no backlog replay).
    */
   schedule: CronScheduleInput;
   handler: CronJobHandler<TTenant>;

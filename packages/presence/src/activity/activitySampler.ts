@@ -134,9 +134,10 @@ export const getRoomPresence = async (
   //? room the peers actually joined — mirroring the broadcast side
   //? (`informRoomPeers`/`informRoomPeersLeft`). Without this, a non-identity
   //? formatter would make this late-joiner snapshot query the raw room nobody
-  //? joined and return empty (M2/D4). No `userId` is in scope for a whole-room
-  //? snapshot, so the context carries `userId: null`.
-  const physicalRoom = formatRoomName(roomCode, { purpose: 'presence', userId: null });
+  //? joined and return empty (M2/D4). Canonical content-room purpose
+  //? `'broadcast'` — the purpose the sockets joined under (M5). No `userId` is
+  //? in scope for a whole-room snapshot, so the context carries `userId: null`.
+  const physicalRoom = formatRoomName(roomCode, { purpose: 'broadcast', userId: null });
   const roomSockets = await io.in(physicalRoom).fetchSockets();
 
   return Promise.all(roomSockets.map(async (socket) => {

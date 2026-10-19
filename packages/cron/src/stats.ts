@@ -37,6 +37,30 @@ export const writeRunStats = async (
   });
 };
 
+//? Separate key, not a stats-hash field: `getCronJobStats` must keep returning
+//? null for a job that never ran.
+const anchorKey = (jobName: string): string => formatKey('cron', `anchor:${jobName}`);
+
+/**
+ * The time an interval job's period counts from when a leader (re)starts
+ * scheduling it: the start of its last run, or — for a job that has not run
+ * yet — the first time any leader scheduled it (stored once with NX, so
+ * restarts before the first run do not keep moving it). `null` when Redis is
+ * unreachable; the caller then counts from "now".
+ */
+export const readIntervalAnchor = async (jobName: string, now: number): Promise<number | null> => {
+  const [error, anchor] = await tryCatch(async () => {
+    const lastRunAt = await redis.hget(statsKey(jobName), 'lastRunAt');
+    if (lastRunAt) return Number(lastRunAt);
+    const claimed = await redis.set(anchorKey(jobName), String(now), 'NX');
+    if (claimed) return now;
+    const stored = await redis.get(anchorKey(jobName));
+    return stored ? Number(stored) : null;
+  });
+  if (error || anchor === null || !Number.isFinite(anchor)) return null;
+  return anchor;
+};
+
 export const incrementSkipStat = async (jobName: string): Promise<void> => {
   await tryCatch(async () => {
     await redis.hincrby(statsKey(jobName), 'skipCount', 1);

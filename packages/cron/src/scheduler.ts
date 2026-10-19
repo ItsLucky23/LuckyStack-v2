@@ -10,8 +10,11 @@
 //? - Per-run dedup: every run additionally takes a short `cron-run:<job>`
 //?   lease (renewed while the handler executes), so a leader switch mid-run
 //?   skips instead of double-firing in the common case.
-//? - No catch-up: ticks missed while no leader was alive are skipped; on
-//?   gaining leadership every schedule is recomputed from "now".
+//? - No catch-up: ticks missed while no leader was alive are skipped. On
+//?   gaining leadership a cron expression resumes at its next occurrence from
+//?   "now"; an interval resumes from its persisted anchor (last run start), so
+//?   an overdue interval fires ONCE on the next tick — never a backlog burst —
+//?   and a restart/failover does not push it a full period out.
 
 import {
   acquireLease,
@@ -23,9 +26,9 @@ import {
   tryCatch,
   tryCatchSync,
 } from '@luckystack/core';
-import { getCronConfig } from './cronConfig';
+import { getCronConfig, setCronConfigChangeListener } from './cronConfig';
 import { computeNextRun } from './schedule';
-import { incrementSkipStat, writeRunStats } from './stats';
+import { incrementSkipStat, readIntervalAnchor, writeRunStats } from './stats';
 import { jobRuntimes, type JobRuntime } from './state';
 import type { CronJobContext, CronJobDefinition } from './types';
 
@@ -34,6 +37,9 @@ interface SchedulerState {
   leaderToken: string | null;
   leaderLoop: ReturnType<typeof setInterval> | null;
   tickLoop: ReturnType<typeof setInterval> | null;
+  /** Period the armed loop runs at, so a config change can tell whether to re-arm. */
+  leaderLoopMs: number | null;
+  tickLoopMs: number | null;
   leaderTickInFlight: boolean;
   teardownRegistered: boolean;
 }
@@ -43,6 +49,8 @@ const state: SchedulerState = {
   leaderToken: null,
   leaderLoop: null,
   tickLoop: null,
+  leaderLoopMs: null,
+  tickLoopMs: null,
   leaderTickInFlight: false,
   teardownRegistered: false,
 };
@@ -79,16 +87,52 @@ export const registerCronTeardown = (): void => {
   });
 };
 
-//? On gaining leadership: recompute every schedule from "now" (no catch-up)
-//? and arm not-yet-fired `runOnStart` jobs to fire on the next tick.
-const onLeadershipGained = (): void => {
+//? Where a job's schedule resumes once this instance owns it. An interval
+//? counts from its persisted anchor instead of "now": computing now + everyMs
+//? on every restart or leader change meant a period longer than the time
+//? between deploys never fired at all. `max(now, …)` makes an overdue interval
+//? fire once on the next tick; the run after it counts from that fire, so
+//? missed periods are never replayed. Redis unreachable → "now" (old behaviour).
+const resumeSchedule = async (runtime: JobRuntime, now: number): Promise<number | null> => {
+  const jitterMs = runtime.def.jitterMs ?? 0;
+  if (runtime.normalized.kind === 'interval') {
+    const anchor = await readIntervalAnchor(runtime.def.name, now);
+    if (anchor !== null) {
+      const due = computeNextRun(runtime.normalized, anchor, jitterMs);
+      return due === null ? null : Math.max(now, due);
+    }
+  }
+  return computeNextRun(runtime.normalized, now, jitterMs);
+};
+
+//? On gaining leadership: resume every schedule (see resumeSchedule) and arm
+//? not-yet-fired `runOnStart` jobs to fire on the next tick.
+const onLeadershipGained = async (): Promise<void> => {
   const now = Date.now();
-  for (const runtime of jobRuntimes.values()) {
+  await Promise.all([...jobRuntimes.values()].map(async (runtime) => {
     runtime.nextRunAt =
       runtime.def.runOnStart && !runtime.ranOnStart
         ? now
-        : computeNextRun(runtime.normalized, now, runtime.def.jitterMs ?? 0);
-  }
+        : await resumeSchedule(runtime, now);
+  }));
+};
+
+/**
+ * Internal (called by `registerCronJob`): a job registered while this process
+ * already leads missed `onLeadershipGained` — e.g. an overlay file loaded after
+ * the first leader tick won, or a hot-reload re-registration — so resume its
+ * interval from the persisted anchor too.
+ */
+export const resumeJobRegisteredWhileLeader = (name: string): void => {
+  if (!isCronLeader()) return;
+  const runtime = jobRuntimes.get(name);
+  if (runtime?.normalized.kind !== 'interval') return;
+  if (runtime.def.runOnStart && !runtime.ranOnStart) return;
+  observeBackground((async () => {
+    const nextRunAt = await resumeSchedule(runtime, Date.now());
+    //? A re-registration during the read replaced this runtime; it resumes itself.
+    if (jobRuntimes.get(name) === runtime) runtime.nextRunAt = nextRunAt;
+  })(), `job "${name}" schedule resume`);
 };
 
 const leaderTick = async (): Promise<void> => {
@@ -113,9 +157,16 @@ const leaderTick = async (): Promise<void> => {
     }
     const token = await acquireLease(config.leaseName, config.leaseTtlMs);
     if (token) {
+      //? Resume the schedules BEFORE publishing leadership, so the tick loop
+      //? never fires on stale nextRunAt values from an earlier leadership term.
+      await onLeadershipGained();
+      if (!state.started) {
+        //? Stopped while the anchors were read — hand the lease straight back.
+        await releaseLease(config.leaseName, token);
+        return;
+      }
       state.leaderToken = token;
       getLogger().info('[cron] acquired scheduler leadership on this instance');
-      onLeadershipGained();
     }
   } finally {
     //? A rejected injected lease primitive or logger must never freeze every
@@ -256,23 +307,45 @@ const schedulerTick = (): void => {
   }
 };
 
+//? (Re)arm both loops at the CURRENT config periods. A no-op when the periods
+//? did not change, so re-registering an identical config keeps the loop phase.
+const armLoops = (): void => {
+  const { renewIntervalMs, tickIntervalMs } = getCronConfig();
+  if (state.leaderLoopMs !== renewIntervalMs) {
+    if (state.leaderLoop) clearInterval(state.leaderLoop);
+    state.leaderLoop = setInterval(() => {
+      observeBackground(leaderTick(), 'leader tick');
+    }, renewIntervalMs);
+    state.leaderLoop.unref();
+    state.leaderLoopMs = renewIntervalMs;
+  }
+  if (state.tickLoopMs !== tickIntervalMs) {
+    if (state.tickLoop) clearInterval(state.tickLoop);
+    state.tickLoop = setInterval(schedulerTick, tickIntervalMs);
+    state.tickLoop.unref();
+    state.tickLoopMs = tickIntervalMs;
+  }
+};
+
+//? A `registerCronConfig` after the first job registered (overlay load order)
+//? must reach the running loops; otherwise a shorter `leaseTtlMs` keeps the old
+//? renew period and the lease expires between renewals (leadership flaps).
+setCronConfigChangeListener(() => {
+  if (state.started) armLoops();
+});
+
 /**
  * Start the leader + tick loops (idempotent). Called lazily by
  * `registerCronJob`; both loops are `unref()`d so an otherwise-finished
  * process never hangs on them, and both re-read `cronConfig.enabled` every
- * pass so the master switch works regardless of registration order.
+ * pass so the master switch works regardless of registration order. A later
+ * `registerCronConfig` re-arms them at the new periods.
  */
 export const ensureCronSchedulerStarted = (): void => {
   if (state.started) return;
   state.started = true;
   registerCronTeardown();
-  const config = getCronConfig();
-  state.leaderLoop = setInterval(() => {
-    observeBackground(leaderTick(), 'leader tick');
-  }, config.renewIntervalMs);
-  state.leaderLoop.unref();
-  state.tickLoop = setInterval(schedulerTick, config.tickIntervalMs);
-  state.tickLoop.unref();
+  armLoops();
   observeBackground(leaderTick(), 'initial leader tick');
 };
 
@@ -286,6 +359,8 @@ export const stopCronScheduler = async (): Promise<void> => {
   if (state.tickLoop) clearInterval(state.tickLoop);
   state.leaderLoop = null;
   state.tickLoop = null;
+  state.leaderLoopMs = null;
+  state.tickLoopMs = null;
   state.started = false;
   if (state.leaderToken) {
     const token = state.leaderToken;
@@ -300,6 +375,8 @@ export const resetCronSchedulerForTests = (): void => {
   if (state.tickLoop) clearInterval(state.tickLoop);
   state.leaderLoop = null;
   state.tickLoop = null;
+  state.leaderLoopMs = null;
+  state.tickLoopMs = null;
   state.started = false;
   state.leaderToken = null;
   state.leaderTickInFlight = false;

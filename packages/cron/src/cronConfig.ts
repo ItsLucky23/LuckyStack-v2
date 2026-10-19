@@ -35,7 +35,8 @@ export interface CronConfig {
   leaseTtlMs: number;
   /**
    * How often the leader renews (and non-leaders try to acquire) the lease.
-   * Keep well below `leaseTtlMs`.
+   * Keep well below `leaseTtlMs`; `registerCronConfig` throws when it is not
+   * below it at all.
    */
   renewIntervalMs: number;
   /** How often the leader checks for due jobs. */
@@ -62,8 +63,29 @@ export type CronConfigInput = DeepPartial<CronConfig>;
 
 let activeConfig: CronConfig = DEFAULT_CRON_CONFIG;
 
+//? Internal seam (not re-exported from the barrel): the scheduler's loops run on
+//? `setInterval` periods, so a config registered AFTER the first job (overlay
+//? files load alphabetically — `billing.ts` before `config.ts`) must re-arm them.
+//? A listener instead of an import keeps cronConfig → scheduler acyclic.
+let configChangeListener: (() => void) | null = null;
+
+export const setCronConfigChangeListener = (listener: (() => void) | null): void => {
+  configChangeListener = listener;
+};
+
+/**
+ * Throws when `renewIntervalMs >= leaseTtlMs`: the lease would expire between
+ * renewals and leadership would flap on every renew.
+ */
 export const registerCronConfig = (config: CronConfigInput): void => {
-  activeConfig = deepMerge(DEFAULT_CRON_CONFIG, config);
+  const next = deepMerge(DEFAULT_CRON_CONFIG, config);
+  if (next.renewIntervalMs >= next.leaseTtlMs) {
+    throw new Error(
+      `[cron] renewIntervalMs (${next.renewIntervalMs}) must be well below leaseTtlMs (${next.leaseTtlMs}) — the leader lease would expire between renewals`,
+    );
+  }
+  activeConfig = next;
+  configChangeListener?.();
 };
 
 export const getCronConfig = (): CronConfig => activeConfig;
