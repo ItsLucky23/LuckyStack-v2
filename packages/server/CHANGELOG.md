@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`preHttpRequest` hook headers leave out a renamed CSRF header** (set with `registerCsrfConfig({ headerName })`) and `proxy-authorization`.
 - **The `onSocketConnect` hook's `ip` honours `http.trustProxy`.**
 - **Top-level static files requested with a query string** (`/logo.png?v=2`) are served instead of answering 404.
+- **`joinRoom('all')` is refused with `room.invalid`**, and a persisted `'all'` room is skipped when a session's rooms are re-joined on connect. `'all'` is the sync "every socket" receiver, so a real room with that name would be mistaken for everyone.
 
 ## [0.12.0] - 2026-10-15
 

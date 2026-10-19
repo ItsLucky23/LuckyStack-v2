@@ -36,6 +36,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **A password reset, a password change or a confirmed email change cancels the other kind of pending link.**
 - **The reset-password and confirm-email pages remove the token from the URL after reading it.** A reload shows the start screen; open the email link again.
 - **An email-change request answers the same way whether or not the address is taken.** Users no longer see "Could not send the confirmation email".
+- **The client activity heartbeat honours `socket.activityHeartbeatThrottleMs`** instead of a hardcoded 10 seconds.
+- **The socket status shows `RECONNECTING` with the attempt number during reconnects.** The template listened for `reconnect_attempt` on the socket, but socket.io-client only emits it on the connection manager.
+- **The 404 page no longer runs the page guard twice**, now that the `plain` template mounts `<Middleware>` itself.
+- **The cron question no longer promises exactly-once execution.** It says normally one instance runs each job, so handlers must be idempotent (safe to run twice).
+- **With the router, the `docker` environment in `deploy.config.ts` binds `settings` and `reset-password`** to the app, like `system`. Before, the router answered `serviceNotAssigned` for those routes.
 
 ### Upgrading an existing project
 

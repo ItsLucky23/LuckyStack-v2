@@ -20,6 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Token-mode projects:** `runAllTests({ authToken })` sends the session as `Authorization: Bearer` instead of a Cookie and skips the CSRF layer with a note. Before, the CSRF layer failed every state-changing route by mistake and ran real mutations on the sweep's session.
 - **Contract and fuzz probes that hit the rate limiter are reported as skipped instead of passed.** With a reset token (`resetToken` / `TEST_RESET_TOKEN`) both layers reset rate limits before each route.
+- **The session `Cookie:` header uses the effective cookie name** when `http.sessionCookiePrefix` is set (`__Host-…` / `__Secure-…`), in the sweep, the test sockets and `ctx` calls. Before, the runner sent the unprefixed name, which the server no longer reads.
 
 ## [0.12.0] - 2026-10-15
 

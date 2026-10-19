@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`auth.passwordResetPath` is used for the reset link.** It was ignored.
 - **Turning off 2FA and regenerating recovery codes count wrong codes toward the per-account 2FA lockout** (10 per 15 minutes).
 - **`saveSession(..., { onlyIfExists: true })` never recreates a session that was deleted in the meantime** and never re-adds its token to the active-session set (ADR 0077).
+- **Log and error-tracker redaction masks 2FA and recovery codes** (`recoveryCode`, `totp`, `totpCode` in any spelling) once `@luckystack/login` is loaded. A bare `code` key is deliberately left alone.
 
 ## [0.12.0] - 2026-10-15
 
