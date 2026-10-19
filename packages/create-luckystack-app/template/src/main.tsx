@@ -9,6 +9,7 @@ import {
   AvatarProvider,
   TranslationProvider,
   registerPageMiddleware,
+  registerPageRoute,
   validatePagePath,
 } from '@luckystack/core/client';
 import type { PageMiddleware } from '@luckystack/core/client';
@@ -112,6 +113,9 @@ const getRoutes = (loaders: Record<string, PageLoader>): RouteObject[] => {
       continue;
     }
     seenRoutes.set(finalPath, path);
+    //? Known up front, guarded or not, so a page without a guard is never
+    //? resolved to a less specific page's guard (guards register lazily).
+    registerPageRoute(finalPath);
 
     //? Lazy: the page component + its import tree load only when the route is
     //? visited, instead of every page eager-loading on first paint (which made

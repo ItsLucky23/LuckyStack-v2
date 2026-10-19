@@ -132,6 +132,7 @@ export {
   registerMiddlewareHandler,
   getMiddlewareHandler,
   registerPageMiddleware,
+  registerPageRoute,
   getPageMiddleware,
   hasPageMiddleware,
   resolvePageMiddleware,

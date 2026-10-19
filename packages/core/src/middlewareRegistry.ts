@@ -88,8 +88,24 @@ export type PageMiddleware<TSession extends BaseSessionLayout = BaseSessionLayou
 ) => MiddlewareResult | Promise<MiddlewareResult>;
 
 const pageMiddlewares = new Map<string, PageMiddleware>();
+//? Every page route pattern the app renders, guarded or not. Guards register
+//? lazily (when a page module loads), so resolving only among guarded patterns
+//? let an unguarded `/about` pick up an already-loaded `/:slug` guard. The
+//? resolver picks the best-matching ROUTE first and then uses that route's
+//? guard, if any.
+const pageRoutes = new Set<string>();
+
+/**
+ * Declare a page route pattern without (or before) its middleware, so
+ * {@link resolvePageMiddleware} never lends this route a less specific
+ * page's guard. Register every page when the route table is built.
+ */
+export const registerPageRoute = (path: string): void => {
+  pageRoutes.add(path);
+};
 
 export const registerPageMiddleware = (path: string, middleware: PageMiddleware): void => {
+  pageRoutes.add(path);
   pageMiddlewares.set(path, middleware);
 };
 
@@ -142,15 +158,16 @@ const matchScore = (patternSegments: string[], pathSegments: string[]): number |
  */
 export const resolvePageMiddleware = (path: string): PageMiddleware | undefined => {
   const pathSegments = splitPath(path).map((segment) => decodeSegment(segment));
-  let best: { score: number; middleware: PageMiddleware } | null = null;
-  for (const [pattern, middleware] of pageMiddlewares) {
+  let best: { score: number; pattern: string } | null = null;
+  for (const pattern of pageRoutes) {
     const score = matchScore(splitPath(pattern), pathSegments);
-    if (score !== null && (best === null || score > best.score)) best = { score, middleware };
+    if (score !== null && (best === null || score > best.score)) best = { score, pattern };
   }
-  return best?.middleware;
+  return best ? pageMiddlewares.get(best.pattern) : undefined;
 };
 
-/** Test helper — drop every registered per-page middleware. */
+/** Test helper — drop every registered page route and per-page middleware. */
 export const clearPageMiddlewaresForTests = (): void => {
   pageMiddlewares.clear();
+  pageRoutes.clear();
 };

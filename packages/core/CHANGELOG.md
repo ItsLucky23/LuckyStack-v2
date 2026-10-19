@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`resolvePageMiddleware(path)`** on `@luckystack/core/client` finds the per-page guard for a URL by route pattern. It ignores letter case, a trailing slash, the query and the hash, fills `:param` segments and supports a trailing `*`.
+- **`registerPageRoute(pattern)`** on `@luckystack/core/client` declares a page route whether or not it has a guard. `resolvePageMiddleware` picks the best-matching route first and returns that route's guard, so a page without a guard (`/about`) never gets the guard of a less specific page that loaded earlier (`/:slug`). The scaffold's `src/main.tsx` registers every page; without it only guarded pages are candidates.
 - **`SessionSaveOptions.onlyIfExists`.** A save with this option updates an existing session only: when the session was deleted in the meantime, the provider must not recreate it and returns `{ ok: false, errorCode: 'session.notFound' }`. Custom providers registered with `registerSessionProvider` should honour it (ADR 0077).
 - **`hasErrorTrackerIdentityScope()`** tells whether a request identity scope is active, also for an anonymous request. Error-tracker adapters use it to keep anonymous requests anonymous (ADR 0085).
 

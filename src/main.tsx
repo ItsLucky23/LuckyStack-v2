@@ -15,6 +15,7 @@ import {
   registerLocales,
   registerLanguageSource,
   registerPageMiddleware,
+  registerPageRoute,
   validatePagePath,
 } from '@luckystack/core/client'
 import type { PageMiddleware } from '@luckystack/core/client'
@@ -101,10 +102,11 @@ type PageLoader = () => Promise<PageModule>;
 //? Build the rendered element for a resolved page module: register its per-page
 //? middleware (lives on the same module) and wrap it in its chosen template.
 const buildPageElement = (module: PageModule, finalPath: string) => {
+  //? A splat page renders for its whole sub-tree, so its route and guard must
+  //? resolve for those sub-paths too (the exact pattern only matches `finalPath`).
+  if (module.splat) registerPageRoute(`${finalPath}/*`);
   if (module.middleware) {
     registerPageMiddleware(finalPath, module.middleware);
-    //? A splat page renders for its whole sub-tree, so its guard must resolve
-    //? for those sub-paths too (the exact pattern only matches `finalPath`).
     if (module.splat) registerPageMiddleware(`${finalPath}/*`, module.middleware);
   }
   const template = module.template ?? 'plain';
@@ -169,6 +171,9 @@ const getRoutes = (loaders: Record<string, PageLoader>): RouteObject[] => {
       continue;
     }
     seenRoutes.set(finalPath, path);
+    //? Known up front, guarded or not, so a page without a guard is never
+    //? resolved to a less specific page's guard (guards register lazily).
+    registerPageRoute(finalPath);
 
     //? Lazy: the page component + its (often heavy) import tree load only when
     //? this route is actually visited, instead of every page eager-loading on

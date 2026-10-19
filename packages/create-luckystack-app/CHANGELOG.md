@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Saving profile settings or notification preferences no longer brings back a session that was signed out meanwhile.** The settings routes update the session only while it still exists and otherwise answer `session.notFound`.
 - **The client activity heartbeat honours `socket.activityHeartbeatThrottleMs`** instead of a hardcoded 10 seconds.
 - **The socket status shows `RECONNECTING` with the attempt number during reconnects.** The template listened for `reconnect_attempt` on the socket, but socket.io-client only emits it on the connection manager.
+- **A page without a guard no longer runs the guard of a less specific page** that loaded earlier (`/about` next to a guarded `/:slug`). `src/main.tsx` registers every page route with `registerPageRoute`.
 - **The 404 page no longer runs the page guard twice**, now that the `plain` template mounts `<Middleware>` itself.
 - **The cron question no longer promises exactly-once execution.** It says normally one instance runs each job, so handlers must be idempotent (safe to run twice).
 - **With the router, the `docker` environment in `deploy.config.ts` binds `settings` and `reset-password`** to the app, like `system`. Before, the router answered `serviceNotAssigned` for those routes.

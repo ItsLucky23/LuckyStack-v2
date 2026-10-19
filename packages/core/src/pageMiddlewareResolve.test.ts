@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import {
   clearPageMiddlewaresForTests,
   registerPageMiddleware,
+  registerPageRoute,
   resolvePageMiddleware,
   type PageMiddleware,
 } from './middlewareRegistry';
@@ -54,5 +55,17 @@ describe('resolvePageMiddleware', () => {
     expect(resolvePageMiddleware('/orders/7')).toBe(byId);
     expect(resolvePageMiddleware('/')).toBe(root);
     expect(resolvePageMiddleware('/settings')).toBeUndefined();
+  });
+
+  it('never lends an unguarded route the guard of a less specific loaded page', () => {
+    //? Review 1 finding 3: guards register lazily, so after `/x` loaded the
+    //? `/:slug` guard was the only candidate for `/about`.
+    const slug = guard();
+    registerPageRoute('/about');
+    registerPageRoute('/:slug');
+    registerPageMiddleware('/:slug', slug);
+
+    expect(resolvePageMiddleware('/about')).toBeUndefined();
+    expect(resolvePageMiddleware('/x')).toBe(slug);
   });
 });
