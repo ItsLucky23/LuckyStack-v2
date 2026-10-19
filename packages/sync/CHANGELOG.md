@@ -5,6 +5,25 @@ All notable changes to `@luckystack/sync` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-10-19
+
+### Changed
+
+- **Breaking:** the HTTP/SSE sync transport answers the sender as soon as the change is saved and `preSyncFanout` allows delivery; delivery to recipients continues in the background. That is the point where websockets already answered (ADR 0071). Before, a slow fan-out to a large room could time out the sender after the change was saved, and a retry applied it twice. Upgrade: don't assume recipients have been reached when an HTTP sync call resolves; code or tests that need delivery to be complete should listen to the `postSyncFanout` hook.
+
+### Fixed
+
+- **`broadcastStream` to receiver `'all'` reaches every connected socket** across instances, like the final fan-out. It used to target a literal room called `'all'` and reached nobody.
+- **Syncing to your own session token works under a custom room-name formatter.** It failed with `sync.notRoomMember` over websockets and `sync.noReceiversFound` over HTTP; the token room is now addressed unformatted, the same way it is joined.
+- **The error tracker no longer stores the raw session token as `receiver`** when a sync targets a token room. It is shortened to its first 4 characters, as `targetToken` already was.
+- **The socket status reaches `RECONNECTING` with the attempt number during reconnects.** socket.io-client v4 emits `reconnect_attempt` only on the Manager, so the listener on the Socket never fired.
+- **A socket `syncRequest` whose connection drops before the acknowledgement settles at once with the new error code `sync.disconnected`** (added to `SYNC_ERROR_CODES`), like `apiRequest` does with `api.disconnected`. Before, it waited for `sync.requestTimeoutMs` (30 s), or forever with the timeout disabled, and leaked two listeners. Projects with their own locale files should add a `sync.disconnected` translation; the scaffold's locales have it from `create-luckystack-app` 0.15.0.
+
+### Security
+
+- **Over the HTTP/SSE transport a room member could choose the callback name other members received** (`cb` in the request body), and so trigger another route's callbacks with data that never passed that route's server checks. Recipients now always receive the server-resolved route name, as on websockets; the body `cb` is ignored.
+- **Stream chunks from `broadcastStream`, `streamTo` and a `_client` handler's `stream` carried the sender's callback name** on both transports, so they could trigger another route's stream callbacks. They are now keyed on the server-resolved route.
+
 ## [0.12.0] - 2026-10-15
 
 ### Changed

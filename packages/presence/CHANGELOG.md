@@ -5,6 +5,19 @@ All notable changes to `@luckystack/presence` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-10-19
+
+### Changed
+
+- **Breaking:** only for a custom room-name formatter that returns a different name for purpose `'presence'` than for `'broadcast'`. Presence fan-out (`userAfk`, `userBack`, `userLeft`) and `getRoomPresence` now format content room names with `'broadcast'`, the purpose the sockets joined them under, so such a formatter no longer silences all presence. Such a formatter delivered no presence events before. The misleading startup warning about non-identity formatters is removed (see the 2026-10-19 amendment to ADR 0060). Upgrade: remove the `'presence'` branch from your formatter.
+
+### Fixed
+
+- **A user who reconnects while their disconnect grace window is being torn down is no longer announced as "left" and logged out.** The teardown stops once the user is back.
+- **With several server instances, a refresh or reconnect that lands on another instance no longer gets the user announced as departed** and their session deleted when the old instance's grace window ends. The live-connection check sees sockets on every instance.
+- **An idle user is announced as AFK once per idle period instead of once a minute**, and each AFK check looks up only that user's sockets instead of every socket in the cluster.
+- **`LocationProvider` with an inline `searchParamFilter` array no longer re-sends the location on every parent render** (each send also cost a session write and an `onLocationUpdate` call). It sends only when the path or a forwarded query value changes.
+
 ## [0.12.0] - 2026-10-15
 
 ### Changed

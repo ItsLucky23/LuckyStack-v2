@@ -5,6 +5,19 @@ All notable changes to `@luckystack/error-tracking` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-10-19
+
+### Changed
+
+- **Breaking:** the Datadog `error.exception` and `error.message` counters are tagged only with `source`, `fn`, `hook` and `method` (plus `error.type` on exceptions) instead of the whole capture context, so per-request values no longer each create a billed time series. APM spans keep the full context. Upgrade: dashboards that filter these counters on other keys must list those keys in the new `createDatadogAdapter({ metricTagKeys })` option (default `DEFAULT_DATADOG_METRIC_TAG_KEYS`).
+
+### Fixed
+
+- **An error from an anonymous request is no longer attributed to another user making a request at the same time** (Datadog `usr.*` tags, PostHog distinctId, Sentry user). Inside a request the request's own identity is used; the process-wide user from `setSentryUser` is only used outside any request (ADR 0085).
+- **Breaking:** auto-instrumentation no longer sets the process-wide user on every API and sync request, and no longer clears it on logout. Upgrade: projects that wire Sentry through the deprecated `initSharedSentry` themselves no longer get the request user on their events; switch to `initializeSentry()` or register `createSentryAdapter()`.
+- **The PostHog adapter no longer sends an `$identify` event (with the user's email) on every authenticated request.** It identifies again only when id, email or username changes.
+- **Sentry and PostHog receive the scrubbed `error.cause` chain** (as a linked exception) and the scalar `code`, `responseCode`, `statusCode` and `status` fields, so the provider cause `@luckystack/email` attaches to batch reports is no longer lost.
+
 ## [0.12.0] - 2026-10-15
 
 ### Changed

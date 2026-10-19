@@ -5,6 +5,26 @@ All notable changes to `@luckystack/server` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-10-19
+
+### Changed
+
+- **Breaking:** `/auth/api/<credentials provider>` (login and register) accepts only POST and answers other methods with 405. This blocks login CSRF through a cross-site GET and keeps passwords out of URLs. Upgrade: a caller that logs in with GET must switch to POST; the shipped LoginForm already does.
+- **Breaking:** login responses (`/auth/api/credentials`, `/auth/api/email-code/verify`, `/auth/api/2fa`) no longer contain `session.token` or `session.csrfToken` in the JSON body. Upgrade: read the token from the `X-Session-Token` header (token mode) and get the CSRF token from `/auth/csrf`.
+- **Breaking:** only for projects that set `http.sessionCookiePrefix` (`'__Host-'` / `'__Secure-'`) or `http.sessionCookieDomain`. Both settings are now applied: login, OAuth callback, email-code and 2FA, sliding refresh and logout write the session cookie with the same name, Path, Domain and Secure rules (ADR 0078). The cookie name and attributes change, so every user is logged out once after the upgrade. Other projects see no change.
+
+### Fixed
+
+- **An anonymous socket client can no longer crash the server process** by sending `joinRoom`, `leaveRoom`, `getJoinedRooms`, `syncCancel`, `apiCancel` or `updateLocation` without a payload or with `null`. These events ignore a missing or non-object payload.
+- **A room join or leave, or a location update, that overlaps a logout, session revoke or "sign out everywhere" no longer brings the deleted session back.** The update is dropped and the client gets `session.notFound` (ADR 0077).
+- **HTTP API POST, PUT and DELETE calls keep a body field named `stream`.** Only the `?stream=` flag of a GET is removed.
+- **After a dev port hop, the `listen` callback, the "Server is running" log and the dev-server advertisement run once**, instead of once per busy port plus one.
+- **A normal graceful shutdown no longer logs** `[shutdown] step "io-close" failed: Server is not running.`
+- **A generated runtime-maps preset that fails to load logs the real error and is retried on the next request**, instead of staying failed until the process restarts.
+- **`preHttpRequest` hook headers leave out a renamed CSRF header** (set with `registerCsrfConfig({ headerName })`) and `proxy-authorization`.
+- **The `onSocketConnect` hook's `ip` honours `http.trustProxy`.**
+- **Top-level static files requested with a query string** (`/logo.png?v=2`) are served instead of answering 404.
+
 ## [0.12.0] - 2026-10-15
 
 ### Changed

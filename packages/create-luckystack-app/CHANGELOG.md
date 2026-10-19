@@ -5,6 +5,45 @@ All notable changes to `create-luckystack-app` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-10-19
+
+### Added
+
+- **Template locales gain `sync.disconnected` and `settings.emailChange.managedByProvider`** in all four languages.
+
+### Changed
+
+- **Picking a monitoring backend also installs `@luckystack/error-tracking`** (`--monitoring=sentry|datadog|posthog`, or in the wizard), the layer that sends errors to that backend. The wizard asks about error-tracking only when the backend is `none`, as `luckystack manage` already assumed. Before, a backend without error-tracking installed an SDK that never received anything.
+- **Breaking:** a flag you pass is no longer dropped silently (ADR 0082). These combinations now exit 2 before anything is written: `--oauth=…` while auth is not `credentials+oauth`; `--auth=credentials|credentials+oauth` with `--orm=none` (now also on the interactive path, which used to only print a message); `--ai-browser=all|agent-browser` with `--no-ai-docs`. Upgrade: drop the flag you don't mean, or add the one it needs (for example `--auth=credentials+oauth` for `--oauth`).
+- **Breaking:** with the router installed, `scripts/generateServerRequests.ts` fails the build when a top-level `src/` folder with `_api`/`_sync` routes is not a declared service in any preset. Those routes used to be left out of production without a warning. New helper `scripts/routeServices.ts`. Upgrade: see step 1 below.
+
+### Fixed
+
+- **Breaking:** piped or CI runs without `--no-prompt` no longer lose answers that arrive in one chunk. If stdin ends before every question is answered, the scaffolder now exits 1 with "stdin closed … pass --no-prompt" and writes nothing; before, it exited 0 without creating a project. Upgrade: a CI step that relied on that silent exit 0 should pass `--no-prompt` with explicit flags.
+- **A project name with an apostrophe or backslash** (`"bob's app"`) no longer produces a `config.ts` that does not parse. The title is escaped for the TypeScript string and HTML-escaped in `index.html`.
+- **`npm run router` works in a `--router` scaffold.** It runs the router CLI through tsx with `--deploy ./deploy.config.ts --services ./services.config.ts`; before, it always exited 2.
+- **With the router, the production build includes the settings and password-reset routes:** `services.config.ts` declares `settings` and `reset-password` in the `default` preset.
+- **`npm run scaffold:page admin/...` writes `template = 'home'`.** It wrote `'dashboard'`, which the scaffold does not have, so the route crashed with "Element type is invalid".
+- **The `plain` page template mounts `<Middleware>`.** In a fresh project `/` now redirects to the dashboard or login instead of showing a blank page, and `/dashboard` sends logged-out visitors to `/login`.
+- **The scaffolded `SessionProvider` retries the first session fetch and always marks the session as loaded.** A failed first fetch (backend restart, rate limit) made every guarded page wait 5 seconds and then send a signed-in user to `/login`. A malformed `updateSession` message no longer throws inside the socket listener.
+- **The scaffolded `.gitignore` ignores `.env.docker`** (remote database and Redis passwords), **`.env.*.local` and SQLite data files** (`*.db`, `*.db-journal`, `*.db-wal`, `*.db-shm`).
+- **The generated GitHub CI no longer fails on every run in a `--pm=bun` project:** bun projects get `oven-sh/setup-bun` and `bun install`. The GitLab file installs bun and caches on `bun.lock`. The Node matrix is 22/24 instead of 20/22, matching `engines`.
+- **With `--auth=none`, new pages under admin, dashboard, settings and similar folders no longer redirect to the missing `/login` route**, both on dev template injection and with `npm run scaffold:page`.
+- **With drizzle or mikro-orm and auth on, `luckystack/core/clients.ts` no longer says auth was scaffolded off.** It points to the starter `luckystack/login/userAdapter.ts`.
+- **OAuth accounts can no longer change their email** (ADR 0083). Settings shows it read-only, and the server refuses the change when it is requested and when it is confirmed.
+- **Token-mode OAuth login (`sessionBasedToken: true`) works again.** `src/main.tsx` reads the `#token=` fragment the OAuth callback sends and removes it from the address bar.
+- **Changing to a common password, or one longer than 72 bytes, shows the policy message** instead of a server error.
+- **A password reset, a password change or a confirmed email change cancels the other kind of pending link.**
+- **The reset-password and confirm-email pages remove the token from the URL after reading it.** A reload shows the start screen; open the email link again.
+- **An email-change request answers the same way whether or not the address is taken.** Users no longer see "Could not send the confirmation email".
+
+### Upgrading an existing project
+
+1. `npx luckystack update` brings the new `scripts/scaffoldPage.mjs` and, with the router, `scripts/routeServices.ts` and `scripts/generateServerRequests.ts`. Change `template = 'dashboard'` to `'home'` in pages that `scaffold:page` created earlier. With the router, the build then lists every route folder that is not declared: add each one to `services.config.ts` (for example `myFolder: { source: 'myFolder' }`) and to one preset; with login this includes `settings` and `reset-password`.
+2. `npx luckystack update --app` brings the changed `src/` files: the `plain` template (`src/_components/templates/Plain.tsx`, `TemplateProvider.tsx`), `src/_providers/SessionProvider.tsx`, `src/main.tsx`, the locale files and, with login, the reset-password and settings pages and routes. It also brings the corrected CI file. A file you edited gets a `.new` sidecar to merge by hand.
+3. `package.json` is never touched by `update`. With the router, set the `router` script to `tsx --tsconfig tsconfig.server.json node_modules/@luckystack/router/dist/cli.js --deploy ./deploy.config.ts --services ./services.config.ts`.
+4. Add `.env.docker`, `.env.*.local`, `*.db`, `*.db-journal`, `*.db-wal` and `*.db-shm` to `.gitignore`. If `.env.docker` or a `.db` file is already committed, run `git rm --cached` on it and change the credentials it held.
+
 ## [0.14.0] - 2026-10-16
 
 ### Fixed

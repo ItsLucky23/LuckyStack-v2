@@ -4,6 +4,17 @@ All notable changes to `@luckystack/cron` are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow the
 monorepo's lockstep versioning.
 
+## [0.15.0] - 2026-10-19
+
+### Changed
+
+- **Breaking:** `registerCronConfig` throws when `renewIntervalMs` is not below `leaseTtlMs`, because such a lease expires between renewals. Setting only `leaseTtlMs` below the default `renewIntervalMs` of 10 s also triggers it. Upgrade: if boot fails with this error, lower `renewIntervalMs` to about a third of `leaseTtlMs`, or raise `leaseTtlMs`.
+
+### Fixed
+
+- **`registerCronConfig(...)` called after the first job registered** (for example `luckystack/cron/config.ts` loading after `billing.ts`) applies the new `renewIntervalMs` and `tickIntervalMs` to the running scheduler. Before, a shorter lease made leadership flap and interval jobs never ran.
+- **Interval jobs (`{ everyMs }`) no longer restart their period on every restart, deploy or leader change**, so long intervals actually run (ADR 0072). After a restart an overdue interval job runs once straight away, never once per missed period; a job that is not yet due keeps its remaining time. Each interval job keeps one extra Redis key, `<project>:cron:anchor:<job>`, until its first run.
+
 ## [0.12.0] - 2026-10-15
 
 ### Changed

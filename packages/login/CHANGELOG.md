@@ -5,6 +5,29 @@ All notable changes to `@luckystack/login` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-10-19
+
+### Added
+
+- **`invalidatePasswordResetToken(userId)` and `invalidateEmailChangeToken(userId)`** cancel a user's outstanding reset or email-change link. Call them when control of the account changes; the scaffold's password reset, password change and email-change confirmation now do.
+- **`FullOAuthProvider.alwaysUseGetEmail` and the `OAuthEmailResult` type.** A provider's `getEmail` can report whether the address is verified (ADR 0083).
+- **Optional `SessionAdapter.setRawIfExists(token, value, ttl)`.** The Redis adapter uses `SET … XX`. Custom adapters should implement it atomically; without it the framework re-reads before writing, which makes the race window smaller but does not close it (ADR 0077).
+
+### Changed
+
+- **Breaking:** (types) `FullOAuthProvider.getEmail(accessToken, userData)` may return an `OAuthEmailResult`. Custom providers that return a string keep working. Upgrade: code that calls `getEmail` directly must pass the userinfo record and handle the object form.
+- **Breaking:** GitHub sign-in reads the user's verified email list (`/user/emails`). Upgrade: the default `user:email` scope covers it; add that scope back if you removed it.
+
+### Fixed
+
+- **New users whose GitHub profile shows a public email can sign up again.** The email comes from GitHub's verified email list, and a verified public email is preferred, so existing accounts keep matching.
+- **Microsoft sign-up works for an app tied to one organisation** (`microsoftProvider({ tenant: '<tenant id or domain>' })`). With `tenant` set to `common` (the default), `organizations` or `consumers`, brand-new Microsoft users are refused on purpose, because any tenant can set any address there; existing users still sign in (ADR 0083).
+- **Breaking:** the Microsoft `userPrincipalName` fallback no longer counts as a verified email. Upgrade: with `allowUpnFallback: true`, a new user without `mail` can no longer get an account; existing accounts still sign in.
+- **Forgot-password answers an existing account as fast as an unknown one and never reports a send failure.** `sendPasswordResetEmail` sends in the background and logs a failure on the server; `ok: false` now only reports a configuration problem that is the same for every address.
+- **`auth.passwordResetPath` is used for the reset link.** It was ignored.
+- **Turning off 2FA and regenerating recovery codes count wrong codes toward the per-account 2FA lockout** (10 per 15 minutes).
+- **`saveSession(..., { onlyIfExists: true })` never recreates a session that was deleted in the meantime** and never re-adds its token to the active-session set (ADR 0077).
+
 ## [0.12.0] - 2026-10-15
 
 ### Changed

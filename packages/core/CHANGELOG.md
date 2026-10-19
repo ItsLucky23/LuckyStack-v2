@@ -5,6 +5,38 @@ All notable changes to `@luckystack/core` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-10-19
+
+### Added
+
+- **`resolvePageMiddleware(path)`** on `@luckystack/core/client` finds the per-page guard for a URL by route pattern. It ignores letter case, a trailing slash, the query and the hash, fills `:param` segments and supports a trailing `*`.
+- **`SessionSaveOptions.onlyIfExists`.** A save with this option updates an existing session only: when the session was deleted in the meantime, the provider must not recreate it and returns `{ ok: false, errorCode: 'session.notFound' }`. Custom providers registered with `registerSessionProvider` should honour it (ADR 0077).
+- **`hasErrorTrackerIdentityScope()`** tells whether a request identity scope is active, also for an anonymous request. Error-tracker adapters use it to keep anonymous requests anonymous (ADR 0085).
+
+### Changed
+
+- **Breaking:** a real environment variable (shell, Docker, Kubernetes, CI) now beats every env file, including `.env.local` and later `LUCKYSTACK_ENV_FILES` entries, as documented. Before, `.env.local` silently replaced the orchestrator's value. Between files the later file still wins (ADR 0076). Upgrade: if you relied on `.env.local` overriding an exported or container variable, unset that variable or change it at the source.
+- **Breaking:** `registerEmailSenders({...})` replaces the whole registry; without a `default` slot there is no default sender any more. Before, the sender `@luckystack/email/register` picked at boot (often the ConsoleSender) stayed as a hidden default, so mail without a hint was written in full to the server log and reported as sent. Upgrade: add a `default` slot if you call `registerEmailSenders` and send mail without `adapter`, or with an `adapterHint` whose slot is not registered.
+- **Breaking:** the boot UUID Redis key includes the project name (`luckystack:boot:<project>:<env>`), so projects that share one Redis no longer overwrite each other's boot UUID and health signature. New export `bootUuidKey(envKey)` (ADR 0074). Upgrade: upgrade `@luckystack/router` and every backend together, and give them the same `PROJECT_NAME`.
+- The `socket.activityHeartbeatThrottleMs` JSDoc names its actual reader, the client activity tracker; `@luckystack/presence` does not read it.
+
+### Fixed
+
+- **Per-page route guards run for every URL that renders the page:** another letter case (`/ADMIN`), a trailing slash, filled-in dynamic segments (`/orders/123`), percent-encoded segments, and `useRouter().navigate()` targets with a `?query` or `#hash`. Before, these URLs skipped the page guard and fell back to the global handler, which allows by default. A page whose guard should block may now redirect or deny where it used to render.
+- **Removing a hook handler during a dispatch no longer makes the dispatch skip the next handler.** Hot reload, a tenant toggle or a handler that removes itself could skip, for example, an authorization hook that should have stopped the request. This applies to async and sync hooks.
+- **Route inputs typed as an intersection of object types** (`BaseInput & { extra: string }`) no longer reject every valid payload, in development and production. An intersection inside an object type, or an `&` inside a string literal, no longer causes a false "input nesting exceeds the maximum depth" error.
+- **Route inputs with a quote or backslash in a string literal type** (`"it's"`) accept the matching value.
+- **Route inputs typed with Prisma JSON types** (`JsonValue`, `InputJsonValue`, `JsonObject`, `JsonArray`) are validated as JSON data instead of being rejected as an unresolved type. Non-JSON values (Dates, `NaN`, class instances) and the keys `__proto__`, `constructor` and `prototype` are rejected, and nesting depth is bounded.
+- **Log and error-tracker redaction ignores `-` and `_` in key names** (`api_key`, `x-api-key`, `set_cookie`, `recovery_codes`) and also masks `secretKey`- and `privateKey`-style keys.
+- **`sanitizeForLog`, which runs on every error-tracker context, copies an object that appears twice** (`{ actor: user, target: user }`) instead of replacing the second one with `'[circular]'`. Only real loops are marked.
+- **The error-tracker scrubber also removes** `Authorization: Bearer …`/`Basic …` values, JSON-style `"password":"…"`, quoted values (`token: 'abc'`) and spaced assignments (`password = x`) from error messages, stacks and captured messages. Before, only `key=value` and `key: value` up to the first space were removed.
+- **`extractTokenFromRequest` and `extractTokenFromSocket` read the session cookie under its prefixed name** when `http.sessionCookiePrefix` is set (see `@luckystack/server` 0.15.0).
+- **The development guard against per-instance socket enumeration also covers namespaces reached through `io.of(...)`.** Production is unchanged.
+- **The development `console.log` replacement** no longer turns objects after a leading string into `[object Object]`, and keeps an error's stack.
+- **`useUpdateLanguage()` previews** (such as the settings page's language dropdown) are no longer reverted to the session language within 250 ms. The preview holds until the language source itself changes, for example after saving.
+- **The client `preLogin` hook fires only on a real login** (no session → session, or a different user), not on same-user session updates such as a room join or an avatar change. A veto on such an update used to log the UI out while the server session stayed active.
+- **With `transport.invocation: 'routed-http'`, repeated identical GET requests keep cancelling the previous one.** A superseded request removed its replacement's abort controller, so from the third call on a stale response could overwrite a newer one.
+
 ## [0.14.0] - 2026-10-16
 
 ### Added

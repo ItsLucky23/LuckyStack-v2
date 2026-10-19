@@ -5,6 +5,12 @@ All notable changes to `@luckystack/secret-manager` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-10-19
+
+### Fixed
+
+- **Breaking:** a `url` with embedded credentials (`https://user:pass@host`) is rejected at init, with the credentials hidden in the message. Such a URL never worked, because fetch refuses it. Validation errors no longer repeat the raw `url`, so credentials or query tokens do not reach logs. Upgrade: remove the credentials from the URL and use `token`.
+
 ## [0.12.0] - 2026-10-15
 
 ### Changed

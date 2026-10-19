@@ -5,6 +5,26 @@ All notable changes to `@luckystack/devkit` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-10-19
+
+### Changed
+
+- **Editing a file that a route imports restarts the supervised dev server** (`npm run server`), so the new code actually runs; connected clients reconnect (ADR 0079). Before, the route was re-imported but kept running the old dependency code. The supervisor now starts the dev server with an IPC channel for this (Node; Bun on Linux and macOS). Without the supervisor, a warning says a restart is needed. Editing a route file itself still reloads it in place.
+- **Hot reload logs how long type-map regeneration and each route reload took.** The docs now say the dev server answers no requests during that time (ADR 0080).
+
+### Fixed
+
+- **The dev server starts, and type generation runs, when a `.test.ts` or `.spec.ts` file sits next to a route.**
+- **A project checked out under a folder named `_api` or `_sync` boots again.** Route naming is validated relative to the source folder.
+- **The duplicate-route check reports a root sync** (`src/_sync/x_server_v1.ts`) that collides with `src/system/_sync/x_server_v1.ts`, as it already did for APIs.
+- **Deleting a sync `_server` file moves the real `clientInput` type into the paired client** instead of an empty placeholder, and that client rewrite is no longer lost when another sync file is saved within the reload debounce window.
+- **Helpers in a private folder under `_api`/`_sync`** (for example `_api/_lib/helpers.ts`) **and test files next to routes are no longer treated as misnamed routes:** a new empty helper gets no guidance comment written into it, there is no false "ignored by route loading" warning, and editing a helper regenerates types and reloads the routes that use it.
+- **The paired-sync rewrite writes the correct `PagePath`** when the project lives under a folder named `src`, uses a different source folder, or uses a custom sync marker.
+- **A fully commented-out route or page file that arrives by rename, move, `git checkout` or `stash pop` is no longer overwritten with the starter template.** Only empty files, or files that still hold only the injector's guidance line, receive a template.
+- **Route reloads after a dependency change honour a custom source folder and custom route markers.**
+- **Writing the generated Zod schema file no longer triggers a second full type-map generation.**
+- **Saving a watched file while the supervisor waits to restart a crashed server no longer starts two server processes.**
+
 ## [0.14.0] - 2026-10-16
 
 ### Fixed

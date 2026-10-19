@@ -5,6 +5,12 @@ All notable changes to `@luckystack/docs-ui` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-10-19
+
+### Security
+
+- **The try-it-out Send button no longer uses an inline `onclick`.** A quote in a route's page, name or version could end the JavaScript string there and run script. Route and method are now HTML-escaped data attributes that the delegated click listener reads. Side effect: clicking Send no longer collapses the endpoint panel.
+
 ## [0.12.0] - 2026-10-15
 
 ### Changed

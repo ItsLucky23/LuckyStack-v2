@@ -5,6 +5,16 @@ All notable changes to `@luckystack/api` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-10-19
+
+### Fixed
+
+- **Breaking:** a `preApiValidate` hook that returns a stop signal now blocks the request on both the socket and HTTP transports. The client gets the signal's `errorCode` with its `httpStatus` (default 403), and the route handler does not run. Before, the stop was silently ignored. Upgrade: review every `preApiValidate` handler that returns `{ stop: true, ... }`; those requests are now rejected, as the hook contract always promised.
+- **HTTP API respond hooks** (`preApiRespond`, `transformApiResponse`, `postApiRespond`) **and the error formatter get the canonical route name.** Before, they got the request's raw spelling, so a trailing slash, backslash or surrounding whitespace could get past redaction or audit filters keyed by route.
+- **Socket API `apiAuthRejected` gets the canonical route name** instead of the raw message name, so spelling variants of one route share one throttle key, as they already did over HTTP.
+- **`api.requestTimeoutMs: 0`, or any negative value, disables the server-side API timeout** on both transports, as the client already read it. Before, every request that awaited I/O returned `api.timeout` (504).
+- **`preApiRespond`, `transformApiResponse` and `postApiRespond` payloads carry the documented `transport` tag** (`'socket'` or `'http'`) on both transports, for success and error responses.
+
 ## [0.12.0] - 2026-10-15
 
 ### Changed

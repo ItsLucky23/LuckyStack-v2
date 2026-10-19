@@ -5,6 +5,22 @@ All notable changes to `@luckystack/test-runner` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-10-19
+
+### Added
+
+- `runAllTests({ apiTransport, expectServerError })`, `runContractTests({ apiTransport, expectServerError, resetToken })`, `runFuzzTests({ apiTransport, resetToken })`, `apiTransport` on the auth and rate-limit layer inputs, `ctx.callApi(input, { transport })` and the `CallApiOptions` type.
+
+### Changed
+
+- **Breaking:** in socket-mode projects (the default `transport.invocation: 'socket'`) the contract, auth, rate-limit and fuzz layers and `ctx.callApi` test API routes over Socket.io, the path real clients use, instead of `/api/*` (ADR 0084). `createSocketProbeTransport` sends API routes over the socket too; the CSRF layer still probes over HTTP. Upgrade: expect results to change where the two pipelines differ; pass `apiTransport: 'http'` to `runAllTests`, or `{ transport: 'http' }` to `ctx.callApi`, to keep the old path.
+- **Breaking:** the contract layer fails on routing errors (`notFound`, `methodNotAllowed`, `invalidName`) and on server errors (HTTP 5xx, `serverExecutionFailed`, `internalServerError`) instead of passing any well-formed error. Upgrade: list routes that throw on purpose in the new `expectServerError` option of `runAllTests` / `runContractTests`.
+
+### Fixed
+
+- **Token-mode projects:** `runAllTests({ authToken })` sends the session as `Authorization: Bearer` instead of a Cookie and skips the CSRF layer with a note. Before, the CSRF layer failed every state-changing route by mistake and ran real mutations on the sweep's session.
+- **Contract and fuzz probes that hit the rate limiter are reported as skipped instead of passed.** With a reset token (`resetToken` / `TEST_RESET_TOKEN`) both layers reset rate limits before each route.
+
 ## [0.12.0] - 2026-10-15
 
 ### Changed

@@ -5,6 +5,18 @@ All notable changes to `@luckystack/router` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-10-19
+
+### Changed
+
+- **Breaking:** the boot-handshake Redis key is `luckystack:boot:<project>:<env>` (was `luckystack:boot:<env>`), so projects that share one Redis no longer overwrite each other's boot UUID (ADR 0074). Upgrade: upgrade the router and every backend together and run them with the same `PROJECT_NAME`; a mixed pair reports a handshake mismatch, which is a startup failure with `strictBootHandshake`.
+
+### Fixed
+
+- **A router with the shared Redis health store no longer re-publishes its own health messages forever.** One health change used to start an endless publish loop on `router:health:events:<env>`, multiplied by every router on that environment.
+- **Requests with a query string or fragment are routed by their path only.** `/uploads?next=%2Fa` no longer becomes service `uploads?next=`, and a stray `%` in the query no longer turns the request into a 400.
+- **Behind a trusted proxy (`routing.trustedProxyCidrs`), backends receive the real visitor IP in `X-Forwarded-For`**: the last address that proxy added, instead of the proxy's own address for every visitor (ADR 0073). Per-IP rate limits and IP audit work again behind nginx or Caddy. Peers outside `trustedProxyCidrs` are unchanged: their own socket address is sent and the inbound chain is ignored.
+
 ## [0.12.0] - 2026-10-15
 
 ### Changed

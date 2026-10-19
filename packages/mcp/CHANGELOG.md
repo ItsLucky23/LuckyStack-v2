@@ -5,6 +5,13 @@ All notable changes to `@luckystack/mcp` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-10-19
+
+### Fixed
+
+- **`blast_radius`, `who_imports` and the other path lookups no longer answer for a different file that only shares the file name** when the given path has folders.
+- **`graph_status` compares the graph against every folder and root config file the generator scans**, so edits outside `src/` make the graph show as stale.
+
 ## [0.12.0] - 2026-10-15
 
 ### Changed

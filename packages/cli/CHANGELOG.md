@@ -5,6 +5,35 @@ All notable changes to `@luckystack/cli` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.15.0] - 2026-10-19
+
+### Changed
+
+- **Breaking:** `manage` → Auth: none deletes only auth files that are still exactly as the framework shipped them (ADR 0081). Files you added to `src/login`, `src/register`, `src/reset-password` or `src/settings`, and auth files you edited, are kept and listed in the preview and the result. A kept file that still uses `@luckystack/login` or `functions.session` is marked, because it stops compiling. Upgrade: port or delete each marked file.
+- **Breaking:** `remove router` keeps `deploy.config.ts`, `services.config.ts` and `server/config/presetLoader.ts` when you edited them, and lists them (ADR 0081). If you edited the preset loader, the two config files it imports are kept as well. Upgrade: delete the listed files yourself once you no longer need them.
+- **Breaking:** `add docker` takes the database from `.luckystack/scaffold.json`, then `prisma/schema.prisma`, and fails when it cannot work out the database instead of falling back to MongoDB. It no longer builds a MongoDB stack for drizzle, mikro-orm and `orm: 'none'` SQL projects. Upgrade: when it fails, run `npx luckystack add docker --db=<mongodb|postgresql|mysql|sqlite>`.
+
+### Fixed
+
+- **`luckystack update` no longer fails with a misleading network error on an `orm: 'none'` project that later added login.** The re-render leaves auth out for `orm: 'none'`, as the scaffolder does. A failed render now says why: the scaffolder rejected the choices, `npx` is missing, or there is a network or registry problem.
+- **`luckystack update` records the new hash for files that already match the new framework version.** A file you merged from a `.new` sidecar is then overwritten cleanly on the next release instead of getting another sidecar.
+- **`luckystack update` hashes `Dockerfile`, `.yaml`/`.yml`, `.sh` and `.conf` files the way the scaffolder does.** Unedited Docker and CI files on a CRLF checkout (Windows, `core.autocrlf`) no longer count as edited.
+- **`manage` → Auth: none also deletes `src/_api/logout_v1.ts`**, which calls the removed session shim and broke the build. `add login` now delivers it too, so add and remove match.
+- **`add presence` / `remove presence` no longer leave `main.tsx` changed when `TemplateProvider.tsx` cannot be edited.** A second run no longer reports success with the UI half-wired, and it completes a project an older version left half-wired.
+- **`check-i18n` no longer lists keys the installed `@luckystack/*` packages use** (such as `api.invalidName` and `auth.required`) as unused. The report also warns that framework codes, and keys for features you have not added yet, never show up in a search of your own code.
+- **The cron description in `add`, `list` and `--help` no longer promises exactly-once execution.** It says normally one instance runs each job, so handlers must be idempotent (safe to run twice).
+- **`luckystack add router` writes a `services.config.ts` that declares `settings` and `reset-password`**, so their routes reach the production bundle.
+- **The login assets carry the scaffold's 0.15.0 login fixes:** OAuth accounts can no longer change their email (Settings shows it read-only and the server refuses the change when it is requested and when it is confirmed); changing to a common password, or one longer than 72 bytes, shows the policy message instead of a server error; a password reset, a password change or a confirmed email change cancels the other kind of pending link; the reset-password and confirm-email pages remove the token from the URL after reading it; an email-change request answers the same way whether or not the address is taken.
+
+### Upgrading a project scaffolded before 0.15
+
+These steps are also in the `create-luckystack-app` 0.15.0 changelog, which a project never installs.
+
+1. `npx luckystack update` brings the new `scripts/scaffoldPage.mjs` and, with the router, `scripts/routeServices.ts` and `scripts/generateServerRequests.ts`. Change `template = 'dashboard'` to `'home'` in pages that `scaffold:page` created earlier. With the router, the build then lists every route folder that is not declared: add each one to `services.config.ts` (for example `myFolder: { source: 'myFolder' }`) and to one preset; with login this includes `settings` and `reset-password`.
+2. `npx luckystack update --app` brings the changed `src/` files: the `plain` template (`src/_components/templates/Plain.tsx`, `TemplateProvider.tsx`), `src/_providers/SessionProvider.tsx`, `src/main.tsx` (token-mode OAuth reads `#token=`), the locale files (`sync.disconnected`, `settings.emailChange.managedByProvider`) and, with login, the reset-password and settings pages and routes. It also brings the corrected CI file. A file you edited gets a `.new` sidecar to merge by hand.
+3. `package.json` is never touched by `update`. With the router, set the `router` script to `tsx --tsconfig tsconfig.server.json node_modules/@luckystack/router/dist/cli.js --deploy ./deploy.config.ts --services ./services.config.ts`.
+4. Add `.env.docker`, `.env.*.local`, `*.db`, `*.db-journal`, `*.db-wal` and `*.db-shm` to `.gitignore`. If `.env.docker` or a `.db` file is already committed, run `git rm --cached` on it and change the credentials it held.
+
 ## [0.14.0] - 2026-10-16
 
 ### Fixed
