@@ -10,6 +10,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import {
+  assetPath,
   dropDependency,
   editFile,
   err,
@@ -19,6 +20,7 @@ import {
   type Result,
 } from '../lib/project';
 import { collectSourceFiles, matchAll } from '../lib/scan';
+import { expandToFiles, splitShippedFiles, type ShippedSplit } from '../lib/shippedFiles';
 import { removeSentryShim } from './addErrorTracking';
 import { removeSecretManager } from './addSecretManager';
 import { monitoringDeps } from '../featureOptions';
@@ -122,19 +124,35 @@ const disablePresenceFlags = (configPath: string): Result<void> => {
 
 //? The consumer-owned auth files `add login` copies into src/. The SINGLE source of
 //? truth for the auth-UI file set: `remove login` (guarded) LISTS them; the
-//? reconfigure→none path (transitions.ts) DELETES them — both import this so the two
-//? can never drift (ADR 0014 D2).
+//? reconfigure→none path (transitions.ts) DELETES the unedited ones — both import
+//? this so the two can never drift (ADR 0014 D2).
 export const LOGIN_COPIED_PATHS = [
   'src/login',
   'src/register',
   'src/reset-password',
   'src/settings',
   'src/_components/LoginForm.tsx',
+  //? Calls `functions.session.deleteSession`, so it cannot compile once the
+  //? session shim below is gone (the scaffolder's pruneAuthNone drops it too).
+  'src/_api/logout_v1.ts',
   //? Framework shims `add login` also copies — they import @luckystack/login, so a
   //? reconfigure→none MUST delete them (else the build breaks once the dep is gone).
   'functions/session.ts',
   'server/hooks/notifications.ts',
 ] as const;
+
+//? The auth files on disk, split into framework copies the user never touched
+//? (deleted by reconfigure→none) and files the user added or edited inside
+//? those folders (kept + listed — e.g. their own src/settings/billing page).
+export const splitLoginFiles = (root: string): ShippedSplit =>
+  splitShippedFiles(root, expandToFiles(root, LOGIN_COPIED_PATHS), assetPath('login'));
+
+//? Of the kept files, the ones that stop compiling once @luckystack/login and
+//? the functions/session shim are gone — named so the user knows what to port.
+export const keptFilesNeedingLogin = (root: string, kept: readonly string[]): string[] =>
+  kept.filter((relative) =>
+    /@luckystack\/login|functions\.session\b/.test(fs.readFileSync(path.join(root, relative), 'utf8')),
+  );
 
 //? Reverse the presence client mounts (mirror of create-luckystack-app's
 //? prunePresence): main.tsx swaps <LocationProvider/> back to <Outlet/>;
@@ -299,7 +317,8 @@ const removeLogin = (project: ConsumerProject, entry: RegistryEntry): Result<voi
 
   console.warn('\n⚠ login removed from package.json, but the auth files copied into the project were KEPT');
   console.warn('  (you may have edited them). NOTE: functions/session.ts + server/hooks/notifications.ts');
-  console.warn('  import @luckystack/login — the project will NOT build until you delete them (or re-add login).');
+  console.warn('  import @luckystack/login (and src/_api/logout_v1.ts uses functions.session) — the project');
+  console.warn('  will NOT build until you delete them (or re-add login).');
   console.warn('  For a clean, buildable removal instead, run `npx luckystack manage` → Auth → none.');
   console.warn('  Files kept (delete by hand if you no longer want them):');
   for (const rel of LOGIN_COPIED_PATHS) {

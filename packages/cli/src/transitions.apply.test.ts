@@ -4,13 +4,14 @@
 //? single change by its summary so heavy asset-copying changes (addLogin) aren't
 //? pulled in here — those reuse handlers covered elsewhere.
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { planChanges, configFromState, type DesiredConfig, type ApplyContext } from './transitions';
 import type { ProjectState } from './lib/state';
-import type { ConsumerProject } from './lib/project';
+import { assetPath, type ConsumerProject } from './lib/project';
 
 const cfg = (over: Partial<DesiredConfig> = {}): DesiredConfig => ({
   authMode: 'none',
@@ -36,7 +37,10 @@ beforeEach(() => {
   fs.writeFileSync(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
   project = { root: dir, pkgPath, pkg: JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as ConsumerProject['pkg'] };
 });
-afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }); });
+afterEach(() => {
+  vi.restoreAllMocks();
+  fs.rmSync(dir, { recursive: true, force: true });
+});
 
 const ctx = (): ApplyContext => ({ project, cliVersion: '0.2.5', declaredKeys: new Set<string>() });
 
@@ -66,16 +70,66 @@ describe('Change.apply — OAuth provider', () => {
 });
 
 describe('Change.apply — auth → none deletes the UI + drops the dep', () => {
-  it('removes the login dirs and @luckystack/login', () => {
-    fs.mkdirSync(path.join(dir, 'src', 'login'), { recursive: true });
-    fs.writeFileSync(path.join(dir, 'src', 'login', 'page.tsx'), '// login');
-    fs.mkdirSync(path.join(dir, 'src', '_components'), { recursive: true });
-    fs.writeFileSync(path.join(dir, 'src', '_components', 'LoginForm.tsx'), '// form');
+  //? Place a file with the exact content the framework ships for that path.
+  const placeShipped = (rel: string): void => {
+    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+    fs.copyFileSync(assetPath('login', rel), path.join(dir, rel));
+  };
+  const place = (rel: string, content: string): void => {
+    fs.mkdirSync(path.dirname(path.join(dir, rel)), { recursive: true });
+    fs.writeFileSync(path.join(dir, rel), content);
+  };
+
+  it('removes the shipped login files (incl. logout_v1, which needs the session shim) and @luckystack/login', () => {
+    placeShipped('src/login/page.tsx');
+    placeShipped('src/_components/LoginForm.tsx');
+    placeShipped('src/_api/logout_v1.ts');
+    placeShipped('functions/session.ts');
 
     applyOne(planChanges(cfg({ authMode: 'credentials' }), cfg()), 'Auth: → none');
     expect(fs.existsSync(path.join(dir, 'src', 'login'))).toBe(false);
     expect(fs.existsSync(path.join(dir, 'src', '_components', 'LoginForm.tsx'))).toBe(false);
+    expect(fs.existsSync(path.join(dir, 'src', '_api', 'logout_v1.ts'))).toBe(false);
+    expect(fs.existsSync(path.join(dir, 'functions', 'session.ts'))).toBe(false);
     expect(readPkg().dependencies?.['@luckystack/login']).toBeUndefined();
+  });
+
+  it('keeps files the user added or edited in the auth folders, and lists them in the preview and the result', () => {
+    placeShipped('src/settings/page.tsx');
+    place('src/settings/billing/page.tsx', 'export default function Billing() { return null; }\n');
+    place('functions/session.ts', "export * from '@luckystack/login'; // my tweak\n");
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => { /* captured */ });
+    vi.spyOn(console, 'log').mockImplementation(() => { /* quiet */ });
+
+    const changes = planChanges(cfg({ authMode: 'credentials' }), cfg(), dir);
+    const preview = changes.find((c) => c.summary.includes('Auth: → none'))?.effects.join('\n') ?? '';
+    expect(preview).toContain('src/settings/billing/page.tsx');
+    expect(preview).toContain('functions/session.ts  ⚠ uses @luckystack/login');
+    expect(preview).not.toContain('    src/settings/page.tsx');
+
+    applyOne(changes, 'Auth: → none');
+    expect(fs.existsSync(path.join(dir, 'src', 'settings', 'page.tsx'))).toBe(false);
+    expect(fs.existsSync(path.join(dir, 'src', 'settings', 'billing', 'page.tsx'))).toBe(true);
+    expect(fs.readFileSync(path.join(dir, 'functions', 'session.ts'), 'utf8')).toContain('my tweak');
+    const warned = warn.mock.calls.map((call) => String(call[0])).join('\n');
+    expect(warned).toContain('src/settings/billing/page.tsx');
+    expect(warned).toContain('functions/session.ts');
+  });
+
+  it('treats a file matching the scaffold manifest hash as shipped even when the cli asset moved on', () => {
+    const olderRender = '// login page as an older scaffold rendered it\n';
+    place('src/login/page.tsx', olderRender);
+    place('.luckystack/scaffold.json', `${JSON.stringify({
+      schemaVersion: 1,
+      luckystackVersion: '0.1.0',
+      createdAt: '2026-01-01T00:00:00.000Z',
+      projectName: 't',
+      choices: {},
+      files: [{ path: 'src/login/page.tsx', sha256: crypto.createHash('sha256').update(olderRender).digest('hex') }],
+    })}\n`);
+
+    applyOne(planChanges(cfg({ authMode: 'credentials' }), cfg()), 'Auth: → none');
+    expect(fs.existsSync(path.join(dir, 'src', 'login'))).toBe(false);
   });
 });
 

@@ -186,7 +186,7 @@ export const runReconfigureWizard = async (
     }
   }
 
-  const changes = planChanges(current, desired);
+  const changes = planChanges(current, desired, project.root);
   if (changes.length === 0) {
     console.log('\nNo changes selected.');
     return { ok: true, value: undefined };
