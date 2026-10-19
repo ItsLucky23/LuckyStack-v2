@@ -133,13 +133,99 @@ export const loadGraph = async (): Promise<Graph | null> => {
   };
 };
 
+//? What the graph generator scans. A graph that records its own roots
+//? (`roots: { dirs, files }`) is authoritative; otherwise this default mirrors
+//? GRAPH_ROOT_DIRS / GRAPH_ROOT_FILES in scripts/generateGraph.mjs — keep in sync.
+export interface GraphSourceRoots {
+  dirs: string[];
+  files: string[];
+}
+
+export const DEFAULT_GRAPH_SOURCE_ROOTS: GraphSourceRoots = {
+  dirs: ['src', 'server', 'shared', 'functions', 'luckystack'],
+  files: ['config.ts', 'config.ports.ts', 'deploy.config.ts', 'services.config.ts'],
+};
+
+const GraphRootsSchema = z.object({
+  roots: z.object({ dirs: z.array(z.string()), files: z.array(z.string()) }).optional(),
+});
+
+/** The source roots the graph was built from, or the generator's default list. */
+export const loadGraphSourceRoots = async (): Promise<GraphSourceRoots> => {
+  const text = await readDocFile('docs/ai-graph.json');
+  if (text === null) return DEFAULT_GRAPH_SOURCE_ROOTS;
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    return DEFAULT_GRAPH_SOURCE_ROOTS;
+  }
+  const parsed = GraphRootsSchema.safeParse(raw);
+  return parsed.success && parsed.data.roots ? parsed.data.roots : DEFAULT_GRAPH_SOURCE_ROOTS;
+};
+
+//? Same file filter as the generator: generated and declaration files are not
+//? graph nodes, so their mtimes must not make the graph look stale.
+const isGraphSource = (name: string): boolean =>
+  /\.(ts|tsx)$/.test(name) && !name.endsWith('.d.ts') && !name.endsWith('.generated.ts');
+
+//? Visit budget so a huge repo never makes graph_status slow.
+const GRAPH_SOURCE_VISIT_LIMIT = 5000;
+
+/**
+ * The most recently modified file among `roots` (repo-relative), or null when
+ * none exists. Read-only; a missing root is skipped.
+ */
+export const findNewestGraphSource = async (
+  root: string,
+  roots: GraphSourceRoots,
+): Promise<{ file: string; mtime: Date } | null> => {
+  let newest: { file: string; mtime: Date } | null = null;
+  const consider = async (full: string): Promise<void> => {
+    try {
+      const st = await fs.stat(full);
+      if (!st.isFile()) return;
+      if (newest === null || st.mtime > newest.mtime) {
+        newest = { file: path.relative(root, full).replaceAll('\\', '/'), mtime: st.mtime };
+      }
+    } catch {
+      //? missing or unreadable — skip
+    }
+  };
+
+  for (const file of roots.files) await consider(path.join(root, file));
+
+  const queue: string[] = roots.dirs.map((dir) => path.join(root, dir));
+  let visited = 0;
+  while (queue.length > 0 && visited < GRAPH_SOURCE_VISIT_LIMIT) {
+    const dir = queue.shift();
+    if (dir === undefined) break;
+    let entries: { name: string; isDirectory: () => boolean }[];
+    try {
+      entries = await fs.readdir(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      visited++;
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name !== 'node_modules' && !entry.name.startsWith('.')) queue.push(full);
+      } else if (isGraphSource(entry.name)) {
+        await consider(full);
+      }
+    }
+  }
+  return newest;
+};
+
 //? Resolve a user-supplied path to a graph node id. Node ids are repo-relative
 //? (`src/_functions/foo.ts`, `config.ts`) since graph version 3; a version-2
 //? graph used src-relative ids, so a `src/`-less input is tried as a fallback
 //? rather than stripped up front. Returns the unique id, `null` when nothing
-//? matches, or a string[] with all matching candidates when a bare basename
-//? matches more than one node (so the caller can surface a disambiguation
-//? message instead of a bare null).
+//? matches, or a string[] with all matching candidates when a bare basename or
+//? path suffix matches more than one node (so the caller can surface a
+//? disambiguation message instead of a bare null).
 export const resolveNodeId = (graph: Graph, input: string): string | string[] | null => {
   const norm = input.replaceAll('\\', '/').replace(/^\.?\//, '');
   const has = (id: string): boolean => Object.hasOwn(graph.blastRadius, id) || graph.nodes.some((n) => n.id === id);
@@ -150,8 +236,14 @@ export const resolveNodeId = (graph: Graph, input: string): string | string[] | 
   if (has(prefixed)) return prefixed;
   const unprefixed = norm.replace(/^src\//, '');
   if (unprefixed !== norm && has(unprefixed)) return unprefixed;
+  //? The same-name fallback is only for a bare file name. An input with folders
+  //? names one file; matching it by basename alone answered for a different
+  //? file (`packages/core/src/tryCatch.ts` → `shared/tryCatch.ts`) as if it
+  //? were the one asked about. With folders, only a path-suffix match counts.
   const base = path.posix.basename(norm);
-  const byBase = graph.nodes.filter((n) => n.id.endsWith(`/${norm}`) || n.id === norm || path.posix.basename(n.id) === base);
+  const hasFolders = norm.includes('/');
+  const byBase = graph.nodes.filter((n) =>
+    n.id.endsWith(`/${norm}`) || n.id === norm || (!hasFolders && path.posix.basename(n.id) === base));
   // eslint-disable-next-line @typescript-eslint/no-non-null-assertion -- length===1 guarantees element exists
   if (byBase.length === 1) return byBase[0]!.id;
   if (byBase.length > 1) return byBase.map((n) => n.id);

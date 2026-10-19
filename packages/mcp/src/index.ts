@@ -26,6 +26,8 @@ import {
   projectRoot,
   readDocFile,
   loadGraph,
+  loadGraphSourceRoots,
+  findNewestGraphSource,
   resolveNodeId,
   grepLines,
 } from './artifacts.js';
@@ -334,7 +336,7 @@ server.registerTool(
 server.registerTool(
   'graph_status',
   {
-    description: 'Check whether the local dependency-graph cache (docs/ai-graph.json) is likely fresh or stale by comparing its mtime to the newest source file in src/. Returns the graph mtime, the newest source mtime, and a staleness verdict. A STALE verdict is not a problem to report — just run `npm run ai:graph`.',
+    description: 'Check whether the local dependency-graph cache (docs/ai-graph.json) is likely fresh or stale by comparing its mtime to the newest source file the graph generator scans (src/, server/, shared/, functions/, luckystack/ and root config files). Returns the graph mtime, the newest source mtime, and a staleness verdict. A STALE verdict is not a problem to report — just run `npm run ai:graph`.',
     inputSchema: {},
   },
   async () => {
@@ -348,48 +350,19 @@ server.registerTool(
       return text('docs/ai-graph.json not found. Generate it with `npm run ai:graph`.');
     }
 
-    //? Walk src/ up to a shallow budget to find the newest source file mtime.
-    //? We use a BFS capped at 5000 entries so a huge repo never makes this tool
-    //? slow. Missing src/ (non-standard layout) degrades to mtime-only output.
-    const srcDir = path.join(root, 'src');
-    let newestSrcMtime: Date | null = null;
-    let newestSrcFile = '';
-    const queue: string[] = [srcDir];
-    let visited = 0;
-    while (queue.length > 0 && visited < 5000) {
-      const dir = queue.shift();
-      if (dir === undefined) break;
-      let entries: { name: string; isDirectory: () => boolean }[];
-      try {
-        entries = await fs.readdir(dir, { withFileTypes: true });
-      } catch {
-        continue;
-      }
-      for (const entry of entries) {
-        visited++;
-        const full = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          if (entry.name !== 'node_modules' && !entry.name.startsWith('.')) queue.push(full);
-        } else if (/\.(ts|tsx|js|jsx|mjs|cjs)$/.test(entry.name)) {
-          try {
-            const st = await fs.stat(full);
-            if (newestSrcMtime === null || st.mtime > newestSrcMtime) {
-              newestSrcMtime = st.mtime;
-              newestSrcFile = path.relative(root, full).replaceAll('\\', '/');
-            }
-          } catch {
-            //? skip unreadable entries
-          }
-        }
-      }
-    }
+    //? Compare against every file the graph generator scans (its root folders
+    //? AND root config files), not just src/: an edit under server/ or to
+    //? config.ts changes the graph too.
+    const roots = await loadGraphSourceRoots();
+    const newest = await findNewestGraphSource(root, roots);
 
     const graphAge = `docs/ai-graph.json last generated: ${graphMtime.toISOString()}`;
-    if (newestSrcMtime === null) {
-      return text(`${graphAge}\n\nNo source files found under src/ — could not determine staleness.`);
+    const scanned = [...roots.dirs.map((dir) => `${dir}/`), ...roots.files].join(', ');
+    if (newest === null) {
+      return text(`${graphAge}\n\nNo source files found in ${scanned} — could not determine staleness.`);
     }
-    const srcAge = `Newest src/ file: ${newestSrcFile} (${newestSrcMtime.toISOString()})`;
-    const deltaMs = newestSrcMtime.getTime() - graphMtime.getTime();
+    const srcAge = `Newest graph source file: ${newest.file} (${newest.mtime.toISOString()}; scanned ${scanned})`;
+    const deltaMs = newest.mtime.getTime() - graphMtime.getTime();
     let verdict: string;
     if (deltaMs <= 0) {
       verdict = 'FRESH — graph is at least as new as the newest source file.';
