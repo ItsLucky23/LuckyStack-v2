@@ -403,11 +403,18 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
         }
       };
 
+      let ownAbortController: AbortController | null = null;
       const cleanupAbortController = () => {
         if (signal && abortHandler) {
           signal.removeEventListener("abort", abortHandler);
         }
-        abortControllers.delete(abortKey);
+        //? Only remove the entry this request stored. A superseded routed-http
+        //? request settles AFTER its replacement registered under the same key;
+        //? an unconditional delete dropped the replacement's controller, so the
+        //? next identical call could no longer abort it.
+        if (ownAbortController && abortControllers.get(abortKey) === ownAbortController) {
+          abortControllers.delete(abortKey);
+        }
       };
 
       if (useAbortController) {
@@ -422,6 +429,7 @@ export function apiRequest<F extends ApiFullName, V extends VersionsForFullName<
           if (oldest !== undefined) abortControllers.delete(oldest);
         }
         const abortController = new AbortController();
+        ownAbortController = abortController;
         abortControllers.set(abortKey, abortController);
         signal = abortController.signal;
 

@@ -52,6 +52,7 @@
     "invalidVersion": "Ongeldige sync-versie.",
     "failedRequest": "Sync-request {{name}} is mislukt: {{message}}",
     "requestTimeout": "Sync-request is verlopen.",
+    "disconnected": "Verbinding verbroken voordat het sync-request bevestigd was.",
     "disabled": "Sync via HTTP is uitgeschakeld.",
     "devToolsUnavailable": "Sync-devtools zijn niet beschikbaar in deze omgeving.",
     "clientExecutionFailed": "Sync client-handler is mislukt.",

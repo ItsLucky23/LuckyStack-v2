@@ -326,12 +326,16 @@ const renderDocsScript = (jsonPath: string, tryItOutData: string): string => `<s
     }
   };
 
+  //? Route and method travel as HTML-escaped data attributes, read back from
+  //? \`dataset\` by the delegated click listener. An inline onclick would need
+  //? JS-string escaping on top of HTML escaping: the HTML parser decodes
+  //? &#39; back to a quote before the handler runs.
   const renderTryItOut = (route, method) => {
     if (!ENABLE_TRY_IT_OUT) return '';
     return '<div class="try-it-out">' +
       '<div style="font-weight:600;font-size:12px;margin-bottom:4px;">Try it out (live request)</div>' +
       '<textarea placeholder=\\'{"key":"value"}\\'>{}</textarea>' +
-      '<button onclick="runEndpoint(this,\\'' + escapeHtml(route) + '\\',\\'' + escapeHtml(method) + '\\',this.previousElementSibling)">Send</button>' +
+      '<button type="button" data-run-endpoint data-route="' + escapeHtml(route) + '" data-method="' + escapeHtml(method) + '">Send</button>' +
       '<pre class="result"></pre>' +
       '</div>';
   };
@@ -513,6 +517,11 @@ const renderDocsScript = (jsonPath: string, tryItOutData: string): string => `<s
   const bindEndpointToggles = () => {
     const content = document.getElementById('content');
     content.addEventListener('click', (e) => {
+      const runButton = e.target.closest('button[data-run-endpoint]');
+      if (runButton) {
+        void runEndpoint(runButton, runButton.dataset.route, runButton.dataset.method, runButton.previousElementSibling);
+        return;
+      }
       const el = e.target.closest('.endpoint');
       if (!el) return;
       const key = el.getAttribute('data-key');

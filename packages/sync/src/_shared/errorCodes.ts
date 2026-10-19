@@ -26,6 +26,7 @@ export const SYNC_ERROR_CODES = [
   'sync.invalidServerResponse',
   'sync.invalidRequestFormat',
   'sync.requestTimeout',
+  'sync.disconnected',
   //? `handleSyncRequest` / `handleHttpSyncRequest` (both transports)
   'sync.invalidRequest',
   'sync.invalidCallback',

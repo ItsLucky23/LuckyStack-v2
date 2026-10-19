@@ -52,6 +52,7 @@
     "invalidVersion": "Version sync invalide.",
     "failedRequest": "La requête sync {{name}} a échoué : {{message}}",
     "requestTimeout": "La requête sync a expiré.",
+    "disconnected": "Connexion perdue avant la confirmation de la requête sync.",
     "disabled": "La sync via HTTP est désactivée.",
     "devToolsUnavailable": "Les outils de développement sync ne sont pas disponibles dans cet environnement.",
     "clientExecutionFailed": "Le handler client sync a échoué.",

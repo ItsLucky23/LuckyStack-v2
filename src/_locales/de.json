@@ -46,7 +46,8 @@
     "invalidClientResponse": "Sync-Client hat eine ungültige Antwort zurückgegeben.",
     "clientRejected": "Sync-Event wurde durch Client-Validierung abgelehnt.",
     "clientFilteredOut": "Du bist nicht im erforderlichen Kontext für dieses Sync-Event.",
-    "ioUnavailable": "Socket-Server ist nicht verfügbar."
+    "ioUnavailable": "Socket-Server ist nicht verfügbar.",
+    "disconnected": "Verbindung getrennt, bevor die Sync-Anfrage bestätigt wurde."
   },
   "error": {
     "invalidResponse": "Server hat eine ungültige Fehlerantwort zurückgegeben."

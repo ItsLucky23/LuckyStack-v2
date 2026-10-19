@@ -5,13 +5,14 @@
 //? `registerLanguageSource(fn)`, typically `() => session?.language`).
 //? Default language falls back to `getProjectConfig().defaultLanguage`.
 
-import { createContext, ReactNode, use, useEffect, useMemo, useState, Dispatch, SetStateAction } from 'react';
+import { createContext, ReactNode, use, useCallback, useEffect, useMemo, useState, Dispatch, SetStateAction } from 'react';
 import {
   getActiveLanguage,
   getDefaultLocale,
   getLocaleByCode,
   getRegisteredLocales,
 } from '../localesRegistry';
+import { activeLanguage, applyLanguageOverride, applyLanguageSource, type LanguageState } from './languageOverride';
 
 export type TranslationRecord = Record<string, unknown>;
 
@@ -29,21 +30,28 @@ const resolveTranslations = (code: string): TranslationRecord => {
 };
 
 export function TranslationProvider({ children }: { children: ReactNode }) {
-  const [language, setLanguage] = useState<string>(() => getActiveLanguage());
+  const [languageState, setLanguageState] = useState<LanguageState>(() => ({ source: getActiveLanguage(), override: null }));
+  const language = activeLanguage(languageState);
   const translations = useMemo(() => resolveTranslations(language), [language]);
 
   //? Poll the registered language source so changes to session.language
   //? (or whatever the consumer wired) flip the active language without a
-  //? full remount. Cheap: shallow string compare every ~250ms.
+  //? full remount. Cheap: shallow string compare every ~250ms. Compared with
+  //? the SOURCE, not the active language, so a `useUpdateLanguage` override
+  //? survives until the source itself changes.
   useEffect(() => {
     const handle = window.setInterval(() => {
       const next = getActiveLanguage();
-      if (next !== language) setLanguage(next);
+      setLanguageState((state) => applyLanguageSource(state, next));
     }, 250);
     return () => { window.clearInterval(handle); };
-  }, [language]);
+  }, []);
 
-  const contextValue = useMemo(() => ({ translations, setLanguage }), [translations]);
+  const setLanguage = useCallback<Dispatch<SetStateAction<string>>>((value) => {
+    setLanguageState((state) => applyLanguageOverride(state, value));
+  }, []);
+
+  const contextValue = useMemo(() => ({ translations, setLanguage }), [translations, setLanguage]);
 
   return (
     <TranslationContext value={contextValue}>

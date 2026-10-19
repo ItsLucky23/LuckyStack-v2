@@ -46,7 +46,8 @@
     "invalidClientResponse": "Le client sync a renvoyé une réponse invalide.",
     "clientRejected": "L'événement sync a été rejeté par la validation client.",
     "clientFilteredOut": "Vous n'êtes pas dans le bon contexte pour cet événement sync.",
-    "ioUnavailable": "Le serveur socket est indisponible."
+    "ioUnavailable": "Le serveur socket est indisponible.",
+    "disconnected": "Connexion perdue avant la confirmation de la requête sync."
   },
   "error": {
     "invalidResponse": "Le serveur a renvoyé une réponse d'erreur invalide."

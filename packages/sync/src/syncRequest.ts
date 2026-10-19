@@ -703,6 +703,9 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
           clearResponseTimeout();
           cleanupProgressListener?.();
           cleanupProgressListener = null;
+          //? Call (not just null) so the disconnect watcher layered on top is
+          //? removed on a normal acknowledgement.
+          cleanupResponseListener?.();
           cleanupResponseListener = null;
           cleanupExternalAbort?.();
           cleanupExternalAbort = null;
@@ -757,8 +760,28 @@ const syncRequestInternal = <F extends SyncFullName, V extends VersionsForFullNa
         };
 
         socketInstance.once(responseEventName, responseListener);
+
+        //? Mirrors apiRequest's CORE-O13 watcher: a disconnect between emit and
+        //? acknowledgement means no ack will ever arrive on this socket. Settle
+        //? now instead of waiting out `sync.requestTimeoutMs` (or forever, with
+        //? the timeout disabled, leaking the progress and response listeners).
+        const disconnectHandler = () => {
+          clearResponseTimeout();
+          cleanupProgressListener?.();
+          cleanupProgressListener = null;
+          cleanupResponseListener?.();
+          cleanupResponseListener = null;
+          cleanupExternalAbort?.();
+          cleanupExternalAbort = null;
+          resolve(normalizeSyncError({
+            response: { status: 'error', errorCode: 'sync.disconnected' },
+            fallbackErrorCode: 'sync.disconnected',
+          }));
+        };
+        socketInstance.once(socketEventNames.disconnect, disconnectHandler);
         cleanupResponseListener = () => {
           socketInstance.off(responseEventName, responseListener);
+          socketInstance.off(socketEventNames.disconnect, disconnectHandler);
         };
       };
 
@@ -1216,7 +1239,7 @@ export const initSyncRequest = async ({
   if (activeLifecycleHandlers) {
     socket.off(socketEventNames.connect, activeLifecycleHandlers.connect);
     socket.off(socketEventNames.disconnect, activeLifecycleHandlers.disconnect);
-    socket.off(socketEventNames.reconnectAttempt, activeLifecycleHandlers.reconnectAttempt);
+    socket.io.off(socketEventNames.reconnectAttempt, activeLifecycleHandlers.reconnectAttempt);
     socket.off(socketEventNames.userAfk, activeLifecycleHandlers.userAfk);
     socket.off(socketEventNames.userBack, activeLifecycleHandlers.userBack);
     socket.off(socketEventNames.connectError, activeLifecycleHandlers.connectError);
@@ -1240,7 +1263,9 @@ export const initSyncRequest = async ({
 
   socket.on(socketEventNames.connect, connect);
   socket.on(socketEventNames.disconnect, disconnect);
-  socket.on(socketEventNames.reconnectAttempt, reconnectAttempt);
+  //? socket.io-client v4 emits `reconnect_attempt` on the Manager only; a
+  //? listener on the Socket never fires, so RECONNECTING was never shown.
+  socket.io.on(socketEventNames.reconnectAttempt, reconnectAttempt);
   socket.on(socketEventNames.userAfk, userAfk);
   socket.on(socketEventNames.userBack, userBack);
   socket.on(socketEventNames.connectError, connectError);
