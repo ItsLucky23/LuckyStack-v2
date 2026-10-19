@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type { IncomingMessage, ServerResponse } from 'node:http';
+import { IncomingMessage, ServerResponse } from 'node:http';
+import { Socket } from 'node:net';
 
 //? Finding 007: the M2 account-creation guard refuses an OAuth sign-up whose
 //? email the provider did not positively verify. GitHub's `/user` public email
@@ -98,11 +99,10 @@ const runCallback = async (provider: FullOAuthProvider) => {
   registerOAuthProviders([{ name: 'credentials' }, provider]);
   const state = await createOAuthState(provider.name);
   if (!state) throw new Error('state not created');
-  const req = {
-    url: `/auth/callback/${provider.name}?code=the-code&state=${state.state}`,
-    headers: { cookie: `ls-oauth-state=${state.stateCookie}` },
-  } as unknown as IncomingMessage;
-  return loginCallback(`/auth/callback/${provider.name}`, req, {} as ServerResponse);
+  const req = new IncomingMessage(new Socket());
+  req.url = `/auth/callback/${provider.name}?code=the-code&state=${state.state}`;
+  req.headers.cookie = `ls-oauth-state=${state.stateCookie}`;
+  return loginCallback(`/auth/callback/${provider.name}`, req, new ServerResponse(req));
 };
 
 const createdEmail = (): string | undefined => {
