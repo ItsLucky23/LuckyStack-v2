@@ -54,7 +54,11 @@ export const dispatchHook = async <TName extends HookName>(
   payload: HookPayloads[TName],
   options: DispatchHookOptions = {},
 ): Promise<DispatchResult> => {
-  const handlers = hookHandlers.get(name) ?? [];
+  //? Snapshot: unsubscribe splices the live array, so a handler removed
+  //? mid-dispatch (hot reload, a self-removing once-handler) would otherwise
+  //? shift the next handler past the loop index — and that one may be an
+  //? authorization gate.
+  const handlers = [...(hookHandlers.get(name) ?? [])];
 
   for (const handler of handlers) {
     let result: HookResult;
@@ -121,7 +125,8 @@ export const dispatchSyncHook = <TName extends SyncHookName>(
   name: TName,
   payload: SyncHookPayloads[TName],
 ): void => {
-  const handlers = syncHookHandlers.get(name) ?? [];
+  //? Snapshot (see `dispatchHook`).
+  const handlers = [...(syncHookHandlers.get(name) ?? [])];
   for (const handler of handlers) {
     try {
       handler(payload);
