@@ -51,6 +51,8 @@ manage            Step-based reconfiguration wizard: pick a setting (auth + OAut
                   (no feature) opens the same wizard.
 add <feature>     Install one optional package + inject its consumer-src assets.
 add docker        Add the production-like Docker/Compose baseline (no package install).
+                  The database comes from .luckystack/scaffold.json or prisma/schema.prisma;
+                  pass --db=<mongodb|postgresql|mysql|sqlite> when neither records it.
 remove <feature>  Drop one optional package (reverses add; login removal is guarded).
 docker check      Validate Docker assets, selected preset summary, and transport wiring.
 
@@ -206,7 +208,8 @@ const main = async (): Promise<void> => {
   const options: AddOptions = { install, cliVersion };
 
   if (command === 'add' && feature === 'docker') {
-    finish(addDocker(project));
+    const dbFlag = argv.find((argument) => argument.startsWith('--db='));
+    finish(addDocker(project, dbFlag === undefined ? {} : { dbProvider: dbFlag.slice('--db='.length) }));
     return;
   }
 

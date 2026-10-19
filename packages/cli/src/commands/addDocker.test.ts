@@ -64,3 +64,37 @@ describe('Docker assets', () => {
     });
   });
 });
+
+describe('Docker database detection (finding 022)', () => {
+  const writeManifestChoices = (choices: Record<string, unknown>): void => {
+    fs.mkdirSync(path.join(root, '.luckystack'), { recursive: true });
+    fs.writeFileSync(path.join(root, '.luckystack', 'scaffold.json'), JSON.stringify({ schemaVersion: 1, choices, files: [] }));
+  };
+
+  it('uses the recorded dbProvider for a non-Prisma project instead of falling back to MongoDB', () => {
+    fs.rmSync(path.join(root, 'prisma'), { recursive: true, force: true });
+    writeManifestChoices({ orm: 'drizzle', dbProvider: 'postgresql' });
+
+    expect(addDocker(project).ok).toBe(true);
+    const compose = fs.readFileSync(path.join(root, 'compose.yaml'), 'utf8');
+    expect(compose).toContain('postgres:17-alpine');
+    expect(compose).not.toContain('mongo:7');
+  });
+
+  it('refuses to guess when nothing records the database, and names the --db flag', () => {
+    fs.rmSync(path.join(root, 'prisma'), { recursive: true, force: true });
+
+    const result = addDocker(project);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.error.message).toContain('--db=');
+    expect(fs.existsSync(path.join(root, 'compose.yaml'))).toBe(false);
+  });
+
+  it('takes --db when detection finds nothing', () => {
+    fs.rmSync(path.join(root, 'prisma'), { recursive: true, force: true });
+
+    expect(addDocker(project, { dbProvider: 'mysql' }).ok).toBe(true);
+    expect(fs.readFileSync(path.join(root, 'compose.yaml'), 'utf8')).toContain('mysql:8.4');
+    expect(addDocker(project, { dbProvider: 'oracle' }).ok).toBe(false);
+  });
+});
