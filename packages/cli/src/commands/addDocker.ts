@@ -208,11 +208,11 @@ export const gitignoreCovers = (content: string, file: string): boolean => {
     const negated = line.startsWith('!');
     const pattern = (negated ? line.slice(1) : line).replace(/^(\*\*\/|\/)/, '');
     if (pattern.endsWith('/')) continue;
-    const source = [...pattern].map((char) => {
-      if (char === '*') return '[^/]*';
-      if (char === '?') return '[^/]';
-      return escapeRegex(char);
-    }).join('');
+    const source = pattern.replaceAll(/\*|\?|[^*?]+/g, (part) => {
+      if (part === '*') return '[^/]*';
+      if (part === '?') return '[^/]';
+      return escapeRegex(part);
+    });
     if (new RegExp(`^${source}$`).test(file)) covered = !negated;
   }
   return covered;

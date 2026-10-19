@@ -8,7 +8,7 @@ import './hookPayloads';
 //? registers and the accessors return null (unauthenticated). Side-effect at
 //? module load: any app that imports @luckystack/login (its overlay, LoginForm,
 //? config) wires this before the first request is served.
-import { registerSessionProvider } from '@luckystack/core';
+import { registerRedactedLogKeys, registerSessionProvider } from '@luckystack/core';
 import { saveSession as _saveSession, getSession as _getSession, deleteSession as _deleteSession } from './session';
 import { logout as _logout } from './logout';
 registerSessionProvider({
@@ -29,7 +29,6 @@ registerAuthLockoutHook();
 //? defaults nor the sensitive suffixes cover them. The bare `code` stays
 //? unregistered: core redacts case-insensitively by key, so it would also hide
 //? every unrelated `code` field (error codes, country codes) in all logs.
-import { registerRedactedLogKeys } from '@luckystack/core';
 registerRedactedLogKeys(['recoverycode', 'totp', 'totpcode']);
 
 export type { BaseSessionLayout, SessionLocation, AuthProps } from './sessionLayout';
