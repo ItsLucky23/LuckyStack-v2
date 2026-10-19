@@ -24,6 +24,7 @@ const { registerProjectConfig } = await import('./projectConfig');
 const { setSocket } = await import('./socketState');
 
 type LooseApiRequest = (params: { name: string; version: string; data?: unknown; abortable?: boolean }) => Promise<unknown>;
+// luckystack-allow no-as-any: core has no generated route map in isolation, so the typed signature accepts no route name
 const callApi = apiRequest as unknown as LooseApiRequest;
 
 const isAborted = (call: PendingCall | undefined): boolean =>
@@ -38,6 +39,7 @@ describe('apiRequest routed-http replace-previous dedupe', () => {
     calls.length = 0;
     vi.stubGlobal('navigator', { onLine: true });
     registerProjectConfig({ transport: { invocation: 'routed-http' } });
+    // luckystack-allow no-as-any: the routed path only reads `connected`; a full Socket fake adds nothing
     setSocket({ connected: true } as unknown as Socket);
   });
 
