@@ -1581,3 +1581,13 @@ PR #9 kreeg om een verwante reden nooit CI: `pull_request` draait tegen `refs/pu
 **Release.** `c11c356` fast-forward op GitHub `main` (vanaf `69e5264`), tag `v0.14.0` → `publish.yml` run 38928667343 en `ci` run 38928662726 groen. Registry 17/17 met provenance, `latest` = 0.14.0. Vooraf: e2e-matrix 4/4 groen (prisma+sqlite op Node én Bun, bun+drizzle op beide runtimes, mongodb+resend met alle opties, auth none), `pack:dry` 18/18, `publish:dry` 17, consumentproef met strenge `tsc` (incl. `exactOptionalPropertyTypes`) en een run tegen de tarballs. Tarball-spotcheck: cli bevat `CHANGELOG.md`, email-dist bevat `sender-blocked`, `nodemailer`-peer 6–10.
 
 **Files:** `branch-logs/{main,INDEX}.md`. Tag `v0.14.0`.
+
+## 2026-10-19 18:55 — v0.15.0 gepubliceerd
+
+**User prompt (summary):** "daarna alle logische findings fixen" met de keuzes "1. a. … 13. ja." — bugsweep als 0.15.0, zelfde werkwijze als 0.14 (werk op `fix/sweep-0.15`, zie die log).
+
+**Release.** `89f4daa` fast-forward op GitHub `main` (vanaf `62b6db6`), daarna pas tag `v0.15.0` (nieuwe volgorde, ADR 0075) → `ci` run 39287594829 groen (Node 22 en 24, ai-records, e2e-scaffold) en `publish.yml` run 39287602968 groen; de nieuwe stappen "tag gelijk aan pakketversie" en "groene `ci` voor deze commit" liepen en slaagden vóór de build. Registry 17/17 met provenance (na ~2 min propagatie), `latest` = 0.15.0. Vooraf: `verify` 2823/2823, e2e-matrix 4/4 groen, `pack:dry` 18/18, `publish:dry` 17, `audit:production` critical 0 / high 0. Tarball-spotcheck: core-dist bevat `registerPageRoute` en `bootUuidKey`, server-dist `buildClearedSessionCookie`, cli-dist de generator-guardfixes en `needsPackage`, de scaffold-template `Plain.tsx` en de heartbeat-instelling in `socketInitializer.ts`.
+
+**Open (voorgelegd, niet gefixt):** bestaande Microsoft-accounts op een app met `tenant: 'common'` (standaard) blijven inlogbaar via een niet-geverifieerd `mail`; alleen gedocumenteerd + opstartwaarschuwing (ADR 0083).
+
+**Files:** `branch-logs/{main,INDEX}.md`. Tag `v0.15.0`.
