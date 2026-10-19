@@ -18,6 +18,7 @@ import {
   getLogger,
   registerRuntimeMapsProvider,
   isProductionRuntime,
+  tryCatch,
   type RuntimeApiMapsResult,
   type RuntimeMapsProvider,
   type RuntimeSyncMapsResult,
@@ -199,6 +200,9 @@ export const createProdRuntimeMapsProvider = (
   options: ProdRuntimeMapsLoaderOptions,
 ): RuntimeMapsProvider => {
   let prodMapsPromise: Promise<LoadedRuntimeMaps> | null = null;
+  //? Presets whose failure was already logged, so a broken preset that is
+  //? retried on every request logs its cause once instead of per request.
+  const reportedFailures = new Set<string>();
 
   let devkitModulePromise: Promise<DevkitRuntimeMaps> | null = null;
   const getDevkit = async (): Promise<DevkitRuntimeMaps> => {
@@ -209,6 +213,9 @@ export const createProdRuntimeMapsProvider = (
   const loadProdRuntimeMaps = async (): Promise<LoadedRuntimeMaps> => {
     if (prodMapsPromise) return await prodMapsPromise;
 
+    //? An object (not a `let`) so the flag set inside the async loader below is
+    //? not narrowed away at the read after it.
+    const loadState = { anyPresetFailed: false };
     prodMapsPromise = (async () => {
       const presets = resolvePresets(options);
       const merged: LoadedRuntimeMaps = {
@@ -221,20 +228,32 @@ export const createProdRuntimeMapsProvider = (
       const functionOrigin = new Map<string, string>();
 
       const loadedModules = await Promise.all(
-        presets.map(async (preset) => ({
-          preset,
-          mod: await options.loadGenerated(preset).catch(() => null),
-        })),
+        presets.map(async (preset) => {
+          const [loadError, mod] = await tryCatch(() => options.loadGenerated(preset));
+          return { preset, mod, loadError };
+        }),
       );
 
       let loadedAny = false;
-      for (const { preset, mod } of loadedModules) {
+      let newFailure = false;
+      for (const { preset, mod, loadError } of loadedModules) {
         if (!mod) {
-          getLogger().warn(
-            `[luckystack:runtimeMaps] preset "${preset}" failed to load — skipping. ` +
-            `Calls owned by that preset will return notFound until the generated module resolves.`,
-          );
+          loadState.anyPresetFailed = true;
+          //? Log the real cause (a typo'd argv preset, an import that throws)
+          //? once per preset; the load is retried on the next request.
+          if (!reportedFailures.has(preset)) {
+            reportedFailures.add(preset);
+            newFailure = true;
+            getLogger().error(
+              `[luckystack:runtimeMaps] preset "${preset}" failed to load — skipping. ` +
+              `Calls owned by that preset will return notFound until the generated module resolves (retried on the next request).`,
+              loadError ?? new Error('loadGenerated returned no module'),
+            );
+          }
           continue;
+        }
+        if (reportedFailures.delete(preset)) {
+          getLogger().info(`[luckystack:runtimeMaps] preset "${preset}" loaded after an earlier failure.`);
         }
         loadedAny = true;
         const normalized = normalizeGeneratedModule(mod, preset);
@@ -244,7 +263,7 @@ export const createProdRuntimeMapsProvider = (
       }
 
       if (!loadedAny) {
-        getLogger().warn(
+        if (newFailure || presets.length === 0) getLogger().warn(
           `[luckystack:runtimeMaps] no presets resolved (tried: ${presets.join(', ')}). ` +
           `Every api/sync request will return notFound until at least one generated module loads.`,
         );
@@ -254,7 +273,11 @@ export const createProdRuntimeMapsProvider = (
       return merged;
     })();
 
-    return await prodMapsPromise;
+    const result = await prodMapsPromise;
+    //? Never cache a load with a failed preset: the next request retries, so
+    //? the "until the generated module resolves" promise above holds.
+    if (loadState.anyPresetFailed) prodMapsPromise = null;
+    return result;
   };
 
   const getRuntimeApiMaps = async (): Promise<RuntimeApiMapsResult> => {

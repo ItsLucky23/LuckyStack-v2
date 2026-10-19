@@ -12,6 +12,7 @@ import {
   formatKey,
   tryCatch,
   tryCatchSync,
+  type SessionSaveOptions,
 } from '@luckystack/core';
 
 import { getSessionAdapter } from './sessionAdapter';
@@ -42,12 +43,15 @@ const parseSessionLayout = (value: string): SessionLayout | null => {
  *   excluded from single-session enforcement so the user's current device is not
  *   kicked by its own new session. The caller is responsible for deleting it
  *   afterwards (use `deleteSession(supersedeToken, { skipSocketLogout: true })`).
+ * @param options.onlyIfExists - Update an existing session only; returns
+ *   `{ ok: false, errorCode: 'session.notFound' }` instead of recreating a
+ *   session that was deleted (logout/revoke) after the caller read it.
  */
 const saveSession = async (
   token: string,
   data: SessionLayout,
   newUser?: boolean,
-  options?: { supersedeToken?: string },
+  options?: SessionSaveOptions,
 ): Promise<{ ok: true } | { ok: false; errorCode: string }> => {
   //? Reject a session with an empty `id` (B30). `isSessionLayout` only checks
   //? the `id` KEY is present, so a custom adapter / caller handing us an
@@ -159,7 +163,22 @@ const saveSession = async (
     //? a live replayable credential. `getSession` re-attaches it from the lookup
     //? key (`{ ...parsed, token }`) so callers receive the expected shape.
     const { token: _stripToken, ...persistedWithoutToken } = persisted as SessionLayout & { token?: unknown };
-    await adapter.setRaw(token, JSON.stringify(persistedWithoutToken), ttl);
+    const serialized = JSON.stringify(persistedWithoutToken);
+    if (options?.onlyIfExists) {
+      //? A partial update (room join, location) read the session earlier; a
+      //? logout/revoke may have deleted it since. A plain SET would bring the
+      //? revoked token back with a full TTL, so write only when it still exists.
+      let written: boolean;
+      if (adapter.setRawIfExists) {
+        written = await adapter.setRawIfExists(token, serialized, ttl);
+      } else {
+        written = (await adapter.getRaw(token)) !== null;
+        if (written) await adapter.setRaw(token, serialized, ttl);
+      }
+      if (!written) return { ok: false, errorCode: 'session.notFound' } as const;
+    } else {
+      await adapter.setRaw(token, serialized, ttl);
+    }
 
     const userId = data.id;
 
@@ -169,8 +188,15 @@ const saveSession = async (
     //? background workers, CLI tasks) persisted the session but never populated
     //? the active-tokens set, so `listSessions` / `revokeUserSessions` saw
     //? nothing for that user.
+    //? An `onlyIfExists` update only refreshes the set TTL: the token was tracked
+    //? when the session was created, and re-adding it could leave a ghost entry
+    //? when a delete lands between the write above and this call.
     if (userId) {
-      await adapter.trackActive(userId, token, ttl);
+      if (options?.onlyIfExists) {
+        if (adapter.touchActive) await adapter.touchActive(userId, ttl);
+      } else {
+        await adapter.trackActive(userId, token, ttl);
+      }
     }
 
     const { getIoInstance } = await import('@luckystack/core');

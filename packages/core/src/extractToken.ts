@@ -1,6 +1,6 @@
 import { Socket } from 'socket.io';
 import { getProjectConfig } from './projectConfig';
-import { getCookieValue } from './cookies';
+import { applyCookiePrefixConstraints, getCookieValue } from './cookies';
 
 /**
  * Extract the authentication token from a Socket.io connection.
@@ -22,7 +22,10 @@ export const extractTokenFromSocket = (socket: Pick<Socket, 'handshake'>): strin
   const sessionToken = typeof socket.handshake.auth.token === 'string'
     ? socket.handshake.auth.token
     : null;
-  const cookieToken = getCookieValue(cookie, config.http.sessionCookieName);
+  //? Read the cookie under its effective name: the server sets it with the
+  //? configured `__Host-`/`__Secure-` prefix applied.
+  const cookieName = applyCookiePrefixConstraints(config.http.sessionCookieName, config.http.sessionCookiePrefix).name;
+  const cookieToken = getCookieValue(cookie, cookieName);
 
   // Session-based token (stored in sessionStorage on client)
   if (config.session.basedToken) {

@@ -1,5 +1,6 @@
 import { getLogger, getProjectConfig } from '@luckystack/core';
 import { getLogin } from '../capabilities';
+import { buildSessionCookie } from './sessionCookie';
 import type { HttpRouteHandler } from './types';
 
 export const handleAuthCallbackRoute: HttpRouteHandler = async ({
@@ -20,7 +21,6 @@ export const handleAuthCallbackRoute: HttpRouteHandler = async ({
   }
 
   const config = getProjectConfig();
-  const sessionCookieName = config.http.sessionCookieName;
   const shouldLogDev = config.logging.devLogs;
 
   //? Fallback redirect target when no `postLoginRedirect` resolver returns a URL.
@@ -78,7 +78,7 @@ export const handleAuthCallbackRoute: HttpRouteHandler = async ({
     res.setHeader('Set-Cookie', clearStateCookie);
     res.writeHead(302, { Location: `${baseUrl}#token=${newToken}` });
   } else {
-    res.setHeader('Set-Cookie', [clearStateCookie, `${sessionCookieName}=${newToken}; ${sessionCookieOptions}`]);
+    res.setHeader('Set-Cookie', [clearStateCookie, buildSessionCookie(newToken, sessionCookieOptions)]);
     res.writeHead(302, { Location: redirectUrl });
   }
   res.end();

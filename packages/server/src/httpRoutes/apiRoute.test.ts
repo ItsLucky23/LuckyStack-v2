@@ -152,6 +152,26 @@ describe('handleApiRoute — routed GET payload', () => {
     }));
   });
 
+  it('drops the ?stream flag from key-per-query GET params', async () => {
+    const { args } = makeReqRes();
+    args.method = 'GET';
+    args.params = { name: 'a', stream: 'true' };
+
+    await handleApiRoute(args);
+
+    expect(handleHttpApiRequestMock).toHaveBeenCalledWith(expect.objectContaining({ data: { name: 'a' } }));
+  });
+
+  it('keeps a `stream` field in a POST body (transport parity with socket, finding 025)', async () => {
+    const { args } = makeReqRes();
+    args.method = 'POST';
+    args.params = { name: 'a', stream: 'live' };
+
+    await handleApiRoute(args);
+
+    expect(handleHttpApiRequestMock).toHaveBeenCalledWith(expect.objectContaining({ data: { name: 'a', stream: 'live' } }));
+  });
+
   it('rejects malformed routed JSON with 400 before invoking the handler', async () => {
     const { args, cap } = makeReqRes();
     args.method = 'GET';

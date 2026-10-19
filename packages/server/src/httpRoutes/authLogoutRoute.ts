@@ -1,6 +1,6 @@
 import { getLogger, getProjectConfig, tryCatch } from '@luckystack/core';
 import { getLogin } from '../capabilities';
-import { resolveCookieSecure } from './sessionCookie';
+import { buildClearedSessionCookie } from './sessionCookie';
 import type { HttpRouteHandler } from './types';
 
 //? Warn-once guard. The SameSite weakening is a boot-time config property, not a
@@ -47,9 +47,9 @@ export const handleAuthLogoutRoute: HttpRouteHandler = async ({ res, routePath, 
     }
   }
 
-  //? Clearing cookie: identity = name + path (+ domain). Mirror the attributes
-  //? of buildSessionCookieOptions in httpHandler.ts, with Max-Age=0 so the
-  //? browser expires it immediately. setHeader (not append) intentionally
+  //? Clearing cookie: identity = name + path (+ domain). The shared session
+  //? cookie builder produces the same name/attributes as the set, with Max-Age=0
+  //? so the browser expires it immediately. setHeader (not append) intentionally
   //? overrides the sliding-expiration refresh that ran earlier this request.
   const http = getProjectConfig().http;
   //? SEC: /auth/logout relies on SameSite=Strict as its CSRF mitigation (the
@@ -64,11 +64,7 @@ export const handleAuthLogoutRoute: HttpRouteHandler = async ({ res, routePath, 
       `Current sessionCookieSameSite="${http.sessionCookieSameSite}" weakens this protection.`,
     );
   }
-  const secure = resolveCookieSecure(http.sessionCookieSecure, process.env.SECURE);
-  res.setHeader(
-    'Set-Cookie',
-    `${http.sessionCookieName}=; HttpOnly; SameSite=${http.sessionCookieSameSite}; Path=${http.sessionCookiePath}; Max-Age=0; ${secure ? 'Secure;' : ''}`,
-  );
+  res.setHeader('Set-Cookie', buildClearedSessionCookie());
   res.statusCode = 200;
   res.setHeader('Content-Type', 'application/json');
   res.end(JSON.stringify({ status: 'success', result: true }));

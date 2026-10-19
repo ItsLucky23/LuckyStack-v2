@@ -100,7 +100,10 @@ export const handleApiRoute: HttpRouteHandler = async ({
     let apiData = typeof params === 'object'
       ? { ...(params as Record<string, unknown>) }
       : {};
-    delete apiData.stream;
+    //? `stream` here is the `?stream=true` transport flag, which only lands in
+    //? params for a GET (key-per-query). A POST/PUT/DELETE body `stream` field is
+    //? real handler input — the socket transport keeps it, so HTTP must too.
+    if (method === 'GET') delete apiData.stream;
 
     //? Routed GET invocations encode the typed payload as one JSON query value.
     //? Plain public HTTP callers keep the existing key-per-query contract; only

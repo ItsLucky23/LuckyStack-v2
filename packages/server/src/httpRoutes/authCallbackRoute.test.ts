@@ -8,7 +8,7 @@ import type { HttpRouteContext } from './types';
 //? via Referer / history / proxy logs). These tests lock that contract.
 
 const projectConfig = {
-  http: { sessionCookieName: 'token' },
+  http: { sessionCookieName: 'token' } as { sessionCookieName: string; sessionCookiePrefix?: '__Host-' | '__Secure-' },
   logging: { devLogs: false },
   app: { publicUrl: 'https://app.example.com' },
   loginRedirectUrl: '/dashboard',
@@ -20,7 +20,8 @@ const loginMock = {
   deleteSession: vi.fn(() => Promise.resolve()),
 };
 
-vi.mock('@luckystack/core', () => ({
+vi.mock('@luckystack/core', async () => ({
+  applyCookiePrefixConstraints: (await vi.importActual<typeof import('@luckystack/core')>('@luckystack/core')).applyCookiePrefixConstraints,
   getLogger: () => ({ debug: vi.fn() }),
   getProjectConfig: () => projectConfig,
 }));
@@ -29,15 +30,20 @@ vi.mock('../capabilities', () => ({
   getLogin: () => Promise.resolve(loginMock),
 }));
 
-const makeCtx = (): { ctx: HttpRouteContext; status: () => number | undefined; location: () => string | undefined } => {
+const makeCtx = (): {
+  ctx: HttpRouteContext;
+  status: () => number | undefined;
+  location: () => string | undefined;
+  setCookie: () => unknown;
+} => {
   let statusCode: number | undefined;
-  const headers: Record<string, string> = {};
+  const headers: Record<string, unknown> = {};
   const res = {
     writeHead: (code: number, hdrs?: Record<string, string>) => {
       statusCode = code;
       if (hdrs) Object.assign(headers, hdrs);
     },
-    setHeader: (name: string, value: string) => { headers[name] = value; },
+    setHeader: (name: string, value: unknown) => { headers[name] = value; },
     end: vi.fn(),
   };
   const ctx = {
@@ -47,8 +53,31 @@ const makeCtx = (): { ctx: HttpRouteContext; status: () => number | undefined; l
     token: null,
     sessionCookieOptions: 'HttpOnly; Path=/;',
   } as unknown as HttpRouteContext;
-  return { ctx, status: () => statusCode, location: () => headers.Location };
+  return {
+    ctx,
+    status: () => statusCode,
+    location: () => headers.Location as string | undefined,
+    setCookie: () => headers['Set-Cookie'],
+  };
 };
+
+describe('handleAuthCallbackRoute (cookie mode)', () => {
+  beforeEach(() => {
+    projectConfig.session.basedToken = false;
+    loginMock.loginCallback.mockReset();
+  });
+
+  it('sets the session cookie under the configured prefix (finding 044)', async () => {
+    projectConfig.http.sessionCookiePrefix = '__Host-';
+    loginMock.loginCallback.mockResolvedValue({ token: 'TK', redirectUrl: 'https://app.example.com/dashboard' });
+    const { ctx, setCookie } = makeCtx();
+
+    await handleAuthCallbackRoute(ctx);
+    delete projectConfig.http.sessionCookiePrefix;
+
+    expect(setCookie()).toEqual([expect.stringMatching(/=; Path=\/; HttpOnly; Max-Age=0/), '__Host-token=TK; HttpOnly; Path=/;']);
+  });
+});
 
 describe('handleAuthCallbackRoute (based-token)', () => {
   beforeEach(() => {

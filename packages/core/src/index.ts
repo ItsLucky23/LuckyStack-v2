@@ -308,7 +308,7 @@ export {
   removeSession,
   performLogout,
 } from './sessionProviderRegistry';
-export type { SessionProvider, SessionSaveResult, SessionLogoutInput } from './sessionProviderRegistry';
+export type { SessionProvider, SessionSaveResult, SessionSaveOptions, SessionLogoutInput } from './sessionProviderRegistry';
 export { validateRequest, isFalsy } from './validateRequest';
 export type { ValidationResult } from './validateRequest';
 export {

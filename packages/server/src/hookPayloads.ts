@@ -14,6 +14,7 @@
 export interface OnSocketConnectPayload {
   socketId: string;
   token: string | null;
+  /** Resolved client IP (honours `http.trustProxy`). */
   ip: string;
 }
 

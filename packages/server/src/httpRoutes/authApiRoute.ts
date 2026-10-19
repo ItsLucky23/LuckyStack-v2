@@ -7,7 +7,8 @@ import {
   resolveDevCallbackUrl,
 } from '@luckystack/core';
 import { getLogin } from '../capabilities';
-import { resolveCookieSecure } from './sessionCookie';
+import { toClientSession } from './clientSession';
+import { buildSessionCookie, resolveCookieSecure } from './sessionCookie';
 import type { HttpRouteHandler } from './types';
 
 const parseSessionBasedTokenHeader = (headerValue: string | string[] | undefined): boolean | null => {
@@ -36,6 +37,7 @@ export const handleAuthApiRoute: HttpRouteHandler = async ({
   req,
   res,
   routePath,
+  method,
   token,
   params,
   sessionCookieOptions,
@@ -52,7 +54,6 @@ export const handleAuthApiRoute: HttpRouteHandler = async ({
   }
 
   const config = getProjectConfig();
-  const sessionCookieName = config.http.sessionCookieName;
   const shouldLogDev = config.logging.devLogs;
 
   const providerName = routePath.split('/')[3];
@@ -179,6 +180,18 @@ export const handleAuthApiRoute: HttpRouteHandler = async ({
     return true;
   }
 
+  //? Credentials login/register is POST-only, like the email-code and 2FA routes.
+  //? A GET would let a cross-site navigation log the victim into an attacker's
+  //? account (login CSRF: the origin gate admits a header-less GET and the
+  //? response's Set-Cookie is stored), and would put the password in URLs and logs.
+  //? Only the full-OAuth authorize redirect above is a GET.
+  if (method !== 'POST') {
+    res.statusCode = 405;
+    res.setHeader('Allow', 'POST');
+    res.end();
+    return true;
+  }
+
   const rateLimiting = config.rateLimiting;
   //? DD-LOGIN-F5: resolve the client IP once, unconditionally, so it can be
   //? threaded into `loginWithCredentials` for the IP+account composite lockout
@@ -291,7 +304,7 @@ export const handleAuthApiRoute: HttpRouteHandler = async ({
     if (useSessionBasedToken) {
       res.setHeader('X-Session-Token', result.newToken);
     } else {
-      res.setHeader('Set-Cookie', `${sessionCookieName}=${result.newToken}; ${sessionCookieOptions}`);
+      res.setHeader('Set-Cookie', buildSessionCookie(result.newToken, sessionCookieOptions));
     }
   }
 
@@ -299,7 +312,7 @@ export const handleAuthApiRoute: HttpRouteHandler = async ({
   res.end(JSON.stringify({
     status: result.status,
     reason: result.reason,
-    session: result.session,
+    session: toClientSession(result.session),
     authenticated: Boolean(result.newToken),
   }));
   return true;

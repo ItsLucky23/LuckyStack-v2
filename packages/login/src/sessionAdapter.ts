@@ -23,6 +23,16 @@ export interface SessionAdapter {
    */
   setRaw(token: string, value: string, ttlSeconds: number): Promise<void>;
 
+  /**
+   * Write the raw session string ONLY when a record for `token` still exists
+   * (Redis `SET ... XX`), with a TTL. Returns false on miss and must not
+   * create a record. Used by partial session updates so an update racing a
+   * logout/revoke cannot resurrect the deleted session. Optional: without it
+   * the framework re-reads before `setRaw`, which narrows but does not close
+   * that window — implement it atomically when the backend can.
+   */
+  setRawIfExists?(token: string, value: string, ttlSeconds: number): Promise<boolean>;
+
   /** Delete the session record for `token`. Idempotent. */
   delete(token: string): Promise<void>;
 
@@ -98,6 +108,13 @@ export const redisSessionAdapter: SessionAdapter = {
     //? a stolen token could use indefinitely. A single command eliminates that
     //? gap — the TTL is committed in the same atomic operation as the write.
     await redis.set(sessionKey(token), value, 'EX', ttlSeconds);
+  },
+
+  async setRawIfExists(token, value, ttlSeconds) {
+    //? `XX` makes the existence check and the write one atomic command, so a
+    //? concurrent `delete` either lands first (we write nothing) or after.
+    const result = await redis.set(sessionKey(token), value, 'EX', ttlSeconds, 'XX');
+    return result === 'OK';
   },
 
   async delete(token) {
