@@ -269,6 +269,57 @@ describe('live render core — buildGroups (FLAT array artifact shape)', () => {
   });
 });
 
+//? Finding 106: a quote in route metadata must not reach JavaScript. The runner
+//? reads route/method from data attributes through the delegated listener; the
+//? fakes below stand in for the DOM pieces that listener and `runEndpoint` touch.
+describe('live render core — try-it-out runner metadata', () => {
+  const hostilePage = `a');alert(1);('`;
+
+  it('renders no inline handler and keeps route/method in escaped data attributes', () => {
+    const html = loadPureCore(true).renderEndpoint({ page: hostilePage, name: 'n', version: 'v1', method: 'get' });
+    expect(html).not.toContain('onclick');
+    expect(html).toContain(`data-route="api/a&#39;);alert(1);(&#39;/n/v1"`);
+    expect(html).toContain('data-method="GET"');
+  });
+
+  it('sends the dataset route verbatim when the delegated listener sees a Send click', async () => {
+    const script = extractScript(renderDocsHtml('/_docs/api.json', 'Docs', { enableTryItOut: true }));
+    const pureBody = script.slice(0, script.indexOf('//? Thin orchestrator'));
+    const captured: { clickListener?: (event: unknown) => void } = {};
+    const fakeDocument = {
+      getElementById: () => ({
+        addEventListener: (_type: string, listener: (event: unknown) => void) => { captured.clickListener = listener; },
+      }),
+    };
+    const requests: { url: string; method: string }[] = [];
+    const fakeFetch = (url: string, init: { method: string }) => {
+      requests.push({ url, method: init.method });
+      return Promise.resolve({ text: () => Promise.resolve('{}') });
+    };
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval -- same rationale as loadPureCore: our own rendered helper code.
+    const factory = new Function('document', 'fetch', `${pureBody}\n return { bindEndpointToggles };`) as (
+      document: unknown,
+      fetch: unknown,
+    ) => { bindEndpointToggles: () => void };
+    factory(fakeDocument, fakeFetch).bindEndpointToggles();
+
+    const route = `api/${hostilePage}/n/v1`;
+    const result = { textContent: '' };
+    const button = {
+      dataset: { route, method: 'GET' },
+      disabled: false,
+      previousElementSibling: { value: '{}' },
+      parentElement: { querySelector: () => result },
+      closest: (selector: string) => (selector === 'button[data-run-endpoint]' ? button : null),
+    };
+    captured.clickListener?.({ target: button });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(requests).toEqual([{ url: `/${route}?stream=false`, method: 'GET' }]);
+    expect(result.textContent).toBe('{}');
+  });
+});
+
 //? Structural guard: the orchestrator decomposition introduced this pass must
 //? stay intact so the pure-core extraction above keeps matching the shipped
 //? code. If a future edit re-inlines or swaps the binding model, this fails.
