@@ -19,13 +19,41 @@ vi.mock('./deployConfigRegistry', () => ({
 vi.mock('./loggerRegistry', () => ({ getLogger: () => loggerMock }));
 
 import {
-  BOOT_KEY_PREFIX,
+  bootUuidKey,
   refreshBootUuid,
   startBootUuidHeartbeat,
   writeBootUuid,
 } from './bootUuid';
 
-const KEY = `${BOOT_KEY_PREFIX}production`;
+const KEY = bootUuidKey('production');
+
+//? REGRESSION (sweep 091): the key was `luckystack:boot:<env>` for every
+//? project, so two projects with the same env name on one Redis overwrote each
+//? other's UUID.
+describe('boot UUID key', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('separates projects that share a Redis and an environment name', () => {
+    vi.stubEnv('PROJECT_NAME', 'alpha');
+    const alpha = bootUuidKey('production');
+    vi.stubEnv('PROJECT_NAME', 'beta');
+    const beta = bootUuidKey('production');
+
+    expect(alpha).toBe('luckystack:boot:alpha:production');
+    expect(beta).toBe('luckystack:boot:beta:production');
+  });
+
+  it('is the key the writer uses', async () => {
+    vi.stubEnv('PROJECT_NAME', 'alpha');
+    setMock.mockReset().mockResolvedValue('OK');
+
+    const uuid = await writeBootUuid('production');
+
+    expect(setMock).toHaveBeenCalledWith('luckystack:boot:alpha:production', uuid, 'EX', deployState.ttlSeconds);
+  });
+});
 
 describe('boot UUID lifecycle', () => {
   beforeEach(() => {

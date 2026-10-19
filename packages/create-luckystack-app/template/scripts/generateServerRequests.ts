@@ -13,21 +13,12 @@ import {
   renderFunctionsMap,
 } from '@luckystack/devkit';
 import { ROOT_DIR, getSrcDir, getServerDir } from '@luckystack/core';
+import { assertRouteServicesDeclared, extractServiceFromPath, type RouteServicesConfig } from './routeServices';
 
 const normalizePath = (p: string) => p.split(path.sep).join("/");
 
 const mapApiPagePath = (pagePath?: string): string => {
   return pagePath && pagePath.length > 0 ? pagePath : 'system';
-};
-
-const extractServiceFromPath = (workspaceRelativePath: string): string => {
-  // path starts with src/
-  // Either src/_api/... (system) or src/vehicles/_api/... (vehicles)
-  const segments = workspaceRelativePath.split('/');
-  if (segments.length > 1 && (segments[1] === '_api' || segments[1] === '_sync')) {
-    return 'system';
-  }
-  return segments[1] || 'system';
 };
 
 // Recursively walk dirs to collect _api and _sync files
@@ -69,6 +60,8 @@ interface PresetPlan {
   presets: string[];
   /** Services allowed in a preset, or `null` to include EVERY service (base install). */
   servicesForPreset: (preset: string) => string[] | null;
+  /** Declared services + presets, or `null` in a base install (nothing is filtered out). */
+  servicesConfig: RouteServicesConfig | null;
 }
 
 const DEFAULT_PRESET_NAME = 'default';
@@ -79,7 +72,7 @@ const loadPresetPlan = async (): Promise<PresetPlan> => {
   const hasRouterConfig = fs.existsSync(servicesConfigPath) && fs.existsSync(presetLoaderPath);
 
   if (!hasRouterConfig) {
-    return { presets: [DEFAULT_PRESET_NAME], servicesForPreset: () => null };
+    return { presets: [DEFAULT_PRESET_NAME], servicesForPreset: () => null, servicesConfig: null };
   }
 
   //? Non-literal specifier so `tsc` doesn't try to resolve `presetLoader` (which
@@ -87,7 +80,7 @@ const loadPresetPlan = async (): Promise<PresetPlan> => {
   //? because the file exists in this branch.
   const loaderSpecifier = ['..', 'server', 'config', 'presetLoader'].join('/');
   const loader = (await import(loaderSpecifier)) as {
-    loadBuildConfig: () => unknown;
+    loadBuildConfig: () => { services: RouteServicesConfig };
     validatePresetsAndServices: (config: unknown) => void;
     resolveRequestedPresets: (requested: string[], config: unknown) => string[];
     getServicesForPreset: (presetName: string, config: unknown) => string[];
@@ -100,6 +93,7 @@ const loadPresetPlan = async (): Promise<PresetPlan> => {
   return {
     presets,
     servicesForPreset: (presetName: string) => loader.getServicesForPreset(presetName, buildConfig),
+    servicesConfig: buildConfig.services,
   };
 };
 
@@ -120,6 +114,14 @@ const run = async () => {
   });
 
   const rawSrcFiles = walkSrcFiles(srcDir).map(normalizePath).sort();
+  //? Before filtering per preset: a route whose service no preset takes would
+  //? otherwise be skipped silently and exist only in dev.
+  if (plan.servicesConfig) {
+    assertRouteServicesDeclared(
+      rawSrcFiles.map((file) => normalizePath(path.relative(ROOT_DIR, file))),
+      plan.servicesConfig,
+    );
+  }
 
   // Collect functions from every configured `paths.serverFunctionDirs` root
   // (default `['functions', 'shared']`), nested by directory — the SAME discovery

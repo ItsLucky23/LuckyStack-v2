@@ -256,11 +256,36 @@ export const stripForwardedHeaders = (
   return out;
 };
 
+/** The rightmost hop of an inbound `x-forwarded-for` (list or repeated header). */
+const lastForwardedHop = (value: string | string[] | undefined): string | undefined => {
+  const parts = Array.isArray(value) ? value : [value ?? ''];
+  const hops = parts.flatMap((part) => part.split(',')).map((hop) => hop.trim()).filter((hop) => hop.length > 0);
+  return hops.at(-1);
+};
+
 /**
  * Compute the `x-forwarded-for` value the router forwards upstream. The router
- * is the trust boundary: it sets XFF to its own peer view of the client
- * (`req.socket.remoteAddress`) rather than trusting any inbound chain, so a
- * client cannot forge its source IP to defeat per-IP rate-limiting, ban lists,
- * or audit. Backends must trust ONLY this router-set value.
+ * is the trust boundary: it forwards ONE address, so a backend with the default
+ * one-hop proxy trust reads exactly this value.
+ *
+ * - Direct peer (not in `trustedProxyCidrs`): its own socket address. Any
+ *   inbound chain is client-written and ignored, so a client cannot forge its
+ *   source IP to defeat per-IP rate-limiting, ban lists or audit.
+ * - Trusted proxy peer (a TLS terminator in front of the router): the LAST hop
+ *   of the inbound chain — the address that proxy itself appended. Without this
+ *   every visitor reached the backend as the proxy's address, so per-IP limits
+ *   became one shared bucket. Earlier hops were written by whoever connected to
+ *   that proxy and stay untrusted. A missing or non-IP last hop falls back to
+ *   the peer address.
  */
-export const buildForwardedFor = (remoteAddress: string | undefined): string => remoteAddress ?? '';
+export const buildForwardedFor = (
+  remoteAddress: string | undefined,
+  inboundForwardedFor?: string | string[],
+  isTrustedProxy?: TrustedProxyMatcher,
+): string => {
+  if (isTrustedProxy?.(remoteAddress) === true) {
+    const visitor = lastForwardedHop(inboundForwardedFor);
+    if (visitor !== undefined && isIP(visitor) !== 0) return visitor;
+  }
+  return remoteAddress ?? '';
+};

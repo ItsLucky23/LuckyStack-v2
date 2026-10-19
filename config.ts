@@ -16,7 +16,6 @@ export { ports } from './config.ports';
 
 interface AppEnvironmentConfig {
   backendUrl: string;
-  dev: boolean;
   sessionBasedToken?: boolean;
   sessionPerUser?: 'single' | 'multiple';
 }
@@ -31,33 +30,40 @@ const runtimeWindow = globalThis as typeof globalThis & { window?: Window };
 const env = (key: string): string | undefined =>
   typeof process === 'undefined' ? undefined : process.env[key];
 
-//? Default environment used both as the localhost entry AND as the fallback
-//? when the detected DNS isn't in the map. Pulled out so the fallback path is
-//? guaranteed non-undefined under `noUncheckedIndexedAccess`.
-const fallbackEnvironment: AppEnvironmentConfig = {
+//? @adr 0040 — dev/prod follows the runtime mode, never the origin. It used to
+//? come from the DNS map below, whose fallback for any unknown origin was a dev
+//? entry: a real deployment on an unlisted domain ran with localhost CORS, a
+//? localhost OAuth callback and the `?backend=` override switched on. Node reads
+//? NODE_ENV; the browser has no `process`, so it reads Vite's `__IS_PROD__`
+//? (true for `vite build`). Declared here as possibly absent: Node never defines it.
+declare const __IS_PROD__: boolean | undefined;
+const resolveDev = (): boolean => {
+  const nodeEnv = env('NODE_ENV');
+  if (nodeEnv !== undefined) return nodeEnv !== 'production';
+  return typeof __IS_PROD__ === 'boolean' ? !__IS_PROD__ : true;
+};
+const runtimeDev = resolveDev();
+
+const localEnvironment: AppEnvironmentConfig = {
   backendUrl: `http://localhost:${ports.backend}`,
-  dev: true,
   sessionBasedToken: false,
   sessionPerUser: 'multiple',
 };
 
 const dnsEnvironmentMap: Record<string, AppEnvironmentConfig> = {
-  "http://localhost:5173": fallbackEnvironment,
+  "http://localhost:5173": localEnvironment,
   "http://localhost:5174": {
     backendUrl: `http://localhost:${ports.backend}`,
-    dev: true,
     sessionBasedToken: false,
     sessionPerUser: 'multiple'
   },
   "https://staging.server.com": {
     backendUrl: "https://staging.server.com",
-    dev: false,
     sessionBasedToken: false,
     sessionPerUser: 'single'
   },
   "https://app.server.com": {
     backendUrl: "https://app.server.com",
-    dev: false,
     sessionBasedToken: false,
     sessionPerUser: 'single'
   },
@@ -71,8 +77,13 @@ const detectDns = (): string => {
   return normalizeDns(primary);
 };
 
+//? An unlisted origin keeps the local settings in dev (e.g. a preview URL that
+//? proxies to a dev server). In production it fails closed: the origin itself is
+//? the same-origin backend, with the production session policy.
 const resolveEnvironment = (dns: string): AppEnvironmentConfig =>
-  dnsEnvironmentMap[dns] ?? fallbackEnvironment;
+  dnsEnvironmentMap[dns] ?? (runtimeDev
+    ? localEnvironment
+    : { backendUrl: dns, sessionBasedToken: false, sessionPerUser: 'single' });
 
 const detectedDns = detectDns();
 const resolvedEnvironment = resolveEnvironment(detectedDns);
@@ -93,7 +104,7 @@ const resolvedEnvironment = resolveEnvironment(detectedDns);
 //?     post-login full-page redirect (which drops the query string).
 const resolveBackendUrl = (environment: AppEnvironmentConfig): string => {
   const base = environment.backendUrl;
-  if (!environment.dev) return base;
+  if (!runtimeDev) return base;
   const win = runtimeWindow.window;
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
   if (!win) return base;
@@ -116,7 +127,7 @@ const createConfig = (resolvedEnvironment: AppEnvironmentConfig) => ({
   backendUrl: resolveBackendUrl(resolvedEnvironment),
  
   /** Enable extra console logs for debugging */
-  dev: resolvedEnvironment.dev,
+  dev: runtimeDev,
 
   /**
    * Keep one Socket.io connection for realtime state, but route typed API/sync
@@ -136,13 +147,13 @@ const createConfig = (resolvedEnvironment: AppEnvironmentConfig) => ({
     //? DEVTOOLS-LAG EXPERIMENT (branch debug/devtools-lag, handoff §5.1): devLogs +
     //? stream hard-off. Every object logged to the console is RETAINED by DevTools
     //? while open → residual lag even when no new logs are visible. Revert to
-    //? `resolvedEnvironment.dev` if this makes no measurable difference.
+    //? `runtimeDev` if this makes no measurable difference.
     /** General debug logs in API/sync/client/server flows. */
     devLogs: false,
     /** Dev-only toast notifications for socket/API/sync errors. */
-    devNotifications: resolvedEnvironment.dev,
+    devNotifications: runtimeDev,
     /** Client socket lifecycle status logs (connect/disconnect/reconnect). */
-    socketStatus: resolvedEnvironment.dev,
+    socketStatus: runtimeDev,
     /** Server socket startup log line (SocketIO initialized). */
     socketStartup: true,
     /** Stream payload logs for API/Sync stream events. */
@@ -286,7 +297,7 @@ const createConfig = (resolvedEnvironment: AppEnvironmentConfig) => ({
     required: false,
     logging: {
       errors: true,
-      sends: resolvedEnvironment.dev,
+      sends: runtimeDev,
     },
   },
 
@@ -447,7 +458,7 @@ const createProjectConfigRegistration = () => {
         //? Convenience for local dev: any localhost origin is accepted regardless
         //? of port. Production deployments should keep this `false` (the framework
         //? default) and rely on `allowedOrigins` only.
-        allowLocalhost: currentEnvironment.dev,
+        allowLocalhost: runtimeDev,
       },
     },
     defaultLanguage: currentConfig.defaultLanguage,
@@ -459,7 +470,7 @@ const createProjectConfigRegistration = () => {
     //? registry lives in the browser-safe core/config entry, so this dual-bundle
     //? module never imports server-only argv code. In production the configured
     //? public/backend origin remains authoritative.
-    oauthCallbackBase: currentEnvironment.dev
+    oauthCallbackBase: runtimeDev
       ? `http://localhost:${String(getPortOverride() ?? ports.backend)}`
       : currentEnvironment.backendUrl,
     socketActivityBroadcaster: currentConfig.socketActivityBroadcaster,

@@ -4,6 +4,7 @@ import net, { type AddressInfo } from 'node:net';
 import { registerDeployConfig } from '@luckystack/core';
 
 import { createWsProxy } from './wsProxy';
+import { createTrustedProxyMatcher } from './proxyUtils';
 import type { ServiceTargetResolver, ResolveTargetResult } from './resolveTarget';
 
 //? Minimal stub resolver. The WS proxy only calls `resolve(service)`; the other
@@ -350,5 +351,61 @@ describe('wsProxy', () => {
       req.on('error', () => { resolve(false); });
     });
     expect(alive).toBe(true);
+  });
+});
+
+//? REGRESSION (sweep 054): the WS leg must make the same X-Forwarded-For choice
+//? as the HTTP leg, or a socket's IP differs from its own polling handshake.
+describe('wsProxy — x-forwarded-for behind a trusted proxy', () => {
+  const bootXff = async (trustedCidrs: string[]): Promise<{ port: number; seen: (string | undefined)[] }> => {
+    const seen: (string | undefined)[] = [];
+    const upstream = http.createServer();
+    upstream.on('upgrade', (req, socket) => {
+      const xff = req.headers['x-forwarded-for'];
+      seen.push(Array.isArray(xff) ? xff.join('|') : xff);
+      socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n');
+    });
+    await new Promise<void>((resolve) => upstream.listen(0, '127.0.0.1', resolve));
+    const upstreamPort = (upstream.address() as AddressInfo).port;
+    const wsProxy = createWsProxy({
+      resolver: makeResolver({ target: `http://127.0.0.1:${String(upstreamPort)}`, viaFallback: false, resolvedEnvKey: 'test' }),
+      isTrustedProxy: createTrustedProxyMatcher(trustedCidrs),
+    });
+    const server = http.createServer();
+    server.on('upgrade', wsProxy);
+    await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+    cleanups.push(() => { server.close(); upstream.close(); });
+    return { port: (server.address() as AddressInfo).port, seen };
+  };
+
+  const upgradeWithXff = (port: number, xff: string): Promise<string> =>
+    new Promise((resolve, reject) => {
+      const socket = net.connect(port, '127.0.0.1', () => {
+        socket.write(
+          'GET /socket.io/?EIO=4 HTTP/1.1\r\n'
+          + `Host: 127.0.0.1:${String(port)}\r\n`
+          + 'Connection: Upgrade\r\nUpgrade: websocket\r\n'
+          + `X-Forwarded-For: ${xff}\r\n`
+          + 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Version: 13\r\n\r\n',
+        );
+      });
+      socket.on('data', (chunk: Buffer) => {
+        resolve(chunk.toString('utf8').split('\r\n')[0] ?? '');
+        socket.destroy();
+      });
+      socket.on('error', reject);
+      socket.setTimeout(2000, () => { socket.destroy(); reject(new Error('timeout')); });
+    });
+
+  it('forwards the last address a trusted proxy appended', async () => {
+    const h = await bootXff(['127.0.0.1/32']);
+    expect(await upgradeWithXff(h.port, '198.51.100.7, 203.0.113.9')).toContain('101');
+    expect(h.seen).toEqual(['203.0.113.9']);
+  });
+
+  it('ignores the inbound chain from a peer that is not a trusted proxy', async () => {
+    const h = await bootXff([]);
+    expect(await upgradeWithXff(h.port, '203.0.113.9')).toContain('101');
+    expect(h.seen).toEqual(['127.0.0.1']);
   });
 });

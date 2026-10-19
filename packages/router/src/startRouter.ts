@@ -163,8 +163,9 @@ export const startRouter = async (input: StartRouterInput): Promise<RunningRoute
   //? terminating Socket.io on a non-system service was silently ignored.
   const websocketService = deployConfig.routing?.websocketService;
   //? The router itself is plain HTTP. Only an explicitly trusted immediate TLS
-  //? proxy may assert `x-forwarded-proto: https`; direct clients always resolve
-  //? to http. Compile CIDRs once instead of parsing on every HTTP/WS request.
+  //? proxy may assert `x-forwarded-proto: https` or name the visitor in
+  //? `x-forwarded-for`; direct clients always resolve to http and to their own
+  //? socket address. Compile CIDRs once instead of parsing on every HTTP/WS request.
   const isTrustedProxy = createTrustedProxyMatcher(deployConfig.routing?.trustedProxyCidrs);
 
   const envMap = (deployConfig.environments ?? {}) as Record<string, EnvironmentDefinition | undefined>;
@@ -183,17 +184,16 @@ export const startRouter = async (input: StartRouterInput): Promise<RunningRoute
   let healthStore: RedisHealthStore | null = null;
   let healthPoller: HealthPoller | null = null;
 
-  //? Placeholder resolver reference so `onExternalChange` can close over it.
-  //? Resolver is created right after the store to avoid the chicken/egg.
-  let resolverRef: ServiceTargetResolver | null = null;
-
   if (wantSharedHealth) {
     const [storeError, store] = await tryCatch(() => createRedisHealthStore({
       envKey: input.currentEnvKey,
       onExternalChange: (service, healthy) => {
-        //? Mirror Redis-published changes into the resolver's local map too,
-        //? so `getLocalHealth` returns a consistent view for tests/inspectors.
-        resolverRef?.setLocalHealth(service, healthy);
+        //? Notify only. The store's message handler has already updated its
+        //? cache, and the resolver reads health from that cache. Calling
+        //? `resolver.setLocalHealth` here used to write the change back to the
+        //? store (SET + PUBLISH), whose own message then arrived here again:
+        //? one health flip re-published forever, multiplied by every router
+        //? subscribed to the env channel.
         input.onHealthChange?.(service, healthy);
       },
     }));
@@ -216,7 +216,6 @@ export const startRouter = async (input: StartRouterInput): Promise<RunningRoute
     localPresetKey: input.localPresetKey,
     healthStore: healthStore ?? undefined,
   });
-  resolverRef = resolver;
 
   if (healthStore) {
     await healthStore.hydrate(resolver.getLocallyOwnedServices());

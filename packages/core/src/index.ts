@@ -236,6 +236,7 @@ export {
   startBootUuidHeartbeat,
   resolveEnvKey,
   BOOT_KEY_PREFIX,
+  bootUuidKey,
   type BootUuidHeartbeat,
 } from './bootUuid';
 export {

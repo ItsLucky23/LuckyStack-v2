@@ -14,21 +14,12 @@ import {
 } from '@luckystack/devkit';
 import { ROOT_DIR, getSrcDir, getServerDir } from '@luckystack/core';
 import { loadBuildConfig, validatePresetsAndServices, resolveRequestedPresets, getServicesForPreset } from '../server/config/presetLoader';
+import { assertRouteServicesDeclared, extractServiceFromPath } from './routeServices';
 
 const normalizePath = (p: string) => p.split(path.sep).join("/");
 
 const mapApiPagePath = (pagePath?: string): string => {
   return pagePath && pagePath.length > 0 ? pagePath : 'system';
-};
-
-const extractServiceFromPath = (workspaceRelativePath: string): string => {
-  // path starts with src/
-  // Either src/_api/... (system) or src/vehicles/_api/... (vehicles)
-  const segments = workspaceRelativePath.split('/');
-  if (segments.length > 1 && (segments[1] === '_api' || segments[1] === '_sync')) {
-    return 'system';
-  }
-  return segments[1] || 'system';
 };
 
 // Recursively walk dirs to collect _api and _sync files
@@ -73,6 +64,12 @@ assertNoDuplicateNormalizedRouteKeys({
 });
 
 const rawSrcFiles = walkSrcFiles(srcDir).map(normalizePath).sort();
+//? Before filtering per preset: a route whose service no preset takes would
+//? otherwise be skipped silently and exist only in dev.
+assertRouteServicesDeclared(
+  rawSrcFiles.map((file) => normalizePath(path.relative(ROOT_DIR, file))),
+  buildConfig.services,
+);
 
 // Collect functions from every configured `paths.serverFunctionDirs` root
 // (default `['functions', 'shared']`), nested by directory — the SAME discovery

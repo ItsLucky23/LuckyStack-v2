@@ -16,7 +16,18 @@
         console.createTask = undefined;
       }
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.min.js"></script>
+    <!--
+      Third-party script on the authenticated origin: pinned by Subresource Integrity, so a
+      tampered CDN file is refused instead of run. The URL is the file as published to npm
+      (byte-identical to the 1.5.1 tarball). Not `confetti.browser.min.js`: that file is not
+      in the package, jsDelivr minifies it on the fly, and a minifier update would change
+      its bytes and break the hash. Recompute the hash when bumping the version.
+    -->
+    <script
+      src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.5.1/dist/confetti.browser.js"
+      integrity="sha384-/NcXtQ1U0LC4HMzmZYoiKsBhNNqHWTnbzx6hqjqkFhsncCu1WDpGkmIEn0lG+5LE"
+      crossorigin="anonymous"
+    ></script>
     <!-- <script src="https://unpkg.com/react-scan/dist/auto.global.js"></script> -->
     <title>Vite + React + TS</title>
   </head>
