@@ -644,3 +644,248 @@ describe("recipients resolve before _server — a fan-out failure never masks a 
     expect(entry.main).toHaveBeenCalledTimes(2);
   });
 });
+
+// ─── Recipients never receive a client-chosen callback name (002 / 003) ──────
+//? Recipients fire callbacks for BOTH `fullName` and `cb`. A room member who
+//? sends a legitimate route with a `cb` naming a DIFFERENT route must not be
+//? able to trigger that other route's callbacks on everyone else's client.
+describe("server-authoritative cb on every frame that reaches another socket", () => {
+  const ROUTE = "sync/chat/send/v1";
+  const SPOOFED_CB = "admin/announce/v1";
+  const SERVER_OUTPUT = { status: "success" as const, message: "ok" };
+
+  //? io double that also records room / global stream emits.
+  const makeStreamingIo = (recipients: ReturnType<typeof makeRecipientSocket>[]) => {
+    const roomEmit = vi.fn();
+    return {
+      ...makeIoInstance(recipients),
+      to: vi.fn(() => ({ emit: roomEmit })),
+      emit: vi.fn(),
+      roomEmit,
+    };
+  };
+
+  const cbsOf = (socket: ReturnType<typeof makeRecipientSocket>): unknown[] =>
+    socket.emit.mock.calls.map((call) => (call[1] as { cb?: unknown }).cb);
+
+  beforeEach(() => {
+    state.session = { id: "u1", roomCodes: ["chat-room"] };
+  });
+
+  it("HTTP: a spoofed body cb never reaches a recipient (server-only route)", async () => {
+    state.syncObject = { [`${ROUTE}_server`]: serverEntry(SERVER_OUTPUT) };
+    const recipient = makeRecipientSocket();
+    (mockedCore.getIoInstance as ReturnType<typeof vi.fn>).mockReturnValue(makeIoInstance([recipient]));
+
+    const result = await handleHttpSyncRequest({
+      name: ROUTE, cb: SPOOFED_CB, data: {}, receiver: "chat-room", token: "tokenA", requesterIp: "127.0.0.1",
+    });
+
+    expect(result.status).toBe("success");
+    await vi.waitFor(() => { expect(recipient.emit).toHaveBeenCalled(); });
+    expect(cbsOf(recipient)).toEqual([ROUTE]);
+  });
+
+  it("HTTP: a spoofed body cb never reaches a recipient (_client route, stream + final)", async () => {
+    state.syncObject = {
+      [`${ROUTE}_server`]: serverEntry(SERVER_OUTPUT),
+      [`${ROUTE}_client`]: vi.fn(({ stream }: { stream: (payload: Record<string, unknown>) => void }) => {
+        stream({ chunk: "c" });
+        return Promise.resolve({ status: "success" as const });
+      }),
+    };
+    const recipient = makeRecipientSocket();
+    (mockedCore.getIoInstance as ReturnType<typeof vi.fn>).mockReturnValue(makeIoInstance([recipient]));
+
+    await handleHttpSyncRequest({
+      name: ROUTE, cb: SPOOFED_CB, data: {}, receiver: "chat-room", token: "tokenA", requesterIp: "127.0.0.1",
+    });
+
+    await vi.waitFor(() => { expect(recipient.emit).toHaveBeenCalledTimes(2); });
+    expect(cbsOf(recipient)).toEqual([ROUTE, ROUTE]);
+  });
+
+  it("socket + HTTP: broadcastStream / streamTo frames carry the resolved route, not the client cb", async () => {
+    const SPOOFED_STREAM_CB = "billing/progress/v1";
+    const entry = {
+      ...serverEntry(SERVER_OUTPUT),
+      main: vi.fn(({ broadcastStream, streamTo }: {
+        broadcastStream: (payload: Record<string, unknown>) => void;
+        streamTo: (tokens: string[], payload: Record<string, unknown>) => void;
+      }) => {
+        broadcastStream({ chunk: "b" });
+        streamTo(["tokenB"], { chunk: "t" });
+        return Promise.resolve(SERVER_OUTPUT);
+      }),
+    };
+    state.syncObject = { [`${ROUTE}_server`]: entry };
+    const io = makeStreamingIo([makeRecipientSocket()]);
+    (mockedCore.getIoInstance as ReturnType<typeof vi.fn>).mockReturnValue(io);
+
+    const originator = makeOriginatorSocket("sock-A", ["chat-room"]);
+    await handleSyncRequest({
+      msg: { name: ROUTE, data: {}, cb: SPOOFED_STREAM_CB, receiver: "chat-room", responseIndex: 1 },
+      socket: asSocketArg(originator),
+      token: "tokenA",
+    });
+    await handleHttpSyncRequest({
+      name: ROUTE, cb: SPOOFED_STREAM_CB, data: {}, receiver: "chat-room", token: "tokenA", requesterIp: "127.0.0.1",
+    });
+
+    //? 2 transports × (broadcastStream + streamTo).
+    expect(io.roomEmit).toHaveBeenCalledTimes(4);
+    for (const call of io.roomEmit.mock.calls) {
+      expect(call[1]).toMatchObject({ cb: ROUTE, fullName: ROUTE, status: "stream" });
+    }
+  });
+});
+
+// ─── 017: HTTP answers the originator once the change is saved ───────────────
+//? Owner decision: parity with the socket early ack (SYNC-O9). A slow fan-out
+//? must not hold the HTTP answer back, or the caller times out about a saved
+//? mutation and a retry applies it twice.
+describe("HTTP answers the originator before the per-recipient fan-out finishes", () => {
+  const ROUTE = "sync/chat/send/v1";
+  const SERVER_OUTPUT = { status: "success" as const, message: "saved" };
+
+  it("returns success while a recipient's _client handler is still running; delivery completes afterwards", async () => {
+    let releaseClient: () => void = () => undefined;
+    const clientGate = new Promise<void>((resolve) => { releaseClient = resolve; });
+    state.session = { id: "u1", roomCodes: ["chat-room"] };
+    state.syncObject = {
+      [`${ROUTE}_server`]: serverEntry(SERVER_OUTPUT),
+      [`${ROUTE}_client`]: vi.fn(async () => {
+        await clientGate;
+        return { status: "success" as const };
+      }),
+    };
+    const recipient = makeRecipientSocket();
+    (mockedCore.getIoInstance as ReturnType<typeof vi.fn>).mockReturnValue(makeIoInstance([recipient]));
+    const hookNames = (): string[] =>
+      (mockedCore.dispatchHook as ReturnType<typeof vi.fn>).mock.calls.map((call) => String(call[0]));
+
+    //? On the old code this await never settles (the loop awaits the gated
+    //? `_client` handler) and the test times out.
+    const result = await handleHttpSyncRequest({
+      name: ROUTE, data: {}, receiver: "chat-room", token: "tokenA", requesterIp: "127.0.0.1",
+    });
+
+    expect(result).toEqual({ status: "success", message: "saved", result: SERVER_OUTPUT });
+    //? The deny gate already ran; delivery itself has not finished yet.
+    expect(hookNames()).toContain("preSyncFanout");
+    expect(hookNames()).not.toContain("postSyncFanout");
+    expect(recipient.emit).not.toHaveBeenCalled();
+
+    releaseClient();
+    await vi.waitFor(() => { expect(hookNames()).toContain("postSyncFanout"); });
+    expect(recipient.emit).toHaveBeenCalledTimes(1);
+  });
+
+  it("a preSyncFanout stop is still an error answer (the gate runs before the answer)", async () => {
+    state.session = { id: "u1", roomCodes: ["chat-room"] };
+    state.syncObject = { [`${ROUTE}_server`]: serverEntry(SERVER_OUTPUT) };
+    (mockedCore.getIoInstance as ReturnType<typeof vi.fn>).mockReturnValue(makeIoInstance([makeRecipientSocket()]));
+    (mockedCore.dispatchHook as ReturnType<typeof vi.fn>).mockImplementation((name: string) =>
+      Promise.resolve(name === "preSyncFanout"
+        ? { stopped: true as const, signal: { errorCode: "custom.denied", httpStatus: 403 } }
+        : { stopped: false as const }),
+    );
+
+    const result = await handleHttpSyncRequest({
+      name: ROUTE, data: {}, receiver: "chat-room", token: "tokenA", requesterIp: "127.0.0.1",
+    });
+
+    (mockedCore.dispatchHook as ReturnType<typeof vi.fn>).mockImplementation(() => Promise.resolve({ stopped: false as const }));
+    expect(result.status).toBe("error");
+    expect(result.errorCode).toBe("custom.denied");
+  });
+});
+
+// ─── 066 / 067: syncing to your own session token ────────────────────────────
+describe("syncing to the caller's own token room", () => {
+  const ROUTE = "sync/chat/send/v1";
+  const OWN_TOKEN = "own-session-token-0123456789abcdef";
+  const SERVER_OUTPUT = { status: "success" as const, message: "ok" };
+
+  beforeEach(() => {
+    //? A consumer-registered, non-identity formatter (multi-tenant prefix).
+    (mockedCore.formatRoomName as ReturnType<typeof vi.fn>).mockImplementation((room: string) => `tenantA:${room}`);
+    state.session = { id: "u1", token: OWN_TOKEN, roomCodes: [] };
+  });
+
+  afterEach(() => {
+    (mockedCore.formatRoomName as ReturnType<typeof vi.fn>).mockImplementation((room: string) => room);
+  });
+
+  it("socket: own token passes membership and is fetched raw under a prefixing formatter", async () => {
+    state.syncObject = { [`${ROUTE}_server`]: serverEntry(SERVER_OUTPUT) };
+    const io = makeIoInstance([makeRecipientSocket()]);
+    (mockedCore.getIoInstance as ReturnType<typeof vi.fn>).mockReturnValue(io);
+    //? loadSocket joins the token room RAW, so the socket holds the bare token.
+    const originator = makeOriginatorSocket("sock-A", [OWN_TOKEN]);
+
+    await handleSyncRequest({
+      msg: { name: ROUTE, data: {}, cb: "chat/send/v1", receiver: OWN_TOKEN, responseIndex: 1 },
+      socket: asSocketArg(originator),
+      token: OWN_TOKEN,
+    });
+
+    const ack = originator._emits.find((e) => e.event === "sync-1");
+    expect(ack?.payload).toMatchObject({ status: "success" });
+    expect(io.in).toHaveBeenCalledWith(OWN_TOKEN);
+  });
+
+  it("HTTP: own token is fetched raw under a prefixing formatter (no sync.noReceiversFound)", async () => {
+    state.syncObject = { [`${ROUTE}_server`]: serverEntry(SERVER_OUTPUT) };
+    const io = makeIoInstance([makeRecipientSocket()]);
+    (mockedCore.getIoInstance as ReturnType<typeof vi.fn>).mockReturnValue(io);
+
+    const result = await handleHttpSyncRequest({
+      name: ROUTE, data: {}, receiver: OWN_TOKEN, token: OWN_TOKEN, requesterIp: "127.0.0.1",
+    });
+
+    expect(result.status).toBe("success");
+    expect(io.in).toHaveBeenCalledWith(OWN_TOKEN);
+  });
+
+  it("ordinary rooms are still formatted", async () => {
+    state.session = { id: "u1", token: OWN_TOKEN, roomCodes: ["chat-room"] };
+    state.syncObject = { [`${ROUTE}_server`]: serverEntry(SERVER_OUTPUT) };
+    const io = makeIoInstance([makeRecipientSocket()]);
+    (mockedCore.getIoInstance as ReturnType<typeof vi.fn>).mockReturnValue(io);
+
+    await handleHttpSyncRequest({
+      name: ROUTE, data: {}, receiver: "chat-room", token: OWN_TOKEN, requesterIp: "127.0.0.1",
+    });
+
+    expect(io.in).toHaveBeenCalledWith("tenantA:chat-room");
+  });
+
+  it("socket + HTTP: the error-tracker context never carries the raw token as receiver", async () => {
+    state.syncObject = { [`${ROUTE}_server`]: serverEntry(SERVER_OUTPUT) };
+    (mockedCore.getIoInstance as ReturnType<typeof vi.fn>).mockReturnValue(makeIoInstance([makeRecipientSocket()]));
+    const originator = makeOriginatorSocket("sock-A", [OWN_TOKEN]);
+
+    await handleSyncRequest({
+      msg: { name: ROUTE, data: {}, cb: "chat/send/v1", receiver: OWN_TOKEN, responseIndex: 1 },
+      socket: asSocketArg(originator),
+      token: OWN_TOKEN,
+    });
+    await handleHttpSyncRequest({
+      name: ROUTE, data: {}, receiver: OWN_TOKEN, token: OWN_TOKEN, requesterIp: "127.0.0.1",
+    });
+    await vi.waitFor(() => {
+      expect(tryCatch.mock.calls.some((call) => (call as unknown[])[2] !== undefined && JSON.stringify((call as unknown[])[2]).includes('"stage":"fanout"'))).toBe(true);
+    });
+
+    const contexts = tryCatch.mock.calls
+      .map((call) => (call as unknown[])[2])
+      .filter((context): context is Record<string, unknown> => typeof context === "object" && context !== null && "receiver" in context);
+    //? socket server + handler, HTTP server + fanout.
+    expect(contexts.length).toBeGreaterThanOrEqual(4);
+    for (const context of contexts) {
+      expect(context.receiver).toBe("own-…");
+    }
+    expect(JSON.stringify(contexts)).not.toContain("0123456789abcdef");
+  });
+});

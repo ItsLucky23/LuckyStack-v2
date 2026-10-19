@@ -6,8 +6,6 @@
 //? result, and emitted the per-recipient `sync` envelope (stream / error /
 //? success / server-only-success). The two copies differed only in:
 //?
-//?   - the `cb` value carried back to the client (raw `cb` over sockets,
-//?     `callbackName` over HTTP),
 //?   - the accept-/x-language header preference ORDER used to localize a
 //?     per-recipient error (socket prefers `x-language`; HTTP prefers
 //?     `accept-language` — preserved verbatim here), and
@@ -16,11 +14,17 @@
 //? Those are now explicit parameters, so the loop body itself is single-source.
 //? Behaviour (emit shapes, ordering, continue-on-error) is identical to the
 //? previous inlined copies.
+//?
+//? Every frame's `cb` is the SERVER-resolved route, never a client-chosen
+//? callback name, and there is no parameter to pass one. Recipients fire
+//? callbacks for both `fullName` and `cb`, so a client `cb` here let a room
+//? member trigger another route's callbacks with data that never passed that
+//? route's `_server` auth or validation (cross-route callback spoofing).
 
 import { tryCatch, socketEventNames, getLogger } from '@luckystack/core';
 import type { RuntimeSyncClientHandler, SyncStreamPayload, SyncErrorEnvelopeInput } from './syncTypes';
 import { ensureSyncErrorShape } from './errorBuilders';
-import { redactToken } from './redactToken';
+import { redactToken, redactTokenRoom } from './redactToken';
 
 //? Minimal surface of the per-recipient socket the fanout uses. Both
 //? `RemoteSocket` (cross-instance, via the Redis adapter) and a plain local
@@ -41,9 +45,6 @@ export interface ProcessClientSyncForRecipientArgs<TError extends object> {
   serverOutput: unknown;
   receiver: string;
   resolvedName: string;
-  //? `cb` value echoed back to the recipient. Socket transport uses the raw
-  //? client `cb`; HTTP transport uses the derived `callbackName`.
-  callbackKey: string;
   //? `'socket' | 'http'` — feeds the tryCatch context + chooses the header
   //? preference order for per-recipient error localization.
   transport: 'socket' | 'http';
@@ -78,7 +79,6 @@ export const processClientSyncForRecipient = async <TError extends object>({
   serverOutput,
   receiver,
   resolvedName,
-  callbackKey,
   transport,
   handlerName,
   logLabel,
@@ -95,7 +95,7 @@ export const processClientSyncForRecipient = async <TError extends object>({
 
     tempSocket.emit(socketEventNames.sync, {
       ...payload,
-      cb: callbackKey,
+      cb: resolvedName,
       fullName: resolvedName,
       status: 'stream',
     });
@@ -120,14 +120,17 @@ export const processClientSyncForRecipient = async <TError extends object>({
       //? a usable credential (defeats HttpOnly-cookie mode). The 4-char prefix
       //? still correlates error events.
       targetToken: redactToken(tempToken),
-      receiver,
+      //? A token room's name IS the token: every socket in it carries that
+      //? token, so comparing against the recipient's token catches any token
+      //? room, not only the originator's own.
+      receiver: redactTokenRoom(receiver, [tempToken]),
       transport,
     },
   );
   const preferred = resolvePreferredLocale(tempSocket.handshake.headers);
   if (clientSyncError) {
     tempSocket.emit(socketEventNames.sync, {
-      cb: callbackKey,
+      cb: resolvedName,
       fullName: resolvedName,
       ...buildSyncError({
         response: { status: 'error', errorCode: 'sync.clientExecutionFailed' },
@@ -138,7 +141,7 @@ export const processClientSyncForRecipient = async <TError extends object>({
   }
   if (clientSyncResult?.status === 'error') {
     tempSocket.emit(socketEventNames.sync, {
-      cb: callbackKey,
+      cb: resolvedName,
       fullName: resolvedName,
       ...buildSyncError({
         response: ensureSyncErrorShape(clientSyncResult),
@@ -149,7 +152,7 @@ export const processClientSyncForRecipient = async <TError extends object>({
   }
   if (clientSyncResult?.status !== 'success') {
     tempSocket.emit(socketEventNames.sync, {
-      cb: callbackKey,
+      cb: resolvedName,
       fullName: resolvedName,
       ...buildSyncError({
         response: { status: 'error', errorCode: 'sync.invalidClientResponse' },
@@ -160,7 +163,7 @@ export const processClientSyncForRecipient = async <TError extends object>({
   }
 
   const result = {
-    cb: callbackKey,
+    cb: resolvedName,
     fullName: resolvedName,
     serverOutput,
     clientOutput: clientSyncResult,

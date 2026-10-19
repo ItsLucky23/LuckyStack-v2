@@ -28,6 +28,7 @@ vi.mock("@luckystack/core", () => ({
 }));
 
 import { processClientSyncForRecipient } from "./clientFanout";
+import type { RuntimeSyncClientHandler } from "./syncTypes";
 
 const RAW_TOKEN = "abcdefghijklmnopqrstuvwxyz0123456789";
 
@@ -40,7 +41,6 @@ const makeArgs = (tempToken: string | null) => ({
   serverOutput: { status: "success" as const },
   receiver: "room-A",
   resolvedName: "sync/chat/sendMessage/v1",
-  callbackKey: "cb-1",
   transport: "socket" as const,
   handlerName: "handleSyncRequest" as const,
   logLabel: "sync" as const,
@@ -70,5 +70,57 @@ describe("processClientSyncForRecipient — token redaction in error context", (
 
     const context = tryCatch.mock.calls[0]?.[2] ?? {};
     expect(context.targetToken).toBeNull();
+  });
+
+  //? 067 — a token room's name is the bearer token, so `receiver` leaked it.
+  it("redacts the receiver when it is the recipient's token room", async () => {
+    await processClientSyncForRecipient({ ...makeArgs(RAW_TOKEN), receiver: RAW_TOKEN });
+
+    const context = tryCatch.mock.calls[0]?.[2] ?? {};
+    expect(context.receiver).toBe("abcd…");
+    expect(JSON.stringify(context)).not.toContain("ijklmnop");
+  });
+
+  it("keeps an ordinary room code readable in the error context", async () => {
+    await processClientSyncForRecipient(makeArgs(RAW_TOKEN));
+
+    const context = tryCatch.mock.calls[0]?.[2] ?? {};
+    expect(context.receiver).toBe("room-A");
+  });
+});
+
+//? 002 — recipients fire callbacks for both `fullName` and `cb`. Every frame
+//? this helper emits (stream, error, success) must carry the SERVER-resolved
+//? route as `cb`, so a client-chosen callback name never reaches another socket.
+describe("processClientSyncForRecipient — server-authoritative cb on every frame", () => {
+  const ROUTE = "sync/chat/sendMessage/v1";
+
+  const cbOf = (call: unknown[] | undefined): unknown => (call?.[1] as { cb?: unknown } | undefined)?.cb;
+
+  it("stream and success frames carry cb = resolvedName", async () => {
+    const args = {
+      ...makeArgs(RAW_TOKEN),
+      clientSyncHandler: vi.fn<RuntimeSyncClientHandler>(async ({ stream }) => {
+        //? Even a handler payload carrying its own `cb` is overridden.
+        stream({ cb: "admin/announce/v1", chunk: "x" });
+        return { status: "success" };
+      }),
+    };
+    await processClientSyncForRecipient(args);
+
+    const calls = args.tempSocket.emit.mock.calls;
+    expect(calls).toHaveLength(2);
+    expect(cbOf(calls[0])).toBe(ROUTE);
+    expect(cbOf(calls[1])).toBe(ROUTE);
+  });
+
+  it("error frames carry cb = resolvedName", async () => {
+    const args = {
+      ...makeArgs(RAW_TOKEN),
+      clientSyncHandler: vi.fn<RuntimeSyncClientHandler>(async () => ({ status: "error" })),
+    };
+    await processClientSyncForRecipient(args);
+
+    expect(cbOf(args.tempSocket.emit.mock.calls[0])).toBe(ROUTE);
   });
 });
