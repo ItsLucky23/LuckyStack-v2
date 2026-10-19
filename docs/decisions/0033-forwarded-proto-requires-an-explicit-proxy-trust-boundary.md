@@ -27,6 +27,10 @@ immediate socket peer, and emit `https` only when that peer is trusted and the
 header's first value is exactly `https`. Malformed entries abort router boot.
 Forwarded chains remain discarded.
 
+> **Amendment 2026-10-19 (v0.15.0).** For a trusted peer the router now
+> forwards the last `X-Forwarded-For` hop that proxy appended; see ADR 0073.
+> Untrusted peers are unchanged.
+
 ## Rejected alternatives
 
 - **Trust every literal `https` value.** This is the original direct-client

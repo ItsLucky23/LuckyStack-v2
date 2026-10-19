@@ -36,6 +36,14 @@ in the core socket-bootstrap doc and in the package INDEX; no call site changes.
 Per-user isolation belongs in the raw room code the consumer chooses (a token
 room, a `user:<id>` room), which is stable across join, fan-out and stream.
 
+> **Amendment 2026-10-19 (v0.15.0).** Since v0.15.0 presence fan-out formats
+> content rooms with purpose `'broadcast'`, the purpose the sockets joined them
+> under; the framework no longer emits `'presence'` for room-name formatting.
+> A formatter that gave `'presence'` its own names put presence events in rooms
+> nobody had joined. `'presence'` stays in the purpose union for backward
+> compatibility and should be treated like `'broadcast'`, so the example of
+> `'presence'` as a genuinely separate family above no longer applies.
+
 ## Rejected alternatives
 
 - **Pass `userId: null` for every `'broadcast'` call** — rejected because it

@@ -1045,6 +1045,7 @@ async function handleHttpSyncRequestScoped({
     const fanout = await stageFanout(resolvedName, serverOutput, sockets, syncObject, functionsObject, ctx);
     if (fanout.error) return fanout.error;
 
+    //? @adr 0071
     //? Answer the originator as soon as the change is saved and `preSyncFanout`
     //? allowed delivery, then deliver in the background — the same point the
     //? socket transport acks (SYNC-O9). The per-recipient loop is serial and

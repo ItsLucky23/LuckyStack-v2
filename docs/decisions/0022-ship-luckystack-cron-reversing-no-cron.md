@@ -29,5 +29,6 @@ Ship an optional `@luckystack/cron` package (NOT a core/server feature). It comp
 
 - Jobs must be idempotent: the lease is single-Redis best-effort (not Redlock) — a leader stalling past its TTL can hand over mid-run; the per-run lease reduces but cannot eliminate double-fires. Documented in the package CLAUDE.md + deep dive.
 - No catch-up semantics: ticks missed while leaderless are skipped — jobs needing guaranteed execution windows should persist their own watermark.
+  > **Amendment 2026-10-19 (v0.15.0).** Interval jobs (`{ everyMs }`) now resume from their last run after a restart or leader change, and an overdue one runs once; missed periods are still not replayed. See ADR 0072.
 - Follow-up work: `_cron/` file convention (devkit + codegen), optional scaffold-wizard selectability (currently add-later via `npx luckystack add cron`), and a `luckystack doctor`-style stats surface.
 - The EXTENSION_POINTS "Scheduled jobs" section is amended in the same change (package-first, history preserved).
