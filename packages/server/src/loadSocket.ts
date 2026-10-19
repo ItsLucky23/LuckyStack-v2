@@ -53,6 +53,11 @@ const withSessionLock = async (token: string, fn: () => Promise<void>) => {
   if (sessionLocks.get(token) === next) sessionLocks.delete(token);
 };
 
+//? 'all' is the sync every-socket sentinel: `receiver: 'all'` fans out to every
+//? connected socket instead of a room. A room literally named 'all' would be
+//? addressed as that sentinel, so it is never joinable.
+const SYNC_ALL_RECEIVER = 'all';
+
 const getVisibleSocketRooms = (
   socket: { rooms: Set<string>; id: string },
   token: string | null
@@ -295,6 +300,13 @@ const registerRoomEvents = (ctx: SocketContext): void => {
     if (!validateRoomRequest(socket, responseIndex, token, group, preferredLocale, buildJoinRoomResponseEventName)) return;
     // validateRoomRequest already rejects null tokens, so this guard is redundant but narrows the type
     if (!token) return;
+    if (group === SYNC_ALL_RECEIVER) {
+      socket.emit(buildJoinRoomResponseEventName(responseIndex), normalizeErrorResponse({
+        response: { status: 'error', errorCode: 'room.invalid' },
+        preferredLocale,
+      }));
+      return;
+    }
 
     void withSessionLock(token, async () => {
       await executeRoomMutation({
@@ -534,6 +546,8 @@ const rejoinPersistedRooms = (ctx: SocketContext): void => {
       const roomCodes = session ? getSessionRoomCodes(session) : [];
       const userId = session?.id ?? null;
       for (const roomCode of roomCodes) {
+        //? A code persisted before 'all' was reserved must not become a room.
+        if (roomCode === SYNC_ALL_RECEIVER) continue;
         //? Route through the formatter so a multi-tenant prefix applies on
         //? reconnect exactly as it did on the original join (PRESENCE-1). Canonical
         //? content-room purpose (M5) so the rejoined physical room matches the sync

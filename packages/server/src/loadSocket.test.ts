@@ -216,6 +216,26 @@ describe('loadSocket — room/location writes never resurrect a deleted session 
   });
 });
 
+describe('loadSocket — the sync every-socket sentinel is not a room (finding 016)', () => {
+  it('joinRoom("all") answers room.invalid and never joins', async () => {
+    const socket = connect('tok');
+    listener(socket, 'joinRoom')({ group: ' all ', responseIndex: 4 });
+    await new Promise((resolve) => { setTimeout(resolve, 0); });
+
+    expect(socket.emit).toHaveBeenCalledWith('joinRoomResponse-4', { status: 'error', errorCode: 'room.invalid' });
+    expect(socket.join).not.toHaveBeenCalledWith('room:all');
+    expect(writeSessionMock).not.toHaveBeenCalled();
+  });
+
+  it('skips a persisted "all" room code when rejoining on connect', async () => {
+    readSessionMock.mockResolvedValue({ id: 'u1', roomCodes: ['all', 'lobby'] });
+    const socket = connect('tok');
+    await vi.waitFor(() => { expect(socket.join).toHaveBeenCalledWith('room:lobby'); });
+
+    expect(socket.join).not.toHaveBeenCalledWith('room:all');
+  });
+});
+
 describe('loadSocket — onSocketConnect ip (finding 088)', () => {
   it('resolves the client IP through http.trustProxy instead of the raw socket address', () => {
     connect('tok');
