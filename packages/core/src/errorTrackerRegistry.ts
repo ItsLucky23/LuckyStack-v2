@@ -12,7 +12,7 @@
 //? server-only errorTrackerIdentity.ts module. This registry is also reached by
 //? the browser-safe legacy capture seam, so it must remain free of node:* imports.
 import type { ErrorTrackerUser } from './errorTrackerIdentity';
-import { getRedactedLogKeys, REDACTED_PLACEHOLDER, sanitizeForLog } from './redactedLogKeys';
+import { getRedactedLogKeys, normalizeLogKey, REDACTED_PLACEHOLDER, sanitizeForLog, SENSITIVE_KEY_SUFFIXES } from './redactedLogKeys';
 import { getLogger } from './loggerRegistry';
 
 export type { ErrorTrackerUser } from './errorTrackerIdentity';
@@ -64,7 +64,11 @@ const buildScrubPattern = (key: string): ScrubPatternPair => {
       // last-resort swallow
     }
   }
-  const escaped = key.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`);
+  //? `key` is normalized (no `-`/`_`); an optional separator between its
+  //? characters matches `api_key`, `x-api-key` and `apiKey` alike, as the
+  //? object-key lookup does. Each `[-_]?` takes at most one character and
+  //? nothing around it repeats, so a failed match costs at most the key length.
+  const escaped = Array.from(key, (char) => char.replaceAll(/[.*+?^${}()|[\]\\]/g, String.raw`\$&`)).join('[-_]?');
   //? Two separate passes — one for `key=value` (URL-param style), one for
   //? `key: value` (log-label style) — to avoid alternation complexity and the
   //? subtle behaviours that arise when mixing capturing and non-capturing groups
@@ -88,7 +92,11 @@ export const sanitizeErrorString = (value: string): string => {
   let result = value;
   // Scrub matching `key=value` / `key: value` patterns for every registered
   // redacted key so interpolated secrets (e.g. "token=abc") never reach an adapter.
-  for (const key of getRedactedLogKeys()) {
+  //? The suffixes join the registered keys: the pattern has no left boundary,
+  //? so `secretkey` also catches `stripe_secret_key=`, like the key lookup.
+  const scrubKeys = new Set([...getRedactedLogKeys(), ...SENSITIVE_KEY_SUFFIXES].map((key) => normalizeLogKey(key)));
+  scrubKeys.delete('');
+  for (const key of scrubKeys) {
     const { urlParam, logLabel } = buildScrubPattern(key);
     result = result.replace(urlParam, () => REDACTED_PLACEHOLDER).replace(logLabel, () => REDACTED_PLACEHOLDER);
   }

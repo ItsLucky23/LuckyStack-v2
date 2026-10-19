@@ -28,11 +28,10 @@ export const DEFAULT_REDACTED_LOG_KEYS: readonly string[] = [
 
 //? Separators are dropped before matching so header- and snake-case spellings
 //? (`x-api-key`, `private_key`) meet the same defaults and suffixes.
-const normalizeLogKey = (key: string): string => key.toLowerCase().replaceAll(/[-_]/g, '');
+export const normalizeLogKey = (key: string): string => key.toLowerCase().replaceAll(/[-_]/g, '');
 
-//? `redactedKeys` keeps the registered spelling (lowercased): the error-tracker
-//? value scrub builds `key=value` patterns from it, and a log line spells
-//? `set-cookie` with its hyphen. `normalizedRedactedKeys` serves key lookups.
+//? `redactedKeys` keeps the registered spelling (lowercased) for
+//? `getRedactedLogKeys`. `normalizedRedactedKeys` serves key lookups.
 const redactedKeys = new Set<string>(DEFAULT_REDACTED_LOG_KEYS.map((key) => key.toLowerCase()));
 const normalizedRedactedKeys = new Set<string>(DEFAULT_REDACTED_LOG_KEYS.map((key) => normalizeLogKey(key)));
 
@@ -47,7 +46,7 @@ const normalizedRedactedKeys = new Set<string>(DEFAULT_REDACTED_LOG_KEYS.map((ke
 //? `registerRedactedLogKeys` for project-specific names that don't fit.
 //? `secretkey` / `privatekey` cover `secretKey`, `stripeSecretKey`, `privateKey`
 //? (the bare `key` ending would over-redact `cacheKey`, `idempotencyKey`).
-const SENSITIVE_KEY_SUFFIXES: readonly string[] = ['token', 'secret', 'apikey', 'password', 'secretkey', 'privatekey'];
+export const SENSITIVE_KEY_SUFFIXES: readonly string[] =['token', 'secret', 'apikey', 'password', 'secretkey', 'privatekey'];
 
 export const registerRedactedLogKeys = (keys: readonly string[]): void => {
   for (const key of keys) {
