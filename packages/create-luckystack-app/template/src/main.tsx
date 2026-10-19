@@ -7,7 +7,6 @@ import 'src/index.css';
 
 import {
   AvatarProvider,
-  Middleware,
   TranslationProvider,
   registerPageMiddleware,
   validatePagePath,
@@ -168,15 +167,13 @@ const loaders = (import.meta.env.PROD ? prodPages : devPages) as Record<string, 
 const routes = getRoutes(loaders);
 
 //? Catch-all — any URL that doesn't match a page renders ErrorPage inside the
-//? plain template wrapper. Middleware lets the framework intercept auth /
-//? bootstrap state before painting.
+//? plain template wrapper, whose <Middleware> lets the framework intercept
+//? auth / bootstrap state before painting.
 routes.push({
   path: '*',
   element: (
     <TemplateProvider initialTemplate='plain'>
-      <Middleware>
-        <ErrorPage />
-      </Middleware>
+      <ErrorPage />
     </TemplateProvider>
   ),
 });

@@ -103,6 +103,9 @@ type PageLoader = () => Promise<PageModule>;
 const buildPageElement = (module: PageModule, finalPath: string) => {
   if (module.middleware) {
     registerPageMiddleware(finalPath, module.middleware);
+    //? A splat page renders for its whole sub-tree, so its guard must resolve
+    //? for those sub-paths too (the exact pattern only matches `finalPath`).
+    if (module.splat) registerPageMiddleware(`${finalPath}/*`, module.middleware);
   }
   const template = module.template ?? 'plain';
   return (

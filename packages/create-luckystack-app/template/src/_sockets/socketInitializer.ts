@@ -19,6 +19,7 @@ import {
   buildGetJoinedRoomsResponseEventName,
   buildJoinRoomResponseEventName,
   buildLeaveRoomResponseEventName,
+  getProjectConfig,
   tryCatch,
 } from "@luckystack/core/client";
 import { useSocketStatus } from "../_providers/socketStatusProvider";
@@ -111,8 +112,9 @@ export function useSocket(session: SessionLayout | null) {
     };
     document.addEventListener("visibilitychange", handleVisibility);
 
-    //? Activity heartbeat: forward real user interaction (throttled to once per
-    //? 10s) to the server so the activity-event system (built-in AFK detection
+    //? Activity heartbeat: forward real user interaction (throttled by
+    //? `socket.activityHeartbeatThrottleMs`, default 10s) to the server so the
+    //? activity-event system (built-in AFK detection
     //? + any custom pause/kick events) knows when the user is active. Idle =
     //? no events emitted = the server's last-activity ages past the AFK
     //? threshold and the registered event fires.
@@ -120,7 +122,7 @@ export function useSocket(session: SessionLayout | null) {
     const handleActivity = () => {
       if (!socketActivityBroadcaster) { return; }
       const now = Date.now();
-      if (now - lastActivitySent < 10_000) { return; }
+      if (now - lastActivitySent < getProjectConfig().socket.activityHeartbeatThrottleMs) { return; }
       lastActivitySent = now;
       socketConnection.emit(socketEventNames.activity);
     };
@@ -149,7 +151,7 @@ export function useSocket(session: SessionLayout | null) {
         }
       });
 
-      socketConnection.on(socketEventNames.reconnectAttempt, (attempt) => {
+      socketConnection.io.on(socketEventNames.reconnectAttempt, (attempt) => {
         if (shouldLogSocketStatus) {
           console.log("Reconnecting attempt", attempt);
         }

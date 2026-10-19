@@ -99,7 +99,7 @@ export function attachMinimalStatusLogs(socketConnection: Socket) {
     }
   });
 
-  socketConnection.on(socketEventNames.reconnectAttempt, (attempt) => {
+  socketConnection.io.on(socketEventNames.reconnectAttempt, (attempt) => {
     if (shouldLogSocketStatus) {
       console.log("Reconnecting attempt", attempt);
     }
