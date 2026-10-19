@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`luckystack update` no longer fails with a misleading network error on an `orm: 'none'` project that later added login.** The re-render leaves auth out for `orm: 'none'`, as the scaffolder does. A failed render now says why: the scaffolder rejected the choices, `npx` is missing, or there is a network or registry problem.
 - **`luckystack update` records the new hash for files that already match the new framework version.** A file you merged from a `.new` sidecar is then overwritten cleanly on the next release instead of getting another sidecar.
+- **`luckystack update --app` no longer adds a file that imports a package the project does not have.** A project with a monitoring backend but without `@luckystack/error-tracking` got `functions/sentry.ts`, which broke dev boot and typecheck. The file is now held back, and the command and report say to run `npx luckystack add error-tracking`.
 - **`luckystack update` hashes `Dockerfile`, `.yaml`/`.yml`, `.sh` and `.conf` files the way the scaffolder does.** Unedited Docker and CI files on a CRLF checkout (Windows, `core.autocrlf`) no longer count as edited.
 - **`manage` → Auth: none also deletes `src/_api/logout_v1.ts`**, which calls the removed session shim and broke the build. `add login` now delivers it too, so add and remove match.
 - **`add presence` / `remove presence` no longer leave `main.tsx` changed when `TemplateProvider.tsx` cannot be edited.** A second run no longer reports success with the UI half-wired, and it completes a project an older version left half-wired.
@@ -35,6 +36,7 @@ These steps are also in the `create-luckystack-app` 0.15.0 changelog, which a pr
 2. `npx luckystack update --app` brings the changed `src/` files: the `plain` template (`src/_components/templates/Plain.tsx`, `TemplateProvider.tsx`), `src/_providers/SessionProvider.tsx`, `src/main.tsx` (token-mode OAuth reads `#token=`), the locale files (`sync.disconnected`, `settings.emailChange.managedByProvider`, `session.notFound`) and, with login, the reset-password and settings pages and routes. It also brings the corrected CI file. A file you edited gets a `.new` sidecar to merge by hand.
 3. `package.json` is never touched by `update`. With the router, set the `router` script to `tsx --tsconfig tsconfig.server.json node_modules/@luckystack/router/dist/cli.js --deploy ./deploy.config.ts --services ./services.config.ts`.
 4. Add `.env.docker`, `.env.*.local`, `*.db`, `*.db-journal`, `*.db-wal` and `*.db-shm` to `.gitignore`. If `.env.docker` or a `.db` file is already committed, run `git rm --cached` on it and change the credentials it held.
+5. If the project has a monitoring backend (`sentry`, `datadog` or `posthog`) but not `@luckystack/error-tracking`, run `npx luckystack add error-tracking`. That package is what sends errors to the backend; until it is installed, `update --app` does not deliver `functions/sentry.ts`.
 
 ## [0.14.0] - 2026-10-16
 

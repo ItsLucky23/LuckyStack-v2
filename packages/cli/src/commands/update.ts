@@ -30,6 +30,7 @@ import { spawnSync } from 'node:child_process';
 import { ok, type ConsumerProject, type Result } from '../lib/project';
 import { writeDumpLog } from '../lib/scan';
 import { AUTH_MODES, EMAIL_PROVIDERS, MONITORING_PROVIDERS, OAUTH_PROVIDERS } from '../featureOptions';
+import { REGISTRY } from '../registry';
 
 //? Marker written next to a file the framework USED to ship and no longer does.
 //?
@@ -309,13 +310,42 @@ export const choicesToFlags = (choices: Record<string, unknown>): string[] => {
   return flags;
 };
 
-export type UpdateAction = 'add' | 'overwrite' | 'sidecar' | 'unchanged' | 'ignored';
+export type UpdateAction = 'add' | 'overwrite' | 'sidecar' | 'unchanged' | 'ignored' | 'needsPackage';
 
 export interface UpdatePlanEntry {
   path: string;
   action: UpdateAction;
   freshSha256: string;
+  /** For `needsPackage`: the optional package the file imports. */
+  requiredPackage?: string;
 }
+
+//? Framework files that exist only to import an optional package. The fresh
+//? render follows the recorded choices, which a newer scaffolder can widen (0.15:
+//? a monitoring backend implies error-tracking), while `package.json` is never
+//? touched by `update`. Adding such a file to a project without the package
+//? breaks boot and typecheck, so it is held back with an `add` hint instead.
+const PACKAGE_GATED_FILES: ReadonlyMap<string, string> = new Map([
+  ['functions/sentry.ts', '@luckystack/error-tracking'],
+]);
+
+const readDeclaredDependencies = (consumerRoot: string): Set<string> => {
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(consumerRoot, 'package.json'), 'utf8')) as {
+      dependencies?: Record<string, string>;
+      devDependencies?: Record<string, string>;
+    };
+    return new Set([...Object.keys(pkg.dependencies ?? {}), ...Object.keys(pkg.devDependencies ?? {})]);
+  } catch {
+    return new Set();
+  }
+};
+
+//? `npx luckystack add <id>` for a package, falling back to a plain install.
+export const installHintFor = (pkg: string): string => {
+  const entry = REGISTRY.find((candidate) => candidate.pkg === pkg);
+  return entry ? `npx luckystack add ${entry.id}` : `npm install ${pkg}`;
+};
 
 export interface UpdatePlan {
   entries: UpdatePlanEntry[];
@@ -333,6 +363,7 @@ export const planUpdate = (
   freshManifest: ScaffoldManifest,
   scope: UpdateScope = 'framework',
   isIgnored: (relativePath: string) => boolean = createIgnoreMatcher(readScaffoldIgnore(consumerRoot)),
+  declaredDependencies: ReadonlySet<string> = readDeclaredDependencies(consumerRoot),
 ): UpdatePlan => {
   const recordedHashes = new Map(
     (consumerManifest?.files ?? []).map((entry) => [entry.path, entry.sha256]),
@@ -349,6 +380,11 @@ export const planUpdate = (
     }
     const localAbsolute = path.join(consumerRoot, fresh.path);
     if (!fs.existsSync(localAbsolute)) {
+      const requiredPackage = PACKAGE_GATED_FILES.get(fresh.path);
+      if (requiredPackage !== undefined && !declaredDependencies.has(requiredPackage)) {
+        entries.push({ path: fresh.path, action: 'needsPackage', freshSha256: fresh.sha256, requiredPackage });
+        continue;
+      }
       entries.push({ path: fresh.path, action: 'add', freshSha256: fresh.sha256 });
       continue;
     }
@@ -382,8 +418,9 @@ export const applyUpdate = (
   freshManifest: ScaffoldManifest,
   scope: UpdateScope = 'framework',
 ): { reportPath: string; counts: Record<UpdateAction, number> } => {
-  const counts: Record<UpdateAction, number> = { add: 0, overwrite: 0, sidecar: 0, unchanged: 0, ignored: 0 };
+  const counts: Record<UpdateAction, number> = { add: 0, overwrite: 0, sidecar: 0, unchanged: 0, ignored: 0, needsPackage: 0 };
   const sidecars: string[] = [];
+  const heldBack: { path: string; requiredPackage: string }[] = [];
   const added: string[] = [];
   const overwritten: string[] = [];
   const ignored: string[] = [];
@@ -411,6 +448,12 @@ export const applyUpdate = (
       case 'ignored': {
         //? Nothing on disk — not the file, not a sidecar. That IS the opt-out.
         ignored.push(entry.path);
+        break;
+      }
+      case 'needsPackage': {
+        //? Not written and not baselined: once the package is added, the next
+        //? update plans it as an ordinary add.
+        heldBack.push({ path: entry.path, requiredPackage: entry.requiredPackage ?? '' });
         break;
       }
       case 'unchanged': {
@@ -491,6 +534,13 @@ export const applyUpdate = (
       '',
       'Nothing was written for these: no file, no sidecar. Remove the pattern',
       `from ${IGNORE_FILE_NAME} if you want the framework's version back.`,
+      '',
+    );
+  }
+  if (heldBack.length > 0) {
+    lines.push(
+      'Not delivered — each imports a package this project does not have:',
+      ...heldBack.map((entry) => `  - ${entry.path} (${entry.requiredPackage}): run \`${installHintFor(entry.requiredPackage)}\``),
       '',
     );
   }
@@ -764,6 +814,13 @@ export const runUpdate = (project: ConsumerProject, options: UpdateOptions): Res
   console.log(`Report: ${reportPath}`);
   if (counts.sidecar > 0) {
     console.log('Merge the listed `.new` sidecars (an AI agent can apply the report), then review with git diff.');
+  }
+  for (const entry of plan.entries) {
+    if (entry.action !== 'needsPackage' || entry.requiredPackage === undefined) continue;
+    console.log(
+      `Not delivered: ${entry.path} imports ${entry.requiredPackage}, which this project does not have. ` +
+        `Run \`${installHintFor(entry.requiredPackage)}\` to add both.`,
+    );
   }
   if (fs.existsSync(path.join(project.root, 'CLAUDE.md'))) {
     console.log('Legacy CLAUDE.md remains untouched. Review its custom rules against AGENTS.md before deciding whether to retire it; update never deletes it.');

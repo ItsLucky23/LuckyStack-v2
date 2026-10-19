@@ -50,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 2. `npx luckystack update --app` brings the changed `src/` files: the `plain` template (`src/_components/templates/Plain.tsx`, `TemplateProvider.tsx`), `src/_providers/SessionProvider.tsx`, `src/main.tsx`, the locale files and, with login, the reset-password and settings pages and routes. It also brings the corrected CI file. A file you edited gets a `.new` sidecar to merge by hand.
 3. `package.json` is never touched by `update`. With the router, set the `router` script to `tsx --tsconfig tsconfig.server.json node_modules/@luckystack/router/dist/cli.js --deploy ./deploy.config.ts --services ./services.config.ts`.
 4. Add `.env.docker`, `.env.*.local`, `*.db`, `*.db-journal`, `*.db-wal` and `*.db-shm` to `.gitignore`. If `.env.docker` or a `.db` file is already committed, run `git rm --cached` on it and change the credentials it held.
+5. If the project has a monitoring backend (`sentry`, `datadog` or `posthog`) but not `@luckystack/error-tracking`, run `npx luckystack add error-tracking`. That package is what sends errors to the backend; until it is installed, `update --app` does not deliver `functions/sentry.ts`.
 
 ## [0.14.0] - 2026-10-16
 

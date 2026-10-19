@@ -581,3 +581,42 @@ describe('orm none + auth replay (finding 004)', () => {
     expect(describeScaffolderExit(1)).toContain('network');
   });
 });
+
+//? Review 1 finding 6: a 0.14 project recorded {monitoringProvider:'sentry',
+//? errorTracking:false}. The 0.15 scaffolder implies error-tracking from the
+//? backend, so the fresh render ships functions/sentry.ts; adding it without the
+//? package in package.json broke dev boot and typecheck.
+describe('a file that imports an optional package the project does not have', () => {
+  const SHIM = "export * from '@luckystack/error-tracking';\n";
+  const setUp = (dependencies: Record<string, string>): { consumerManifest: ScaffoldManifest; freshManifest: ScaffoldManifest } => {
+    write(consumerDir, 'package.json', JSON.stringify({ dependencies }));
+    const consumerManifest = manifestFor(consumerDir, {}, {
+      choices: { dbProvider: 'mongodb', monitoringProvider: 'sentry', errorTracking: false },
+    });
+    write(freshDir, 'functions/sentry.ts', SHIM);
+    const freshManifest = manifestFor(freshDir, { 'functions/sentry.ts': SHIM }, { luckystackVersion: '0.15.0' });
+    return { consumerManifest, freshManifest };
+  };
+
+  it('is held back with an `add` hint instead of added', () => {
+    const { consumerManifest, freshManifest } = setUp({ '@luckystack/core': '^0.14.0', '@sentry/node': '^9.0.0' });
+
+    const plan = planUpdate(consumerDir, consumerManifest, freshManifest, 'app');
+    expect(plan.entries).toEqual([
+      expect.objectContaining({ path: 'functions/sentry.ts', action: 'needsPackage', requiredPackage: '@luckystack/error-tracking' }),
+    ]);
+
+    const { counts, reportPath } = applyUpdate(project(), plan, consumerManifest, freshDir, freshManifest, 'app');
+    expect(counts.needsPackage).toBe(1);
+    expect(fs.existsSync(path.join(consumerDir, 'functions/sentry.ts'))).toBe(false);
+    expect(readScaffoldManifest(consumerDir)?.files.some((entry) => entry.path === 'functions/sentry.ts')).toBe(false);
+    expect(fs.readFileSync(path.join(consumerDir, reportPath), 'utf8')).toContain('npx luckystack add error-tracking');
+  });
+
+  it('is added as usual once the package is a dependency', () => {
+    const { consumerManifest, freshManifest } = setUp({ '@luckystack/error-tracking': '^0.15.0' });
+
+    const plan = planUpdate(consumerDir, consumerManifest, freshManifest, 'app');
+    expect(plan.entries.map((entry) => entry.action)).toEqual(['add']);
+  });
+});
