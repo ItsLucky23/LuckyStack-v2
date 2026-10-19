@@ -103,4 +103,49 @@ describe('sanitizeForLog (SYNC-17 defense-in-depth)', () => {
     expect(out.user.sessionToken).toBe(REDACTED_PLACEHOLDER);
     expect(out.user.name).toBe('ok');
   });
+
+  it('matches keys regardless of `-` / `_` separators', () => {
+    const out = sanitizeForLog({
+      'x-api-key': 'k1',
+      api_key: 'k2',
+      'Set-Cookie': 'c',
+      set_cookie: 'c2',
+      recovery_codes: ['a'],
+    }) as Record<string, unknown>;
+    expect(out).toEqual({
+      'x-api-key': REDACTED_PLACEHOLDER,
+      api_key: REDACTED_PLACEHOLDER,
+      'Set-Cookie': REDACTED_PLACEHOLDER,
+      set_cookie: REDACTED_PLACEHOLDER,
+      recovery_codes: REDACTED_PLACEHOLDER,
+    });
+  });
+
+  it('redacts secret-key and private-key spellings', () => {
+    expect(isRedactedLogKey('secretKey')).toBe(true);
+    expect(isRedactedLogKey('stripe_secret_key')).toBe(true);
+    expect(isRedactedLogKey('privateKey')).toBe(true);
+    expect(isRedactedLogKey('PRIVATE-KEY')).toBe(true);
+    expect(isRedactedLogKey('cacheKey')).toBe(false);
+    expect(isRedactedLogKey('idempotencyKey')).toBe(false);
+  });
+
+  it('matches a registered key in any separator spelling', () => {
+    registerRedactedLogKeys(['patient-mrn']);
+    expect(isRedactedLogKey('patientMrn')).toBe(true);
+    expect(isRedactedLogKey('patient_mrn')).toBe(true);
+  });
+
+  it('copies an object that appears twice without a loop instead of reporting it as circular', () => {
+    const user = { id: 'u1' };
+    const shared = [1, 2];
+    const out = sanitizeForLog({ actor: user, target: user, list: [shared, shared] });
+    expect(out).toEqual({ actor: { id: 'u1' }, target: { id: 'u1' }, list: [[1, 2], [1, 2]] });
+  });
+
+  it('still marks a real loop as circular', () => {
+    const node: Record<string, unknown> = { id: 'n' };
+    node.self = node;
+    expect(sanitizeForLog(node)).toEqual({ id: 'n', self: '[circular]' });
+  });
 });

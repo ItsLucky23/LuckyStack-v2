@@ -1,5 +1,5 @@
 import type { Socket } from 'socket.io-client';
-import { i18nNotify as notify, tryCatch, clearCsrfToken } from "@luckystack/core/client";
+import { i18nNotify as notify, tryCatch, clearCsrfToken, getProjectConfig } from "@luckystack/core/client";
 import {
   logging,
   ClientSessionLayout,
@@ -67,7 +67,7 @@ export function attachActivityHeartbeat(socketConnection: Socket) {
   const handleActivity = () => {
     if (!socketActivityBroadcaster) return;
     const now = Date.now();
-    if (now - lastActivitySent < 10_000) return;
+    if (now - lastActivitySent < getProjectConfig().socket.activityHeartbeatThrottleMs) return;
     lastActivitySent = now;
     socketConnection.emit(socketEventNames.activity);
   };

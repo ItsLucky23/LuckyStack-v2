@@ -20,8 +20,8 @@ export type RuntimeEnv = z.infer<typeof EnvSchema>;
 let cachedEnv: RuntimeEnv | null = null;
 
 //? Single source of truth for which env files the framework loads, in order
-//? ("later overrides earlier"). Default `['.env', '.env.local']`. Override at
-//? runtime with the AMBIENT env var `LUCKYSTACK_ENV_FILES` (comma-separated) — it
+//? ("later overrides earlier"; a real ambient env var beats them all). Default
+//? `['.env', '.env.local']`. Override at runtime with the AMBIENT env var `LUCKYSTACK_ENV_FILES` (comma-separated) — it
 //? must be a real environment variable, not a key inside one of the .env files
 //? (those are only read AFTER this list is resolved).
 export const DEFAULT_ENV_FILES = ['.env', '.env.local'];
@@ -70,8 +70,8 @@ const reportDuplicateEnvKeys = (files: string[]): void => {
 //?      `getEnvFiles`) — under Bun a key inside `.env` is already in
 //?      `process.env` by the time we read it, so it hijacks the file list.
 //?   2. Bun also loads `.env.<mode>` / `.env.<mode>.local`, which this framework
-//?      never loads. Because the first file is `override: false`, those values
-//?      silently outrank `.env`.
+//?      never loads. Because a value already in `process.env` beats every file,
+//?      those values silently outrank `.env`.
 //? The cure is a `bunfig.toml` with `env = false` (Bun >= 1.3.3), shipped at the
 //? repo root and in the scaffold template. Bun exposes NO way to read that
 //? setting back at runtime (`Bun.config` / `Bun.bunfig` are undefined), so we
@@ -135,10 +135,21 @@ const warnOnBunEnvAutoload = (files: string[]): void => {
 export const loadEnvFiles = (): void => {
   const files = getEnvFiles();
   warnOnBunEnvAutoload(files);
-  //? First file is non-override (a real ambient env var wins); each later file
-  //? overrides earlier ones, matching the historical `.env` -> `.env.local` order.
-  for (const [index, file] of files.entries()) {
-    loadDotenv({ path: file, override: index > 0 });
+  //? A real ambient env var (shell, Docker, K8s, CI) beats EVERY file; among the
+  //? files a later one overrides an earlier one (`.env` -> `.env.local`). The
+  //? files are merged into a scratch object first because dotenv's `override`
+  //? cannot tell an earlier file's value from an ambient one — `override: true`
+  //? on later files let `.env.local` replace the orchestrator's value.
+  //? "Ambient" is whatever `process.env` holds when this call starts, so a
+  //? repeat call (server.ts and oauthProviders also call this) cannot overwrite
+  //? values written in between, e.g. secret-manager-resolved pointers.
+  const ambientKeys = new Set(Object.keys(process.env));
+  const fileValues: Record<string, string> = {};
+  for (const file of files) {
+    loadDotenv({ path: file, processEnv: fileValues, override: true });
+  }
+  for (const [key, value] of Object.entries(fileValues)) {
+    if (!ambientKeys.has(key)) process.env[key] = value;
   }
   if (process.env.LUCKYSTACK_ENV_DEBUG) {
     reportDuplicateEnvKeys(files);

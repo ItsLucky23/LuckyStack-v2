@@ -1,11 +1,12 @@
 //? Registry of log keys that get masked when the framework prints request /
-//? response payloads. Feature packages register their domain-specific
-//? sensitive keys at boot (login → `password`, email → `apiKey`, etc.) so a
-//? consumer of the package never has to remember to extend a static list in
-//? core to keep their own data out of logs.
+//? response payloads. A feature package or the consumer registers keys that
+//? the defaults and suffixes below do not cover (a domain field such as `mrn`)
+//? at boot, so nobody has to extend a static list in core to keep their own
+//? data out of logs.
 //?
-//? Lookups are case-insensitive. Keys are merged with the framework defaults;
-//? `registerRedactedLogKeys` is additive — duplicate calls are idempotent.
+//? Lookups ignore case, `-` and `_` (`api_key`, `X-Api-Key` and `apiKey` are one
+//? key). Keys are merged with the framework defaults; `registerRedactedLogKeys`
+//? is additive — duplicate calls are idempotent.
 
 export const DEFAULT_REDACTED_LOG_KEYS: readonly string[] = [
   'password',
@@ -25,7 +26,15 @@ export const DEFAULT_REDACTED_LOG_KEYS: readonly string[] = [
   'recoverycodes',
 ];
 
+//? Separators are dropped before matching so header- and snake-case spellings
+//? (`x-api-key`, `private_key`) meet the same defaults and suffixes.
+const normalizeLogKey = (key: string): string => key.toLowerCase().replaceAll(/[-_]/g, '');
+
+//? `redactedKeys` keeps the registered spelling (lowercased): the error-tracker
+//? value scrub builds `key=value` patterns from it, and a log line spells
+//? `set-cookie` with its hyphen. `normalizedRedactedKeys` serves key lookups.
 const redactedKeys = new Set<string>(DEFAULT_REDACTED_LOG_KEYS.map((key) => key.toLowerCase()));
+const normalizedRedactedKeys = new Set<string>(DEFAULT_REDACTED_LOG_KEYS.map((key) => normalizeLogKey(key)));
 
 //? Sensitive SUFFIXES (0.2.0 widening). Exact-match alone missed compound keys
 //? a project naturally produces — `targetToken`, `sessionToken`, `clientSecret`,
@@ -36,29 +45,34 @@ const redactedKeys = new Set<string>(DEFAULT_REDACTED_LOG_KEYS.map((key) => key.
 //? would over-redact benign keys (e.g. a `tokenCount` metric, a `secretSanta`
 //? field). Kept conservative on purpose — register extra keys explicitly via
 //? `registerRedactedLogKeys` for project-specific names that don't fit.
-const SENSITIVE_KEY_SUFFIXES: readonly string[] = ['token', 'secret', 'apikey', 'password'];
+//? `secretkey` / `privatekey` cover `secretKey`, `stripeSecretKey`, `privateKey`
+//? (the bare `key` ending would over-redact `cacheKey`, `idempotencyKey`).
+const SENSITIVE_KEY_SUFFIXES: readonly string[] = ['token', 'secret', 'apikey', 'password', 'secretkey', 'privatekey'];
 
 export const registerRedactedLogKeys = (keys: readonly string[]): void => {
   for (const key of keys) {
     redactedKeys.add(key.toLowerCase());
+    normalizedRedactedKeys.add(normalizeLogKey(key));
   }
 };
 
 export const getRedactedLogKeys = (): readonly string[] => [...redactedKeys];
 
 export const isRedactedLogKey = (key: string): boolean => {
-  const lower = key.toLowerCase();
-  if (redactedKeys.has(lower)) return true;
-  return SENSITIVE_KEY_SUFFIXES.some((suffix) => lower.endsWith(suffix));
+  const normalized = normalizeLogKey(key);
+  if (normalizedRedactedKeys.has(normalized)) return true;
+  return SENSITIVE_KEY_SUFFIXES.some((suffix) => normalized.endsWith(suffix));
 };
 
 //? Test-only helper — restore the default seed set between integration tests.
-//? Never call from production code; framework packages register their own
-//? keys at boot and clearing would re-expose them.
+//? Never call from production code; keys registered at boot would be
+//? re-exposed.
 export const resetRedactedLogKeysForTests = (): void => {
   redactedKeys.clear();
+  normalizedRedactedKeys.clear();
   for (const key of DEFAULT_REDACTED_LOG_KEYS) {
     redactedKeys.add(key.toLowerCase());
+    normalizedRedactedKeys.add(normalizeLogKey(key));
   }
 };
 
@@ -100,13 +114,20 @@ export const sanitizeForLog = (value: unknown, depth = 0, _seen?: WeakSet<object
   if (seen.has(value)) return '[circular]';
   seen.add(value);
 
-  if (Array.isArray(value)) {
-    return value.map((item) => sanitizeForLog(item, depth + 1, seen));
-  }
+  try {
+    if (Array.isArray(value)) {
+      return value.map((item) => sanitizeForLog(item, depth + 1, seen));
+    }
 
-  const out: Record<string, unknown> = {};
-  for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
-    out[key] = isRedactedLogKey(key) ? REDACTED_PLACEHOLDER : sanitizeForLog(nested, depth + 1, seen);
+    const out: Record<string, unknown> = {};
+    for (const [key, nested] of Object.entries(value as Record<string, unknown>)) {
+      out[key] = isRedactedLogKey(key) ? REDACTED_PLACEHOLDER : sanitizeForLog(nested, depth + 1, seen);
+    }
+    return out;
+  } finally {
+    //? Leave the set on the way back up so `seen` holds only ANCESTORS: the same
+    //? object in a sibling position (`{ actor: user, target: user }`) is shared,
+    //? not circular, and must be copied rather than reported as a loop.
+    seen.delete(value);
   }
-  return out;
 };

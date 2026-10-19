@@ -55,7 +55,13 @@ export const initConsolelog = () => {
       originalLog(`${colorCode}${extractedInfo}${COLORS.reset}`);
       originalLog(...args);
     } else {
-      originalLog(`${colorCode}${extractedInfo} -- ${args.join(" ")}${COLORS.reset}`);
+      //? Colour only the leading strings. Joining EVERY argument into one string
+      //? turned later objects into `[object Object]` and errors into their
+      //? message without a stack, so the rest goes to the native log untouched.
+      const firstNonString = args.findIndex((arg) => typeof arg !== "string");
+      const leading = firstNonString === -1 ? args : args.slice(0, firstNonString);
+      const rest = firstNonString === -1 ? [] : args.slice(firstNonString);
+      originalLog(`${colorCode}${extractedInfo} -- ${leading.join(" ")}${COLORS.reset}`, ...rest);
     }
   };
 }

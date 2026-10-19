@@ -207,6 +207,45 @@ const parseObjectFields = (typeText: string): {
   return { fields, indexSignatures };
 };
 
+//? True when `text` opens with `open` and that same bracket closes at the very
+//? last character — so `{ a: string }` qualifies but `{ a: string } | { b: string }`
+//? does not. Brackets inside string literals are ignored.
+const wrapsWhole = (text: string, open: '(' | '{', close: ')' | '}'): boolean => {
+  if (!text.startsWith(open) || !text.endsWith(close)) return false;
+  let depth = 0;
+  let inString: '"' | "'" | null = null;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (inString) {
+      if (char === '\\') index += 1;
+      else if (char === inString) inString = null;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      inString = char;
+      continue;
+    }
+    if (char === open) depth += 1;
+    if (char === close) {
+      depth -= 1;
+      if (depth === 0) return index === text.length - 1;
+    }
+  }
+  return false;
+};
+
+const unwrapParens = (text: string): string => {
+  let current = text.trim();
+  while (wrapsWhole(current, '(', ')')) current = current.slice(1, -1).trim();
+  return current;
+};
+
+const isObjectTypeText = (text: string): boolean => wrapsWhole(text, '{', '}');
+
+//? The devkit generator writes string literal types with `\`, `'` and `"`
+//? escaped (`'it\'s'`); compare against the unescaped text.
+const unquoteLiteral = (literal: string): string => literal.slice(1, -1).replaceAll(/\\(['"\\])/g, '$1');
+
 const matchesIndexKeyType = ({ keyType, key }: { keyType: string; key: string }): boolean => {
   const normalized = keyType.trim();
   if (normalized === 'string') return true;
@@ -216,7 +255,7 @@ const matchesIndexKeyType = ({ keyType, key }: { keyType: string; key: string })
     return parts.some((part) => matchesIndexKeyType({ keyType: part, key }));
   }
   if ((normalized.startsWith("'") && normalized.endsWith("'")) || (normalized.startsWith('"') && normalized.endsWith('"'))) {
-    return key === normalized.slice(1, -1);
+    return key === unquoteLiteral(normalized);
   }
   return false;
 };
@@ -286,6 +325,64 @@ const parseRecordParts = (type: string): { keyType: string; valueType: string } 
 //? far deeper than any realistic typed payload while still bounding the stack.
 const MAX_VALIDATION_DEPTH = 64;
 
+//? The devkit generator collapses every JSON-like type (Prisma `JsonValue`,
+//? `InputJsonValue`, `Json`, …) to the bare name `JsonValue`, so the validator
+//? must know it: plain objects, arrays, strings, finite numbers, booleans and
+//? null, nested no deeper than MAX_VALIDATION_DEPTH.
+const JSON_DATA_TYPES = new Set(['JsonValue', 'JsonObject', 'JsonArray', 'JsonPrimitive']);
+
+const isJsonPrimitive = (value: unknown): boolean =>
+  value === null
+  || typeof value === 'string'
+  || typeof value === 'boolean'
+  || (typeof value === 'number' && Number.isFinite(value));
+
+const isPlainObject = (value: unknown): value is Record<string, unknown> => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const prototype: unknown = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+};
+
+const validateJsonData = (type: string, value: unknown, path: string, depth: number): ValidationResult => {
+  if (depth > MAX_VALIDATION_DEPTH) {
+    return { status: 'error', message: `${path}: input nesting exceeds the maximum depth of ${String(MAX_VALIDATION_DEPTH)}` };
+  }
+
+  if (isJsonPrimitive(value)) {
+    return type === 'JsonValue' || type === 'JsonPrimitive'
+      ? { status: 'success' }
+      : { status: 'error', message: `${path} should be ${type === 'JsonArray' ? 'a JSON array' : 'a JSON object'}` };
+  }
+  if (type === 'JsonPrimitive') {
+    return { status: 'error', message: `${path} should be a JSON primitive` };
+  }
+
+  if (Array.isArray(value)) {
+    if (type === 'JsonObject') return { status: 'error', message: `${path} should be a JSON object` };
+    for (const [index, element] of value.entries()) {
+      const result = validateJsonData('JsonValue', element, `${path}[${String(index)}]`, depth + 1);
+      if (result.status === 'error') return result;
+    }
+    return { status: 'success' };
+  }
+
+  if (isPlainObject(value)) {
+    if (type === 'JsonArray') return { status: 'error', message: `${path} should be a JSON array` };
+    for (const [key, entry] of Object.entries(value)) {
+      if (PROTO_POLLUTION_KEYS.has(key)) {
+        return { status: 'error', message: `${path}.${key} is not allowed` };
+      }
+      //? `JsonObject` admits `undefined` members (`[key: string]: JsonValue | undefined`).
+      if (entry === undefined) continue;
+      const result = validateJsonData('JsonValue', entry, `${path}.${key}`, depth + 1);
+      if (result.status === 'error') return result;
+    }
+    return { status: 'success' };
+  }
+
+  return { status: 'error', message: `${path} should be JSON data` };
+};
+
 const validateType = (typeText: string, value: unknown, path: string, depth = 0): ValidationResult => {
   if (depth > MAX_VALIDATION_DEPTH) {
     return { status: 'error', message: `${path}: input nesting exceeds the maximum depth of ${String(MAX_VALIDATION_DEPTH)}` };
@@ -329,15 +426,27 @@ const validateType = (typeText: string, value: unknown, path: string, depth = 0)
   if (type.includes('&')) {
     const intersectionParts = splitTopLevel(type, '&').filter(Boolean);
     if (intersectionParts.length > 1) {
+      //? An intersection of object types is ONE shape: each part on its own
+      //? rejects the keys only the other parts declare, so validating the parts
+      //? separately rejected every valid `{ a: string } & { b: number }` value.
+      //? Merge the bodies so the not-allowed-key pass sees every declared key.
+      const objectParts = intersectionParts.map((part) => unwrapParens(part));
+      if (objectParts.every((part) => isObjectTypeText(part))) {
+        const mergedBody = objectParts.map((part) => part.slice(1, -1)).join('; ');
+        return validateType(`{ ${mergedBody} }`, value, path, depth + 1);
+      }
       for (const intersectionType of intersectionParts) {
         const result = validateType(intersectionType, value, path, depth + 1);
         if (result.status === 'error') return result;
       }
       return { status: 'success' };
     }
-    //? Same as the union case — a single-member intersection should recurse.
-    if (intersectionParts.length === 1) {
-      return validateType(intersectionParts[0] ?? type, value, path, depth + 1);
+    //? Same as the union case: recurse only on a DIFFERENT single member. An
+    //? `&` nested inside `{...}` (`{ inner: A & B }`) leaves the whole type as
+    //? the one part, and recursing on it looped until the depth cap rejected it.
+    const singleMember = intersectionParts[0] ?? type;
+    if (intersectionParts.length === 1 && singleMember !== type) {
+      return validateType(singleMember, value, path, depth + 1);
     }
   }
 
@@ -360,7 +469,7 @@ const validateType = (typeText: string, value: unknown, path: string, depth = 0)
   }
 
   if ((type.startsWith("'") && type.endsWith("'")) || (type.startsWith('"') && type.endsWith('"'))) {
-    const literal = type.slice(1, -1);
+    const literal = unquoteLiteral(type);
     return value === literal
       ? { status: 'success' }
       : { status: 'error', message: `${path} should equal ${literal}` };
@@ -392,6 +501,10 @@ const validateType = (typeText: string, value: unknown, path: string, depth = 0)
   //? admitting arbitrary values here).
   if (type === 'any' || type === 'unknown') {
     return { status: 'success' };
+  }
+
+  if (JSON_DATA_TYPES.has(type)) {
+    return validateJsonData(type, value, path, depth);
   }
 
   if (/^Record<.+>$/.test(type)) {

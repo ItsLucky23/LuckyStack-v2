@@ -221,3 +221,69 @@ describe('Bun env auto-load guard', () => {
     expect(warn).not.toHaveBeenCalled();
   });
 });
+
+//? The documented contract (load-bearing for Docker/K8s/CI): a real ambient env
+//? var beats EVERY env file, not only `.env`; among the files the later wins.
+describe('env file precedence', () => {
+  const realEnv = { ...process.env };
+  const tempDirs: string[] = [];
+
+  const loadFiles = async (files: Record<string, string>, ambient: Record<string, string>): Promise<void> => {
+    const dir = mkdtempSync(path.join(tmpdir(), 'luckystack-env-'));
+    tempDirs.push(dir);
+    for (const [name, contents] of Object.entries(files)) {
+      writeFileSync(path.join(dir, name), contents);
+    }
+    //? Absolute paths: dotenv reads a relative path against the real working
+    //? directory, which a `process.cwd` spy does not move.
+    process.env.LUCKYSTACK_ENV_FILES = Object.keys(files).map((name) => path.join(dir, name)).join(',');
+    Object.assign(process.env, ambient);
+    vi.resetModules();
+    //? The fresh import's module-scope `bootstrapEnv()` performs the load.
+    await import('./env');
+  };
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.resetModules();
+    process.env = { ...realEnv };
+    for (const dir of tempDirs.splice(0)) {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('keeps a real ambient env var over a value in .env.local', async () => {
+    await loadFiles(
+      {
+        '.env': 'PRECEDENCE_AMBIENT=from_env\n',
+        '.env.local': 'PRECEDENCE_AMBIENT=from_local_file\n',
+      },
+      { PRECEDENCE_AMBIENT: 'from_ambient_k8s' },
+    );
+
+    expect(process.env.PRECEDENCE_AMBIENT).toBe('from_ambient_k8s');
+  });
+
+  it('lets a later file override an earlier file for keys that are not ambient', async () => {
+    await loadFiles(
+      {
+        '.env': 'PRECEDENCE_SHARED=from_env\nPRECEDENCE_ONLY_ENV=from_env\n',
+        '.env.local': 'PRECEDENCE_SHARED=from_local_file\n',
+      },
+      {},
+    );
+
+    expect(process.env.PRECEDENCE_SHARED).toBe('from_local_file');
+    expect(process.env.PRECEDENCE_ONLY_ENV).toBe('from_env');
+  });
+
+  it('does not overwrite a value written after the first load when the files are loaded again', async () => {
+    await loadFiles({ '.env.local': 'PRECEDENCE_RELOAD=pointer\n' }, {});
+    process.env.PRECEDENCE_RELOAD = 'resolved';
+
+    const { loadEnvFiles } = await import('./env');
+    loadEnvFiles();
+
+    expect(process.env.PRECEDENCE_RELOAD).toBe('resolved');
+  });
+});
