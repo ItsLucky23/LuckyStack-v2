@@ -41,7 +41,16 @@ const runCsrfEnforcementTests = vi.fn((_input: unknown): Promise<RunContractSumm
 const runFuzzTests = vi.fn((_input: unknown): Promise<RunContractSummary> => { order.push('fuzz'); return Promise.resolve(summaryOf(5, 2)); });
 const runCustomTests = vi.fn((_input: unknown): Promise<RunCustomTestsSummary> => { order.push('custom'); return Promise.resolve(customSummaryOf(6, 3)); });
 const clearAllRateLimits = vi.fn((): Promise<void> => { order.push('clear'); return Promise.resolve(); });
-const getProjectConfig = vi.fn(() => ({ http: { sessionCookieName: 'cfg_cookie' } }));
+const defaultProjectConfig = () => ({
+  http: { sessionCookieName: 'cfg_cookie' },
+  transport: { invocation: 'socket' as 'socket' | 'routed-http' },
+  session: { basedToken: false },
+});
+let projectConfig = defaultProjectConfig();
+const getProjectConfig = vi.fn(() => projectConfig);
+//? Stand-in socket probe transport so the tests can see which layers get it.
+const socketTransport = { name: 'socket' as const, send: vi.fn(), close: vi.fn(() => Promise.resolve()) };
+vi.mock('./socketProbeTransport', () => ({ createSocketProbeTransport: () => socketTransport }));
 const getCsrfConfig = vi.fn(() => ({ headerName: 'x-csrf-token' }));
 const getSession = vi.fn((_token: string) => Promise.resolve({ csrfToken: 'csrf123' }));
 const resetServerState = vi.fn((_input: unknown): Promise<boolean> => { order.push('reset'); return Promise.resolve(true); });
@@ -108,6 +117,7 @@ const originalResetToken = process.env.TEST_RESET_TOKEN;
 beforeEach(() => {
   order.length = 0;
   vi.clearAllMocks();
+  projectConfig = defaultProjectConfig();
   //? The reset bookends are gated on a token; clear it so the existing
   //? characterization tests see no bookend resets (the bookend tests set it).
   delete process.env.TEST_RESET_TOKEN;
@@ -187,7 +197,6 @@ describe('runAllTests orchestration (characterization)', () => {
     expect(runContractTests.mock.calls[0]?.[0]).toMatchObject({ headers: {} });
     //? The auth-enforcement layer is called WITHOUT a `headers` field by design.
     expect(runAuthEnforcementTests.mock.calls[0]?.[0]).not.toHaveProperty('headers');
-    expect(getProjectConfig).not.toHaveBeenCalled();
   });
 
   it('builds a Cookie header from sessionCookieName when an authToken is given', async () => {
@@ -195,8 +204,6 @@ describe('runAllTests orchestration (characterization)', () => {
     expect(runContractTests.mock.calls[0]?.[0]).toMatchObject({ headers: { Cookie: 'my_cookie=tok123' } });
     expect(runRateLimitTests.mock.calls[0]?.[0]).toMatchObject({ headers: { Cookie: 'my_cookie=tok123' } });
     expect(runFuzzTests.mock.calls[0]?.[0]).toMatchObject({ headers: { Cookie: 'my_cookie=tok123' } });
-    //? sessionCookieName supplied → config fallback is NOT consulted.
-    expect(getProjectConfig).not.toHaveBeenCalled();
   });
 
   it('attaches the session CSRF token so cookie-mode sweeps reach state-changing endpoints', async () => {
@@ -222,7 +229,6 @@ describe('runAllTests orchestration (characterization)', () => {
 
   it('falls back to the project config cookie name when authToken is set but sessionCookieName is not', async () => {
     await runAllTests({ ...baseInput, authToken: 'tok123' });
-    expect(getProjectConfig).toHaveBeenCalledTimes(1);
     expect(runContractTests.mock.calls[0]?.[0]).toMatchObject({ headers: { Cookie: 'cfg_cookie=tok123' } });
   });
 
@@ -321,6 +327,63 @@ describe('runAllTests filter', () => {
   it('returns the layer summaries untouched (no report-side re-filtering)', async () => {
     const summary = await runAllTests({ ...baseInput, filter: 'billing/' });
     expect(summary.contract).toStrictEqual(summaryOf(2, 0));
+  });
+});
+
+describe('runAllTests token mode (session.basedToken)', () => {
+  it('sends the session as Authorization: Bearer, never as a Cookie, and skips the CSRF layer', async () => {
+    projectConfig = { ...defaultProjectConfig(), session: { basedToken: true } };
+    const log = vi.spyOn(console, 'log').mockImplementation(() => { /* swallow expected note */ });
+
+    const summary = await runAllTests({ ...baseInput, authToken: 'tok123', sessionCookieName: 'my_cookie' });
+
+    for (const layer of [runContractTests, runRateLimitTests, runFuzzTests]) {
+      expect(layer.mock.calls[0]?.[0]).toMatchObject({ headers: { Authorization: 'Bearer tok123' } });
+      expect(layer.mock.calls[0]?.[0]).not.toHaveProperty('headers.Cookie');
+    }
+    //? No CSRF lookup: token mode has no CSRF enforcement to satisfy.
+    expect(getSession).not.toHaveBeenCalled();
+    expect(runCsrfEnforcementTests).not.toHaveBeenCalled();
+    expect(summary.csrf).toBeUndefined();
+    expect(log.mock.calls.some(([message]) => String(message).includes('CSRF layer skipped'))).toBe(true);
+    log.mockRestore();
+  });
+});
+
+describe('runAllTests API transport (ADR 0064)', () => {
+  it('probes API routes over the socket in a socket-mode project', async () => {
+    await runAllTests({ ...baseInput });
+    for (const layer of [runContractTests, runAuthEnforcementTests, runRateLimitTests, runFuzzTests]) {
+      expect(layer.mock.calls[0]?.[0]).toMatchObject({ apiTransport: socketTransport });
+    }
+    expect(socketTransport.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('probes API routes over HTTP in a routed-http project', async () => {
+    projectConfig = { ...defaultProjectConfig(), transport: { invocation: 'routed-http' } };
+    await runAllTests({ ...baseInput });
+    expect(runContractTests.mock.calls[0]?.[0]).toMatchObject({ apiTransport: undefined });
+  });
+
+  it('honours an explicit apiTransport override', async () => {
+    await runAllTests({ ...baseInput, apiTransport: 'http' });
+    expect(runContractTests.mock.calls[0]?.[0]).toMatchObject({ apiTransport: undefined });
+  });
+
+  it('keeps the CSRF layer on HTTP for API routes', async () => {
+    await runAllTests({ ...baseInput, authToken: 'tok123', sessionCookieName: 'my_cookie' });
+    expect(runCsrfEnforcementTests.mock.calls[0]?.[0]).not.toHaveProperty('apiTransport', socketTransport);
+  });
+});
+
+describe('runAllTests contract/fuzz inputs', () => {
+  it('passes expectServerError to the contract layer and the reset token to contract and fuzz', async () => {
+    await runAllTests({ ...baseInput, resetToken: 'reset-secret', expectServerError: ['playground/throwError'] });
+    expect(runContractTests.mock.calls[0]?.[0]).toMatchObject({
+      expectServerError: ['playground/throwError'],
+      resetToken: 'reset-secret',
+    });
+    expect(runFuzzTests.mock.calls[0]?.[0]).toMatchObject({ resetToken: 'reset-secret' });
   });
 });
 

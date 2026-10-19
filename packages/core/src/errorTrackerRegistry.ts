@@ -48,6 +48,12 @@ interface ScrubPatternPair {
 }
 const REDACTED_VALUE_RE_CACHE = new Map<string, ScrubPatternPair>();
 
+//? A secret value: a double- or single-quoted string (escapes allowed), an
+//? HTTP auth scheme plus its credential, or a bare run up to a delimiter. The
+//? scheme alternative comes before the bare run so `Bearer <token>` is taken
+//? whole instead of stopping after the scheme word.
+const SCRUB_VALUE = String.raw`(?:"(?:[^"\\\r\n]|\\.)+"|'(?:[^'\\\r\n]|\\.)+'|(?:bearer|basic|digest|token)\s+[^\s,;"'&]+|[^\s,;"'&]+)`;
+
 const buildScrubPattern = (key: string): ScrubPatternPair => {
   const cached = REDACTED_VALUE_RE_CACHE.get(key);
   if (cached) return cached;
@@ -66,9 +72,13 @@ const buildScrubPattern = (key: string): ScrubPatternPair => {
   //? `+` (not `*`) for the value portion so `key=` with an empty value is NOT
   //? replaced (empty parameters are not secrets worth scrubbing and a `*` match
   //? would turn innocent `foo=` markers into `[redacted]`).
+  //? The key may be followed by its closing quote (JSON `"password":"x"`) and
+  //? spaces around the separator (`password = x`). A quoted value or an
+  //? auth-scheme value (`Bearer <token>`) is consumed as one unit: stopping at
+  //? the first space or quote left the actual secret behind.
   const pair: ScrubPatternPair = {
-    urlParam: new RegExp(String.raw`${escaped}=[^\s,;"'&]+`, 'gi'),
-    logLabel: new RegExp(String.raw`${escaped}:\s*[^\s,;"']+`, 'gi'),
+    urlParam: new RegExp(String.raw`${escaped}["']?\s*=\s*${SCRUB_VALUE}`, 'gi'),
+    logLabel: new RegExp(String.raw`${escaped}["']?\s*:\s*${SCRUB_VALUE}`, 'gi'),
   };
   REDACTED_VALUE_RE_CACHE.set(key, pair);
   return pair;

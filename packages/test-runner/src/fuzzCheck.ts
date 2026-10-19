@@ -1,6 +1,7 @@
 import type { ContractCheckResult, EndpointDescriptor } from './types';
 import { defaultProbeTransport } from './probeRequest';
 import type { ProbeTransport } from './probeRequest';
+import { isRateLimitedCode } from './testLayerHelpers';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
 
@@ -38,7 +39,7 @@ export const runFuzzCheck = async (input: FuzzCheckInput): Promise<ContractCheck
   const requestTimeoutMs = input.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
   const transport = input.transport ?? defaultProbeTransport;
 
-  for (const payload of JUNK_PAYLOADS) {
+  for (const [index, payload] of JUNK_PAYLOADS.entries()) {
     const result = await transport.send({
       endpoint: input.endpoint,
       baseUrl: input.baseUrl,
@@ -69,6 +70,20 @@ export const runFuzzCheck = async (input: FuzzCheckInput): Promise<ContractCheck
         status: 'fail',
         httpStatus: result.httpStatus,
         reason: `fuzz payload produced non-envelope response: ${JSON.stringify(payload).slice(0, 80)}`,
+        durationMs,
+      };
+    }
+
+    //? The limiter answers before input validation, so this payload (and every
+    //? later one in the same window) never reached the route. Report what was
+    //? actually exercised instead of counting the rejections as passes.
+    if (isRateLimitedCode(result.parsed.errorCode)) {
+      return {
+        endpoint: input.endpoint,
+        status: 'skipped',
+        httpStatus: result.httpStatus,
+        errorCode: result.parsed.errorCode,
+        reason: `rate-limited after ${String(index)} of ${String(JUNK_PAYLOADS.length)} fuzz payloads (not exercised); pass a reset token so the sweep resets rate limits between routes`,
         durationMs,
       };
     }

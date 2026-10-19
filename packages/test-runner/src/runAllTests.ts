@@ -52,6 +52,19 @@ export interface RunAllTestsInput {
    */
   syncTransport?: 'socket' | 'http';
   /**
+   * How API routes are probed. Defaults to the project's own
+   * `transport.invocation`: `'socket'` → Socket.io (the `apiRequest` pipeline
+   * real clients hit), `'routed-http'` → the `/api/*` HTTP route. The CSRF
+   * layer always probes over HTTP — CSRF is an HTTP-only guard.
+   */
+  apiTransport?: 'socket' | 'http';
+  /**
+   * Routes designed to fail on the server (e.g. a playground route that throws
+   * on purpose), matched like `skip`. The contract layer lets their shaped 5xx
+   * pass; any other route answering 5xx fails it.
+   */
+  expectServerError?: string[];
+  /**
    * Write the full `RunAllTestsSummary` as JSON to this path (relative to the
    * process cwd). Defaults to `TEST_OUTPUT_FILE`, else `test-results.json`;
    * `false` disables the file.
@@ -68,7 +81,11 @@ export interface RunAllTestsInput {
   baseUrl: string;
   /** Cookie name for the session token. Defaults to the project's configured session cookie name (`projectConfig.http.sessionCookieName`). */
   sessionCookieName?: string;
-  /** Auth token applied as a `Cookie` header to sweep-layer requests that need a session. */
+  /**
+   * Session token for sweep-layer requests that need a session: sent as the
+   * session `Cookie` in cookie mode, as `Authorization: Bearer` in token mode
+   * (`session.basedToken`).
+   */
   authToken?: string;
   /** Endpoints to skip from the sweep layers, e.g. routes that need a file upload. */
   skip?: string[];
@@ -136,15 +153,22 @@ const resolveResetBookendToken = (input: RunAllTestsInput): string | null => {
   return token;
 };
 
-//? Build the Cookie (and CSRF) headers sweep layers send when an `authToken`
+//? Build the session (and CSRF) headers sweep layers send when an `authToken`
 //? is supplied. In cookie-mode the server's CSRF middleware rejects POST/PUT/DELETE
 //? without a matching CSRF token, so we look up the session record and attach the
 //? token the same way customTests.ts does: call getSession(authToken) and read
-//? csrfToken off the persisted record. Token-mode sweeps (no Cookie header) and
-//? runs without authToken are unaffected — the CSRF header is never added.
+//? csrfToken off the persisted record. Token-mode sweeps send the token as
+//? `Authorization: Bearer`, the canonical token-mode credential, and no CSRF
+//? header. A Cookie there would be accepted as a fallback token while CSRF is
+//? never enforced, so the CSRF layer would fire real mutations and false-fail.
 const buildAuthHeaders = async (input: RunAllTestsInput): Promise<Record<string, string>> => {
   const headers: Record<string, string> = {};
   if (!input.authToken) return headers;
+
+  if (getProjectConfig().session.basedToken) {
+    headers.Authorization = `Bearer ${input.authToken}`;
+    return headers;
+  }
 
   const cookieName = input.sessionCookieName ?? getProjectConfig().http.sessionCookieName;
   headers.Cookie = `${cookieName}=${input.authToken}`;
@@ -173,30 +197,42 @@ const buildAuthHeaders = async (input: RunAllTestsInput): Promise<Record<string,
   return headers;
 };
 
-interface SyncSweepTransports {
-  /** Transport the contract / auth / rate-limit / fuzz layers use for sync routes. */
-  sweep: ProbeTransport;
+interface SweepTransports {
+  /** Transport the contract / auth / rate-limit / fuzz layers use for sync routes (none without sync routes). */
+  sync: ProbeTransport | undefined;
   /** HTTP transport the CSRF layer uses for sync routes (CSRF is HTTP-only). */
-  csrf: ProbeTransport;
+  csrfSync: ProbeTransport | undefined;
+  /** Transport the contract / auth / rate-limit / fuzz layers use for API routes; undefined = HTTP. */
+  api: ProbeTransport | undefined;
   close: () => Promise<void>;
 }
 
-//? Prepare sync-route probing: one throwaway room per run that every sync probe
-//? targets, joined by the sweep's session so room-membership enforcement
-//? (`sync.requireRoomMembership`, default on) sees a member — exactly what a
-//? real client does before syncing. The HTTP pipeline reads membership from
-//? the session's persisted room codes, which the join writes; the socket
-//? transport additionally joins on its own socket. Without an `authToken`
-//? nothing can join, so sync probes see what an anonymous client sees.
-const prepareSyncSweep = async (input: RunAllTestsInput): Promise<SyncSweepTransports> => {
+//? Probes follow the path real clients take (ADR 0064): the caller's override,
+//? else the project's own `transport.invocation`.
+const resolveProbeMode = (override: 'socket' | 'http' | undefined): 'socket' | 'http' =>
+  override ?? (getProjectConfig().transport.invocation === 'routed-http' ? 'http' : 'socket');
+
+//? Prepare route probing. API routes go over the socket in a socket-mode
+//? project, like the real client's `apiRequest`. Sync routes get one throwaway
+//? room per run that every sync probe targets, joined by the sweep's session
+//? so room-membership enforcement (`sync.requireRoomMembership`, default on)
+//? sees a member — exactly what a real client does before syncing. The HTTP
+//? pipeline reads membership from the session's persisted room codes, which
+//? the join writes; the socket transport additionally joins on its own socket.
+//? Without an `authToken` nothing can join, so sync probes see what an
+//? anonymous client sees.
+const prepareSweepTransports = async (input: RunAllTestsInput, hasSyncRoutes: boolean): Promise<SweepTransports> => {
   const receiver = `lstest-room-${crypto.randomUUID()}`;
   const sessionCookieName = input.sessionCookieName ?? getProjectConfig().http.sessionCookieName;
-  const mode = input.syncTransport
-    ?? (getProjectConfig().transport.invocation === 'routed-http' ? 'http' : 'socket');
+  const syncMode = resolveProbeMode(input.syncTransport);
+  const apiMode = resolveProbeMode(input.apiTransport);
   const http = createHttpProbeTransport({ syncReceiver: receiver });
+  const socket = apiMode === 'socket' || (hasSyncRoutes && syncMode === 'socket')
+    ? createSocketProbeTransport({ baseUrl: input.baseUrl, receiver, sessionCookieName })
+    : null;
 
   let memberSocket: Socket | null = null;
-  if (input.authToken) {
+  if (hasSyncRoutes && input.authToken) {
     const authToken = input.authToken;
     const [connectError, socket] = await tryCatch(() => connectTestSocket({
       baseUrl: input.baseUrl,
@@ -213,15 +249,12 @@ const prepareSyncSweep = async (input: RunAllTestsInput): Promise<SyncSweepTrans
     }
   }
 
-  const sweep = mode === 'socket'
-    ? createSocketProbeTransport({ baseUrl: input.baseUrl, receiver, sessionCookieName })
-    : http;
-
   return {
-    sweep,
-    csrf: http,
+    sync: hasSyncRoutes ? (syncMode === 'socket' && socket ? socket : http) : undefined,
+    csrfSync: hasSyncRoutes ? http : undefined,
+    api: apiMode === 'socket' && socket ? socket : undefined,
     close: async () => {
-      await sweep.close?.();
+      await socket?.close?.();
       //? The member socket runs on the caller's `authToken` session — release
       //? it so presence does not log that session out after the sweep.
       if (memberSocket) await releaseTestSocket(memberSocket);
@@ -248,19 +281,29 @@ const runSweepLayers = async (
   }
 
   const hasSyncRoutes = Object.keys(input.syncMetaMap ?? {}).length > 0;
-  const sync = hasSyncRoutes ? await prepareSyncSweep(input) : null;
-  const shared = {
+  const transports = await prepareSweepTransports(input, hasSyncRoutes);
+  const routing = {
     apiMethodMap: input.apiMethodMap,
     syncMetaMap: input.syncMetaMap,
     baseUrl: input.baseUrl,
     skip: input.skip,
     filter: input.filter,
-    syncTransport: sync?.sweep,
   };
+  //? Every layer except CSRF probes over the project's own transports.
+  const shared = { ...routing, syncTransport: transports.sync, apiTransport: transports.api };
 
   //? The layers must not leave sockets open when one throws.
   const [layerError] = await tryCatch(async () => {
-    summary.contract = await runContractTests({ ...shared, headers, inputFor });
+    summary.contract = await runContractTests({
+      ...shared,
+      headers,
+      inputFor,
+      expectServerError: input.expectServerError,
+      //? Reset limiter buckets between routes when a token is available: the
+      //? global per-IP bucket is checked before validation, so once it fills,
+      //? every later probe would be a limiter rejection, not a route test.
+      resetToken,
+    });
 
     summary.auth = await runAuthEnforcementTests({ ...shared, apiMetaMap: input.apiMetaMap, inputFor });
 
@@ -287,23 +330,28 @@ const runSweepLayers = async (
     //? reach the CSRF check past the auth guard with a valid session, so it runs
     //? only when an `authToken` is supplied (and the layer isn't disabled). Without
     //? a token there is nothing to probe — the layer is silently skipped, leaving
-    //? behavior unchanged for tokenless sweeps.
-    if (!input.noCsrf && headers.Cookie) {
+    //? behavior unchanged for tokenless sweeps. Token-mode sessions carry no
+    //? ambient cookie credential, so the server does not enforce CSRF there:
+    //? the layer is skipped with a note instead of probing mutating routes.
+    if (!input.noCsrf && headers.Authorization) {
+      console.log('[test-runner] runAllTests: CSRF layer skipped — token-mode sessions (session.basedToken) are not subject to CSRF enforcement.');
+    } else if (!input.noCsrf && headers.Cookie) {
       summary.csrf = await runCsrfEnforcementTests({
-        ...shared,
+        ...routing,
         apiMetaMap: input.apiMetaMap,
         authCookie: headers.Cookie,
         inputFor,
-        syncTransport: sync?.csrf,
+        //? CSRF is an HTTP-only guard: both route kinds probe over HTTP.
+        syncTransport: transports.csrfSync,
       });
     }
 
     if (!input.noFuzz) {
-      summary.fuzz = await runFuzzTests({ ...shared, headers });
+      summary.fuzz = await runFuzzTests({ ...shared, headers, resetToken });
     }
   });
 
-  await sync?.close();
+  await transports.close();
 
   //? Reset bookend — AFTER the sweep: the custom layer and the next run start
   //? with fresh limiter buckets.

@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 
 import { createHttpProbeTransport, defaultProbeTransport } from './probeRequest';
-import { metaMapFor, selectEndpoints, transportFor } from './testLayerHelpers';
+import { hasSessionHeaders, metaMapFor, selectEndpoints, transportFor } from './testLayerHelpers';
 import { walkSyncEndpoints } from './walkEndpoints';
 import type { ApiMetaMap, SyncMetaMap } from './types';
 
@@ -66,5 +66,23 @@ describe('metaMapFor / transportFor', () => {
     expect(transportFor(syncEndpoint, syncTransport)).toBe(syncTransport);
     expect(transportFor(apiEndpoint, syncTransport)).toBe(defaultProbeTransport);
     expect(transportFor(syncEndpoint, undefined)).toBe(defaultProbeTransport);
+  });
+
+  it('uses the API transport for API routes only', () => {
+    if (!syncEndpoint || !apiEndpoint) throw new Error('fixture endpoints missing');
+    const syncTransport = createHttpProbeTransport({ syncReceiver: 'room' });
+    const apiTransport = createHttpProbeTransport();
+    expect(transportFor(apiEndpoint, syncTransport, apiTransport)).toBe(apiTransport);
+    expect(transportFor(syncEndpoint, syncTransport, apiTransport)).toBe(syncTransport);
+    expect(transportFor(syncEndpoint, undefined, apiTransport)).toBe(defaultProbeTransport);
+  });
+});
+
+describe('hasSessionHeaders', () => {
+  it('treats a session Cookie or a Bearer header as an authenticated sweep', () => {
+    expect(hasSessionHeaders({ Cookie: 'session=tok' })).toBe(true);
+    expect(hasSessionHeaders({ Authorization: 'Bearer tok' })).toBe(true);
+    expect(hasSessionHeaders({})).toBe(false);
+    expect(hasSessionHeaders(undefined)).toBe(false);
   });
 });

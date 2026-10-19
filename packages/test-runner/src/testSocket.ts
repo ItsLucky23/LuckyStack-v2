@@ -6,10 +6,14 @@
 //?
 //? Wire contract (sourced from `@luckystack/sync` `syncRequest.ts`, the real
 //? client): emit `sync` with `{ name, data, cb, receiver, responseIndex,
-//? ignoreSelf }`; the server answers once on `sync-<responseIndex>`.
+//? ignoreSelf }`; the server answers once on `sync-<responseIndex>`. API calls
+//? (sourced from `@luckystack/core` `apiRequest.ts`): emit `apiRequest` with
+//? `{ name, data, responseIndex }`; the server answers once on
+//? `apiResponse-<responseIndex>`.
 
 import { io as createSocketIoClient, Socket } from 'socket.io-client';
 import {
+  buildApiResponseEventName,
   buildJoinRoomResponseEventName,
   buildSyncResponseEventName,
   getProjectConfig,
@@ -175,24 +179,34 @@ export type EmitSyncOutcome =
   | { kind: 'response'; payload: unknown }
   | { kind: 'timeout' };
 
+//? Emit one request and resolve with the single reply on `replyEvent`, or a
+//? timeout. The listener is attached before the emit so a fast reply is not missed.
+const emitAndAwaitReply = (
+  socket: Socket,
+  replyEvent: string,
+  emit: () => void,
+  timeoutMs: number,
+): Promise<EmitSyncOutcome> => new Promise<EmitSyncOutcome>((resolve) => {
+  const timer = setTimeout(() => {
+    socket.off(replyEvent, onResponse);
+    resolve({ kind: 'timeout' });
+  }, timeoutMs);
+  const onResponse = (payload: unknown): void => {
+    clearTimeout(timer);
+    socket.off(replyEvent, onResponse);
+    resolve({ kind: 'response', payload });
+  };
+  socket.on(replyEvent, onResponse);
+  emit();
+});
+
 /**
  * Send one sync request over `socket` exactly like the real client does and
  * resolve with the server's single reply on `sync-<responseIndex>`.
  */
 export const emitSyncOverSocket = (socket: Socket, input: EmitSyncInput): Promise<EmitSyncOutcome> => {
   const responseIndex = nextResponseIndex();
-  const eventName = buildSyncResponseEventName(responseIndex);
-  return new Promise<EmitSyncOutcome>((resolve) => {
-    const timer = setTimeout(() => {
-      socket.off(eventName, onResponse);
-      resolve({ kind: 'timeout' });
-    }, input.timeoutMs);
-    const onResponse = (payload: unknown): void => {
-      clearTimeout(timer);
-      socket.off(eventName, onResponse);
-      resolve({ kind: 'response', payload });
-    };
-    socket.on(eventName, onResponse);
+  return emitAndAwaitReply(socket, buildSyncResponseEventName(responseIndex), () => {
     socket.emit(socketEventNames.sync, {
       name: `sync/${input.routePath}`,
       //? Only `undefined` defaults — a fuzz probe's `null` must reach the server as-is.
@@ -205,5 +219,29 @@ export const emitSyncOverSocket = (socket: Socket, input: EmitSyncInput): Promis
       responseIndex,
       ignoreSelf: input.ignoreSelf ?? false,
     });
-  });
+  }, input.timeoutMs);
+};
+
+export interface EmitApiInput {
+  /** `<page>/<name>/<version>` — the route path without the `api/` prefix. */
+  routePath: string;
+  data: unknown;
+  timeoutMs: number;
+}
+
+/**
+ * Send one API request over `socket` exactly like the real client does in
+ * socket mode and resolve with the server's single reply on
+ * `apiResponse-<responseIndex>`.
+ */
+export const emitApiOverSocket = (socket: Socket, input: EmitApiInput): Promise<EmitSyncOutcome> => {
+  const responseIndex = nextResponseIndex();
+  return emitAndAwaitReply(socket, buildApiResponseEventName(responseIndex), () => {
+    socket.emit(socketEventNames.apiRequest, {
+      name: `api/${input.routePath}`,
+      //? Only `undefined` defaults — a fuzz probe's `null` must reach the server as-is.
+      data: input.data === undefined ? {} : input.data,
+      responseIndex,
+    });
+  }, input.timeoutMs);
 };

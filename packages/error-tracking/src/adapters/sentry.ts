@@ -15,15 +15,16 @@ import { createRequire } from 'node:module';
 
 import {
   getCurrentErrorTrackerIdentity,
+  hasErrorTrackerIdentityScope,
   loadPeer,
   sanitizeErrorString,
-  sanitizeErrorStrings,
   type ErrorTracker,
   type ErrorTrackerEvent,
   type ErrorTrackerUser,
 } from '@luckystack/core';
 
 import { resolveExceptionEvent, resolveMessageEvent } from './runBeforeSend';
+import { toScrubbedError } from './scrubError';
 
 const localRequire = createRequire(import.meta.url);
 
@@ -70,14 +71,24 @@ export interface SentryAdapterOptions {
   beforeSend?: (event: ErrorTrackerEvent) => ErrorTrackerEvent | null;
 }
 
-//? Build the per-event Sentry CaptureContext, attaching the ALS-bound identity
-//? as a per-event `user` when a request scope is active (ET-02). When no ALS
-//? scope exists (background capture) we omit `user` and Sentry falls back to
-//? whatever the global `setUser` scope last held — preserving prior behavior.
+//? Sentry merges the per-event `user` field by field over the global scope's
+//? user, and ignores an empty object. Every standard field is therefore set
+//? explicitly, so a global user's email cannot fill a gap in the request's.
+const CLEARED_SENTRY_USER: ErrorTrackerUser = {
+  id: undefined,
+  email: undefined,
+  username: undefined,
+  ip_address: undefined,
+};
+
+//? Build the per-event Sentry CaptureContext. Inside a request scope the
+//? scope's identity is always used, also when the request is anonymous (ET-02):
+//? the global `setUser` scope belongs to background code, and falling back to it
+//? attributed anonymous errors to another user. Outside a scope (background
+//? capture) we omit `user` and Sentry uses the global `setUser` scope.
 const withIdentity = (hint?: SentryCaptureContext): SentryCaptureContext | undefined => {
-  const alsUser = getCurrentErrorTrackerIdentity();
-  if (!alsUser) return hint;
-  return { ...hint, user: alsUser };
+  if (!hasErrorTrackerIdentityScope()) return hint;
+  return { ...hint, user: { ...CLEARED_SENTRY_USER, ...getCurrentErrorTrackerIdentity() } };
 };
 
 export const createSentryAdapter = (options: SentryAdapterOptions = {}): ErrorTracker => {
@@ -95,16 +106,10 @@ export const createSentryAdapter = (options: SentryAdapterOptions = {}): ErrorTr
       //? grouping is preserved); a NON-Error throw (e.g. `throw 'auth token=abc'`)
       //? is scrubbed as a string. Previously a real Error passed through with its
       //? RAW message/stack — an interpolated secret reached Sentry unscrubbed.
-      let payload: Error | string;
-      if (resolved.error instanceof Error) {
-        const scrubbed = sanitizeErrorStrings(resolved.error);
-        const rebuilt = new Error(scrubbed?.message ?? resolved.error.message);
-        rebuilt.name = resolved.error.name;
-        rebuilt.stack = scrubbed?.stack ?? resolved.error.stack;
-        payload = rebuilt;
-      } else {
-        payload = sanitizeErrorString(String(resolved.error));
-      }
+      //? The scrubbed `cause` chain is kept so Sentry still links it.
+      const payload: Error | string = resolved.error instanceof Error
+        ? toScrubbedError(resolved.error)
+        : sanitizeErrorString(String(resolved.error));
       const hint = withIdentity(resolved.context ? { extra: resolved.context } : undefined);
       if (hint) {
         sentry.captureException(payload, hint);

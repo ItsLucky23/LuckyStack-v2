@@ -21,7 +21,7 @@ export interface ProbeRequestInput {
 }
 
 export interface ProbeResponse {
-  /** HTTP status. Absent when the probe travelled over Socket.io. */
+  /** HTTP status. Over Socket.io: the envelope's `httpStatus`, when it carries one. */
   httpStatus?: number;
   parsed: { status?: string; errorCode?: string } | null;
 }
@@ -69,7 +69,7 @@ export interface ProbeTransportRequest {
   baseUrl: string;
   /** The route payload — the API `data`, or the sync `data` (the transport adds the sync envelope). */
   body: unknown;
-  /** HTTP headers (session Cookie, CSRF). A socket transport reads only the Cookie. */
+  /** HTTP headers (session Cookie or Bearer, CSRF). A socket transport reads only the session. */
   headers?: Record<string, string>;
   requestTimeoutMs: number;
 }

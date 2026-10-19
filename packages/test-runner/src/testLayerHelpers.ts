@@ -69,11 +69,28 @@ export const metaMapFor = (
   syncMetaMap: SyncMetaMap | undefined,
 ): RouteMetaMap => (endpoint.kind === 'sync' ? syncMetaMap ?? {} : apiMetaMap);
 
-/** The transport for `endpoint`: `syncTransport` for sync routes when given, else HTTP. */
+/**
+ * The transport for `endpoint`: `syncTransport` for sync routes and
+ * `apiTransport` for API routes when given, else HTTP.
+ */
 export const transportFor = (
   endpoint: EndpointDescriptor,
   syncTransport: ProbeTransport | undefined,
-): ProbeTransport => (endpoint.kind === 'sync' && syncTransport ? syncTransport : defaultProbeTransport);
+  apiTransport?: ProbeTransport,
+): ProbeTransport => (endpoint.kind === 'sync' ? syncTransport : apiTransport) ?? defaultProbeTransport;
+
+/**
+ * Whether sweep headers carry a session: a session Cookie (cookie mode) or an
+ * `Authorization: Bearer` token (token mode). Layers that must not fire junk
+ * at mutating routes treat both as an authenticated sweep.
+ */
+export const hasSessionHeaders = (headers: Record<string, string> | undefined): boolean =>
+  Boolean(headers?.Cookie ?? headers?.Authorization);
+
+//? Codes a rate limiter answers with. Such a reply never reached input
+//? validation or the handler, so it proves nothing about the route.
+export const isRateLimitedCode = (errorCode: string | undefined): boolean =>
+  errorCode?.endsWith('.rateLimitExceeded') ?? false;
 
 /**
  * Whether an endpoint is in the explicit skip list. Matched against

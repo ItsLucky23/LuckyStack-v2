@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   getCurrentErrorTrackerIdentity,
+  hasErrorTrackerIdentityScope,
   runWithErrorTrackerIdentity,
   runWithErrorTrackerIdentityScope,
   setCurrentErrorTrackerIdentity,
@@ -58,5 +59,18 @@ describe('error-tracker AsyncLocalStorage identity', () => {
       });
       expect(getCurrentErrorTrackerIdentity()?.id).toBe('parent');
     });
+  });
+
+  it('reports an active scope even when its user is anonymous', async () => {
+    expect(hasErrorTrackerIdentityScope()).toBe(false);
+    await runWithErrorTrackerIdentityScope(async () => {
+      await Promise.resolve();
+      expect(getCurrentErrorTrackerIdentity()).toBeNull();
+      expect(hasErrorTrackerIdentityScope()).toBe(true);
+    });
+    runWithErrorTrackerIdentity(null, () => {
+      expect(hasErrorTrackerIdentityScope()).toBe(true);
+    });
+    expect(hasErrorTrackerIdentityScope()).toBe(false);
   });
 });

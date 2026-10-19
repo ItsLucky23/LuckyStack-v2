@@ -39,3 +39,11 @@ export const setCurrentErrorTrackerIdentity = (user: ErrorTrackerUser | null): v
 /** Read the current request identity, or null outside a scope. */
 export const getCurrentErrorTrackerIdentity = (): ErrorTrackerUser | null =>
   identityStore.getStore()?.user ?? null;
+
+//? `getCurrentErrorTrackerIdentity()` returns null both outside a scope and for
+//? an anonymous request inside one. Adapters need to tell those apart: inside a
+//? scope a null user means "anonymous", and falling back to a process-global
+//? user there attributes the error to whichever request set it last.
+/** Whether a request identity scope is active (even when its user is anonymous). */
+export const hasErrorTrackerIdentityScope = (): boolean =>
+  identityStore.getStore() !== undefined;

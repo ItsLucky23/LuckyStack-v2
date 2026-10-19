@@ -30,7 +30,7 @@ import {
   type StreamChunkFrame,
   type StreamWatcher,
 } from './streamWatcher';
-import { connectTestSocket, emitSyncOverSocket, joinTestRoom } from './testSocket';
+import { connectTestSocket, emitApiOverSocket, emitSyncOverSocket, joinTestRoom } from './testSocket';
 //? `ApiMethodMap` mirrors the generated `apiMethodMap` shape (page → name →
 //? version → method) and is a type-only import, so there's still no import-time
 //? coupling to the consumer's generated artifact.
@@ -180,6 +180,11 @@ export interface CallSyncOptions {
   joinRoom?: boolean;
 }
 
+export interface CallApiOptions {
+  /** Force a transport. Defaults to the project's `transport.invocation`. */
+  transport?: 'socket' | 'http';
+}
+
 //? Test fixture shapes. The TestContext is built per route — each per-route
 //? test file's `customTests` cases receive a context already bound to the
 //? route the file lives next to, so authors don't repeat `page/name/version`.
@@ -187,18 +192,20 @@ export interface TestContext {
   /**
    * Invoke the route under test. Page / name / version are baked in.
    *
-   * `input` travels exactly like the real client sends it: as the JSON body
-   * for POST / PUT / DELETE routes, and as the `__luckystack_data` query-string
-   * value for GET routes (a GET cannot carry a body). Either way the server
-   * validates it as the route's `data`, so a GET route with required fields
-   * receives them.
+   * The call takes the SAME transport the project's real client uses
+   * (`transport.invocation`): Socket.io (`apiRequest`) for `'socket'` (the
+   * default), the `/api/*` HTTP route for `'routed-http'`. Override per call
+   * with `opts.transport`. Over HTTP, `input` travels exactly like the real
+   * client sends it: as the JSON body for POST / PUT / DELETE routes, and as the
+   * `__luckystack_data` query-string value for GET routes (a GET cannot carry a
+   * body). Either way the server validates it as the route's `data`.
    */
   //? Two type parameters by design — `TInput` lets callers document the
   //? typed shape they're sending even though we don't validate against it
   //? here (the route's own runtime validation does). The ESLint rule
   //? otherwise flags it as "used once"; the documentation value is real.
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- callsite-documentation use
-  callApi: <TInput = unknown, TOutput = unknown>(input: TInput) => Promise<TOutput>;
+  callApi: <TInput = unknown, TOutput = unknown>(input: TInput, opts?: CallApiOptions) => Promise<TOutput>;
   /**
    * Invoke the sync route under test over the SAME transport the project's
    * real client uses (`transport.invocation`): Socket.io for `'socket'` (the
@@ -354,6 +361,9 @@ const parseResponse = async (response: Response, state: TestSessionState): Promi
   return parsed;
 };
 
+const resolveCallTransport = (opts: CallSyncOptions | CallApiOptions | undefined): 'socket' | 'http' =>
+  opts?.transport ?? (getProjectConfig().transport.invocation === 'routed-http' ? 'http' : 'socket');
+
 /** @internal Exported for the unit test only; consumers use `TestContext.callApi`. */
 export const buildCallApi = (
   baseUrl: string,
@@ -364,9 +374,24 @@ export const buildCallApi = (
   //? server validates the method, so DELETE/PUT routes (e.g. logout) 405 if we
   //? always sent POST.
   method: string,
+  caseSocket: CaseSyncSocket,
 ): TestContext['callApi'] => {
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- must match TestContext['callApi'] generic signature
-  return async <TInput = unknown, TOutput = unknown>(input: TInput): Promise<TOutput> => {
+  return async <TInput = unknown, TOutput = unknown>(input: TInput, opts?: CallApiOptions): Promise<TOutput> => {
+    //? A socket-mode client sends API calls over Socket.io (`handleApiRequest`),
+    //? a different pipeline than `/api/*`; test the one real users hit.
+    if (resolveCallTransport(opts) === 'socket') {
+      const { socket } = await caseSocket.get(state.token);
+      const outcome = await emitApiOverSocket(socket, { routePath, data: input, timeoutMs: DEFAULT_CALL_TIMEOUT_MS });
+      if (outcome.kind === 'timeout') {
+        state.lastResponse = null;
+        throw new Error(`callApi ${routePath} failed: no socket response within ${DEFAULT_CALL_TIMEOUT_MS}ms`);
+      }
+      state.lastResponse = outcome.payload;
+      //? The socket payload is unknown; TOutput is the caller's type contract, verified at the call site
+      return outcome.payload as TOutput;
+    }
+
     const path = `${baseUrl.replace(/\/$/, '')}/api/${routePath}`;
     const headers: Record<string, string> = { 'Content-Type': 'application/json', Origin: new URL(baseUrl).origin };
     if (state.token) headers.Cookie = `${cookieName}=${state.token}`;
@@ -393,11 +418,12 @@ export const buildCallApi = (
   };
 };
 
-//? The case's sync socket. Opened lazily on the first socket `callSync`, reopened
-//? when the case's session changes (a `session.login()` after the first call),
-//? and closed with the case's watchers. Tracks joined rooms so repeated calls to
-//? the same receiver join once.
-interface CaseSyncSocket {
+//? The case's socket, shared by socket-mode `callApi` and `callSync`. Opened
+//? lazily on the first socket call, reopened when the case's session changes
+//? (a `session.login()` after the first call), and closed with the case's
+//? watchers. Tracks joined rooms so repeated calls to the same receiver join once.
+/** @internal Exported for the unit test only. */
+export interface CaseSyncSocket {
   get: (token: string | null) => Promise<{ socket: Socket; joinedRooms: Set<string> }>;
   close: () => void;
 }
@@ -412,7 +438,7 @@ const createCaseSyncSocket = (baseUrl: string, cookieName: string): CaseSyncSock
     get: async (token) => {
       if (current?.token === token && current.socket.connected) return current;
       close();
-      const socket = await connectTestSocket({ baseUrl, token, label: 'callSync', sessionCookieName: cookieName });
+      const socket = await connectTestSocket({ baseUrl, token, label: 'case socket', sessionCookieName: cookieName });
       current = { socket, token, joinedRooms: new Set() };
       return current;
     },
@@ -420,8 +446,6 @@ const createCaseSyncSocket = (baseUrl: string, cookieName: string): CaseSyncSock
   };
 };
 
-const resolveSyncTransport = (opts: CallSyncOptions | undefined): 'socket' | 'http' =>
-  opts?.transport ?? (getProjectConfig().transport.invocation === 'routed-http' ? 'http' : 'socket');
 
 const buildCallSync = (
   baseUrl: string,
@@ -432,7 +456,7 @@ const buildCallSync = (
 ): TestContext['callSync'] => {
   // eslint-disable-next-line @typescript-eslint/no-unnecessary-type-parameters -- must match TestContext['callSync'] generic signature
   return async <TInput = unknown, TOutput = unknown>(input: TInput, opts?: CallSyncOptions): Promise<TOutput> => {
-    if (resolveSyncTransport(opts) === 'socket') {
+    if (resolveCallTransport(opts) === 'socket') {
       const { socket, joinedRooms } = await syncSocket.get(state.token);
       const { receiver, joinRoom = true } = opts ?? {};
       if (receiver && receiver !== 'all' && joinRoom && !joinedRooms.has(receiver)) {
@@ -539,7 +563,7 @@ const buildContext = (
   };
 
   const ctx: TestContext = {
-    callApi: buildCallApi(input.baseUrl, routePath, state, cookieName, apiMethod),
+    callApi: buildCallApi(input.baseUrl, routePath, state, cookieName, apiMethod, syncSocket),
     callSync: buildCallSync(input.baseUrl, routePath, state, cookieName, syncSocket),
     watchStream,
     session: buildSessionHelpers(state),

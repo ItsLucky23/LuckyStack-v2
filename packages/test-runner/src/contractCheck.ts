@@ -1,6 +1,7 @@
 import type { ContractCheckResult, EndpointDescriptor } from './types';
 import { defaultProbeTransport } from './probeRequest';
 import type { ProbeTransport } from './probeRequest';
+import { isRateLimitedCode } from './testLayerHelpers';
 
 const DEFAULT_REQUEST_TIMEOUT_MS = 5000;
 
@@ -24,12 +25,39 @@ export interface ContractCheckInput {
   requestTimeoutMs?: number;
   /** How the probe reaches the server. Defaults to HTTP. */
   transport?: ProbeTransport;
+  /**
+   * The route is designed to fail on the server (e.g. a playground route that
+   * throws on purpose): a shaped 5xx / execution-failed reply then passes.
+   * Routing errors (unknown route, wrong method) still fail.
+   */
+  allowServerError?: boolean;
 }
+
+//? Reply codes that mean the probe never reached a handler for this route: the
+//? generated route map and the live server disagree (stale map, route missing
+//? on the server, wrong method). A shaped envelope does not make that a pass.
+const ROUTING_ERROR_CODES = new Set([
+  'api.notFound',
+  'sync.notFound',
+  'api.methodNotAllowed',
+  'sync.methodNotAllowed',
+  'api.invalidName',
+  'sync.invalidName',
+]);
+
+//? Codes the pipelines answer with when the handler crashed. Socket replies
+//? may lack an HTTP status, so the code is checked alongside `httpStatus >= 500`.
+const SERVER_ERROR_CODES = new Set([
+  'api.serverExecutionFailed',
+  'sync.serverExecutionFailed',
+  'api.internalServerError',
+  'sync.internalServerError',
+]);
 
 //? Contract layer: send any-shape input, accept any response where
 //? `status` is `success` or `error` (with an `errorCode`). Anything else is
-//? a contract violation — 5xx, thrown exceptions, or shapes outside this
-//? envelope.
+//? a contract violation — 5xx, thrown exceptions, routing errors, or shapes
+//? outside this envelope.
 //?
 //? The goal here is NOT to prove every endpoint works end-to-end; it's to
 //? catch endpoints that crash the server or return garbage on well-formed
@@ -88,6 +116,48 @@ export const runContractCheck = async (input: ContractCheckInput): Promise<Contr
       httpStatus,
       responseStatus: 'error',
       reason: 'Error response missing `errorCode`',
+      durationMs,
+    };
+  }
+
+  //? The limiter answers before input validation, so the route was not
+  //? exercised at all — neither a pass nor a contract failure.
+  if (isRateLimitedCode(parsed.errorCode)) {
+    return {
+      endpoint,
+      status: 'skipped',
+      httpStatus,
+      responseStatus: 'error',
+      errorCode: parsed.errorCode,
+      reason: 'rate-limited before the route ran (not exercised); pass a reset token so the sweep resets rate limits between routes',
+      durationMs,
+    };
+  }
+
+  if (parsed.errorCode !== undefined && ROUTING_ERROR_CODES.has(parsed.errorCode)) {
+    return {
+      endpoint,
+      status: 'fail',
+      httpStatus,
+      responseStatus: 'error',
+      errorCode: parsed.errorCode,
+      reason: 'route not reachable as generated (routing error) — the generated route map and the live server disagree',
+      durationMs,
+    };
+  }
+
+  const isServerError = (httpStatus !== undefined && httpStatus >= 500)
+    || (parsed.errorCode !== undefined && SERVER_ERROR_CODES.has(parsed.errorCode));
+  if (isServerError) {
+    return {
+      endpoint,
+      status: input.allowServerError ? 'pass' : 'fail',
+      httpStatus,
+      responseStatus: 'error',
+      errorCode: parsed.errorCode,
+      reason: input.allowServerError
+        ? 'expected server error (listed in expectServerError)'
+        : 'server error on a well-formed probe — list the route in expectServerError if it is designed to fail',
       durationMs,
     };
   }
