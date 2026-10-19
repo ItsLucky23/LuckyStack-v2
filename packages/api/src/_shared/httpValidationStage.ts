@@ -13,8 +13,10 @@ import { resolveValidationMode } from './socketValidationStage';
 //?     stage, so a public webhook route (Stripe/Slack/GitHub) whose third-party
 //?     payload can't be modeled in TS is reachable over HTTP, not just sockets;
 //?   • warns once if a strict-mode route has no generated input type;
-//?   • dispatches `preApiValidate`, runs `validateInputByType` in strict mode,
-//?     then `postApiValidate` (always, including the relaxed skip path);
+//?   • dispatches `preApiValidate` (a stop signal vetoes the request before
+//?     validation and is returned as `stop`), runs `validateInputByType` in
+//?     strict mode, then `postApiValidate` (always, including the relaxed skip
+//?     path);
 //?   • on failure returns `{ ok: false }` (the caller builds the GENERIC
 //?     `api.invalidInputType` network error — the raw validator message is
 //?     NEVER echoed to the client; it only travels to the postApiValidate hook
@@ -34,7 +36,7 @@ export const runHttpApiValidation = async ({
   requestData: Record<string, unknown>;
   user: SessionLayout | null;
   validation: RuntimeApiEntry['validation'];
-}): Promise<{ ok: true } | { ok: false }> => {
+}): Promise<{ ok: true } | { ok: false; stop?: { errorCode: string; httpStatus?: number } }> => {
   //? Per-route validation toggle, honored identically to the socket stage.
   const validationMode = resolveValidationMode(validation);
 
@@ -42,7 +44,11 @@ export const runHttpApiValidation = async ({
   if (validationMode === 'strict') {
     warnIfInputTypeMissing(resolvedName, inputType);
   }
-  await dispatchHook('preApiValidate', { routeName: resolvedName, data: requestData, user, transport: 'http' });
+  const preValidateResult = await dispatchHook('preApiValidate', { routeName: resolvedName, data: requestData, user, transport: 'http' });
+  //? Stop signal vetoes the request, identical to the socket stage.
+  if (preValidateResult.stopped) {
+    return { ok: false, stop: { errorCode: preValidateResult.signal.errorCode, httpStatus: preValidateResult.signal.httpStatus } };
+  }
 
   if (validationMode === 'relaxed') {
     //? Relaxed: surface the skip via postApiValidate so audit handlers see it.

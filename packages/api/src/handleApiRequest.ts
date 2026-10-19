@@ -78,18 +78,21 @@ const validateApiMessage = async ({ msg, emitApiError }: {
   return { name, data: data as Record<string, unknown> };
 };
 
-const checkApiAuth = async ({ apiEntry, user, name, emitApiError }: {
+//? `resolvedName` (not the raw message name) keys the apiAuthRejected hook, so
+//? spelling variants of one route ('admin/x/v1', ' api/admin/x/v1/') land in the
+//? same consumer throttle key — parity with the HTTP transport.
+const checkApiAuth = async ({ apiEntry, user, resolvedName, emitApiError }: {
   apiEntry: RuntimeApiEntry;
   user: SessionLayout | null;
-  name: string;
+  resolvedName: string;
   emitApiError: EmitApiError;
 }): Promise<boolean> => {
   if (apiEntry.auth.login && !user?.id) {
     if (shouldLogDev()) {
-      getLogger().warn(`api: ${name} requires login`, { route: name });
+      getLogger().warn(`api: ${resolvedName} requires login`, { route: resolvedName });
     }
     void dispatchHook('apiAuthRejected', {
-      routeName: name,
+      routeName: resolvedName,
       reason: 'login-required',
       userId: null,
       transport: 'socket',
@@ -105,10 +108,10 @@ const checkApiAuth = async ({ apiEntry, user, name, emitApiError }: {
   const authResult = validateRequest({ auth: apiEntry.auth, user: user! });
   if (authResult.status === 'error') {
     if (shouldLogDev()) {
-      getLogger().warn(`api: auth failed for ${name}`, { route: name, errorCode: authResult.errorCode });
+      getLogger().warn(`api: auth failed for ${resolvedName}`, { route: resolvedName, errorCode: authResult.errorCode });
     }
     void dispatchHook('apiAuthRejected', {
-      routeName: name,
+      routeName: resolvedName,
       reason: authResult.errorCode === 'auth.invalidCondition' ? 'invalid-condition' : 'additional-failed',
       userId: user?.id ?? null,
       transport: 'socket',
@@ -198,15 +201,17 @@ const executeApiHandler = async ({ apiEntry, normalizedData, user, functionsObje
   const timeoutMs = getProjectConfig().api.requestTimeoutMs;
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
   let timedOut = false;
-  const timeoutPromise = timeoutMs === false
-    ? null
-    : new Promise<void>((resolve) => {
+  //? Only a positive number arms the timer: `0` / negative mean "disabled",
+  //? exactly as the client's `apiRequest` timeout reads the same config key.
+  const timeoutPromise = typeof timeoutMs === 'number' && timeoutMs > 0
+    ? new Promise<void>((resolve) => {
         timeoutHandle = setTimeout(() => {
           timedOut = true;
           abortController.abort();
           resolve();
         }, timeoutMs);
-      });
+      })
+    : null;
 
   const handlerPromise = tryCatch(
     async () => await apiEntry.main({ data: normalizedData, user, functions: functionsObject, stream: emitStream, abortSignal, flushPressure }),
@@ -335,7 +340,7 @@ const emitApiResult = async ({
   //? A handler may also return a stop signal — when that happens we build a
   //? fresh error envelope from the signal's `errorCode` / `httpStatus` and
   //? emit that instead of the original.
-  const preRespond = { routeName: resolvedName, user, response: envelope };
+  const preRespond = { routeName: resolvedName, user, transport: 'socket' as const, response: envelope };
   const preRespondResult = await dispatchHook('preApiRespond', preRespond);
 
   const finalResponse = preRespondResult.stopped
@@ -351,7 +356,7 @@ const emitApiResult = async ({
   //? Designed for response mutation — header injection, body transformation,
   //? response signing — that's awkward inside preApiRespond. Handlers mutate
   //? `payload.response` in place (same shape as preApiRespond.response).
-  const transformPayload = { routeName: resolvedName, user, response: finalResponse };
+  const transformPayload = { routeName: resolvedName, user, transport: 'socket' as const, response: finalResponse };
   await dispatchHook('transformApiResponse', transformPayload);
 
   //? Per-route → global → identity error formatter chain. No-op when status
@@ -369,7 +374,7 @@ const emitApiResult = async ({
 
   //? `postApiRespond` is observation-only — the response is already on the
   //? wire. Use it for audit logging, metrics, dual-write replication.
-  await dispatchHook('postApiRespond', { routeName: resolvedName, user, response: formattedResponse });
+  await dispatchHook('postApiRespond', { routeName: resolvedName, user, transport: 'socket', response: formattedResponse });
 };
 
 //? ET-02 — open a per-request error-tracker identity scope around the ENTIRE
@@ -493,7 +498,7 @@ async function handleApiRequestInner({ msg, socket, token }: handleApiRequestTyp
     //? `emitApiResult` + the HTTP path).
     // luckystack-allow no-as-any: hook payload boundary — normalizeErrorResponse returns a narrower type than the preApiRespond payload shape; fix requires @luckystack/core type alignment
     // eslint-disable-next-line no-restricted-syntax -- hook payload boundary, mirrors handleHttpApiRequest
-    const preRespond = { routeName: routeNameForHook, user, response: normalized as unknown as { status: 'success' | 'error'; httpStatus?: number; [key: string]: unknown } };
+    const preRespond = { routeName: routeNameForHook, user, transport: 'socket' as const, response: normalized as unknown as { status: 'success' | 'error'; httpStatus?: number; [key: string]: unknown } };
     const preRespondResult = await dispatchHook('preApiRespond', preRespond);
 
     let finalResponse = preRespond.response;
@@ -509,7 +514,7 @@ async function handleApiRequestInner({ msg, socket, token }: handleApiRequestTyp
       finalResponse = stoppedEnvelope as unknown as typeof preRespond.response;
     }
 
-    const transformPayload = { routeName: routeNameForHook, user, response: finalResponse };
+    const transformPayload = { routeName: routeNameForHook, user, transport: 'socket' as const, response: finalResponse };
     await dispatchHook('transformApiResponse', transformPayload);
 
     const formatted = applyErrorFormatter({
@@ -522,7 +527,7 @@ async function handleApiRequestInner({ msg, socket, token }: handleApiRequestTyp
     socket.emit(buildApiResponseEventName(responseIndex), formatted);
 
     //? postApiRespond is observation-only — the response is already on the wire.
-    await dispatchHook('postApiRespond', { routeName: routeNameForHook, user, response: formatted });
+    await dispatchHook('postApiRespond', { routeName: routeNameForHook, user, transport: 'socket', response: formatted });
   };
 
   const validated = await validateApiMessage({ msg, emitApiError });
@@ -650,7 +655,7 @@ async function handleApiRequestInner({ msg, socket, token }: handleApiRequestTyp
   //? additional throttles. Consuming the global-IP bucket on auth-fail would
   //? allow an attacker to trigger DoS for a victim account's IP by deliberately
   //? sending bad credentials.
-  if (!(await checkApiAuth({ apiEntry, user, name, emitApiError }))) { cleanupRequest(); return; }
+  if (!(await checkApiAuth({ apiEntry, user, resolvedName, emitApiError }))) { cleanupRequest(); return; }
 
   const rateLimitOk = await runSocketRateLimits({ apiEntry, resolvedName, token, socket, user, emitApiError });
   if (!rateLimitOk) { cleanupRequest(); return; }
@@ -668,6 +673,11 @@ async function handleApiRequestInner({ msg, socket, token }: handleApiRequestTyp
     emitInvalidInputType: async () => { await emitApiError({
       response: { status: 'error', errorCode: 'api.invalidInputType' },
       fallbackHttpStatus: 400,
+    }); },
+    //? preApiValidate stop signal — same envelope + 403 default as preApiExecute.
+    emitValidationStopped: async ({ errorCode, httpStatus }) => { await emitApiError({
+      response: { status: 'error', errorCode },
+      fallbackHttpStatus: httpStatus ?? 403,
     }); },
   });
   if (!validationOk) return;

@@ -91,13 +91,16 @@ export async function handleHttpApiRequest(params: HttpApiRequestParams): Promis
 }
 
 async function handleHttpApiRequestScoped(params: HttpApiRequestParams): Promise<ApiNetworkResponse> {
-  const { response, user, preferredLocale, perRouteFormatter } = await runHandleHttpApiRequest(params);
+  const { response, user, preferredLocale, perRouteFormatter, resolvedName } = await runHandleHttpApiRequest(params);
 
-  //? `name` may not parse to a valid route — pass the original raw name as
-  //? routeName so hook handlers can still correlate the rejection.
-  const routeNameForHook = params.name.startsWith('api/') ? params.name : `api/${params.name}`;
+  //? Respond hooks and the error formatter key on the canonical route name the
+  //? request actually resolved to (same as the socket transport), so a variant
+  //? spelling (trailing slash, backslash, whitespace) cannot dodge route-keyed
+  //? redaction. Only a name that failed to parse falls back to the raw name, so
+  //? hook handlers can still correlate the rejection.
+  const routeNameForHook = resolvedName ?? (params.name.startsWith('api/') ? params.name : `api/${params.name}`);
 
-  const preRespond = { routeName: routeNameForHook, user, response: response as { status: 'success' | 'error'; httpStatus?: number; [key: string]: unknown } };
+  const preRespond = { routeName: routeNameForHook, user, transport: 'http' as const, response: response as { status: 'success' | 'error'; httpStatus?: number; [key: string]: unknown } };
   const preRespondResult = await dispatchHook('preApiRespond', preRespond);
 
   //? Honor a stop signal from `preApiRespond`: rewrite the envelope into a
@@ -117,7 +120,7 @@ async function handleHttpApiRequestScoped(params: HttpApiRequestParams): Promise
   //? so BOTH transports preserve the same policy/hook ordering. Handlers
   //? mutate `payload.response` in place (header injection, body transform,
   //? response signing).
-  const transformPayload = { routeName: routeNameForHook, user, response: finalResponse };
+  const transformPayload = { routeName: routeNameForHook, user, transport: 'http' as const, response: finalResponse };
   await dispatchHook('transformApiResponse', transformPayload);
 
   //? Per-route → global → identity error formatter chain. Mirrors the socket
@@ -138,7 +141,7 @@ async function handleHttpApiRequestScoped(params: HttpApiRequestParams): Promise
     perRouteFormatter,
   }) as ApiNetworkResponse;
 
-  await dispatchHook('postApiRespond', { routeName: routeNameForHook, user, response: formattedResponse });
+  await dispatchHook('postApiRespond', { routeName: routeNameForHook, user, transport: 'http', response: formattedResponse });
 
   return formattedResponse;
 }
@@ -148,6 +151,14 @@ interface RunHandleHttpApiRequestResult {
   user: SessionLayout | null;
   preferredLocale: string | null | undefined;
   perRouteFormatter?: ErrorFormatter;
+  /** Canonical route name; undefined when the request failed before the name parsed. */
+  resolvedName?: string;
+}
+
+/** Route facts the pipeline resolves on the way, read back by the respond stage. */
+interface ResolvedRouteHolder {
+  perRouteFormatter?: ErrorFormatter;
+  resolvedName?: string;
 }
 
 async function runHandleHttpApiRequest(params: HttpApiRequestParams): Promise<RunHandleHttpApiRequestResult> {
@@ -160,9 +171,9 @@ async function runHandleHttpApiRequest(params: HttpApiRequestParams): Promise<Ru
   //? attributes to this user. The legacy global is still set via the
   //? `preApiValidate` hook subscriber; the ALS read wins at capture time.
   setCurrentErrorTrackerIdentity(user?.id ? { id: user.id, email: user.email ?? undefined, username: user.name ?? undefined } : null);
-  const formatterHolder: { current?: ErrorFormatter } = {};
-  const response = await runHandleHttpApiRequestInner(params, user, preferredLocale, formatterHolder);
-  return { response, user, preferredLocale, perRouteFormatter: formatterHolder.current };
+  const routeHolder: ResolvedRouteHolder = {};
+  const response = await runHandleHttpApiRequestInner(params, user, preferredLocale, routeHolder);
+  return { response, user, preferredLocale, perRouteFormatter: routeHolder.perRouteFormatter, resolvedName: routeHolder.resolvedName };
 }
 
 // ---------------------------------------------------------------------------
@@ -189,6 +200,7 @@ async function validateHttpApiRequestShape(
   name: string,
   data: Record<string, unknown>,
   ctx: HttpApiPipelineContext,
+  routeHolder: ResolvedRouteHolder,
 ): Promise<
   | ApiNetworkResponse
   | {
@@ -231,6 +243,9 @@ async function validateHttpApiRequestShape(
   }
 
   const resolvedName = parsedRoute.normalizedFullName;
+  //? Recorded before the lookup so a not-found response also reports the
+  //? canonical name to the respond hooks, as the socket transport does.
+  routeHolder.resolvedName = resolvedName;
 
   if (shouldLogDev()) {
     getLogger().debug(`http api: ${resolvedName} called`);
@@ -515,15 +530,17 @@ async function runHttpApiExecution(
 
   let timedOut = false;
   let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-  const timeoutPromise = timeoutMs === false
-    ? null
-    : new Promise<void>((resolve) => {
+  //? Only a positive number arms the timer: `0` / negative mean "disabled",
+  //? exactly as the client's `apiRequest` timeout reads the same config key.
+  const timeoutPromise = typeof timeoutMs === 'number' && timeoutMs > 0
+    ? new Promise<void>((resolve) => {
         timeoutHandle = setTimeout(() => {
           timedOut = true;
           combinedController.abort();
           resolve();
         }, timeoutMs);
-      });
+      })
+    : null;
 
   const executeStart = Date.now();
   const handlerPromise = tryCatch(
@@ -592,7 +609,7 @@ async function runHandleHttpApiRequestInner(
   }: HttpApiRequestParams,
   user: SessionLayout | null,
   preferredLocale: string | null | undefined,
-  formatterHolder: { current?: ErrorFormatter },
+  routeHolder: ResolvedRouteHolder,
 ): Promise<ApiNetworkResponse> {
   //? B1 — HTTP/SSE transport. The caller (typically `@luckystack/server`'s
   //? SSE bridge) wires `req.on('close', ...)` to a controller and passes its
@@ -621,14 +638,14 @@ async function runHandleHttpApiRequestInner(
   const ctx: HttpApiPipelineContext = { buildNetworkError, user, preferredLocale };
 
   // Stage 1: validate request shape, parse route, resolve runtime maps
-  const shapeResult = await validateHttpApiRequestShape(name, data, ctx);
+  const shapeResult = await validateHttpApiRequestShape(name, data, ctx, routeHolder);
   if ('status' in shapeResult) {
     return shapeResult;
   }
   const { resolvedName, requestData, apisObject, functionsObject } = shapeResult;
 
   const runtimeApiRoute = apisObject[resolvedName] as RuntimeApiEntry;
-  formatterHolder.current = runtimeApiRoute.errorFormatter;
+  routeHolder.perRouteFormatter = runtimeApiRoute.errorFormatter;
 
   // Stage 2: auth (login-required + additional predicates)
   //? Pipeline order: auth → rate-limit → method → validate → execute → respond.
@@ -673,6 +690,12 @@ async function runHandleHttpApiRequestInner(
     validation: runtimeApiRoute.validation,
   });
   if (!httpValidation.ok) {
+    if (httpValidation.stop) {
+      return buildNetworkError({
+        response: { status: 'error', errorCode: httpValidation.stop.errorCode },
+        fallbackHttpStatus: httpValidation.stop.httpStatus ?? 403,
+      });
+    }
     return buildNetworkError({
       response: {
         status: 'error',
