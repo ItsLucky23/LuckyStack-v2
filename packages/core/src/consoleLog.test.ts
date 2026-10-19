@@ -4,12 +4,12 @@ import { initConsolelog } from './consoleLog';
 
 describe('initConsolelog', () => {
   const realLog = console.log;
-  let nativeLog: ReturnType<typeof vi.fn>;
+  let nativeLog: ReturnType<typeof vi.fn<(...args: unknown[]) => void>>;
 
   beforeEach(() => {
     //? `initConsolelog` captures whatever `console.log` is at install time as
     //? the native sink, so install over a spy.
-    nativeLog = vi.fn();
+    nativeLog = vi.fn<(...args: unknown[]) => void>();
     console.log = nativeLog;
     initConsolelog();
   });
