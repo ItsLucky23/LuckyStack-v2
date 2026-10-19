@@ -28,8 +28,10 @@ export interface RunAuthEnforcementTestsInput {
   /** Substring filter on `<page>/<name>/<version>`; other routes are not requested at all. */
   filter?: string;
   inputFor?: (endpoint: EndpointDescriptor) => unknown;
-  /** Transport for sync routes (e.g. the socket transport). API routes always use HTTP. */
+  /** Transport for sync routes (e.g. the socket transport). Defaults to HTTP. */
   syncTransport?: ProbeTransport;
+  /** Transport for API routes (e.g. the socket transport). Defaults to HTTP. */
+  apiTransport?: ProbeTransport;
   onResult?: (result: ContractCheckResult) => void;
 }
 
@@ -88,7 +90,7 @@ export const runAuthEnforcementTests = async (
       endpoint,
       baseUrl: input.baseUrl,
       inputFor: input.inputFor,
-      transport: transportFor(endpoint, input.syncTransport),
+      transport: transportFor(endpoint, input.syncTransport, input.apiTransport),
     });
     results.push(result);
     input.onResult?.(result);

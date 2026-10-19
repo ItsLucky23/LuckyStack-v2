@@ -3,10 +3,15 @@ import type { AddressInfo } from 'node:net';
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { Server } from 'socket.io';
-import { buildJoinRoomResponseEventName, buildSyncResponseEventName, socketEventNames } from '@luckystack/core';
+import {
+  buildApiResponseEventName,
+  buildJoinRoomResponseEventName,
+  buildSyncResponseEventName,
+  socketEventNames,
+} from '@luckystack/core';
 
 import { createSocketProbeTransport } from './socketProbeTransport';
-import { walkSyncEndpoints } from './walkEndpoints';
+import { walkEndpoints, walkSyncEndpoints } from './walkEndpoints';
 
 //? Sync routes on the default `transport.invocation: 'socket'` run through the
 //? socket pipeline, not `/sync/*` — so the runner must speak the real wire. A
@@ -17,6 +22,7 @@ import { walkSyncEndpoints } from './walkEndpoints';
 
 const COOKIE = 'session_test';
 const received: { name: unknown; data: unknown; receiver: unknown; cb: unknown; member: boolean; cookie: string | undefined }[] = [];
+const apiReceived: { name: unknown; data: unknown; cookie: string | undefined; authToken: unknown }[] = [];
 const intentionalDisconnects: (string | undefined)[] = [];
 let connections = 0;
 let server: http.Server;
@@ -43,6 +49,15 @@ beforeAll(async () => {
       socket.emit(
         buildSyncResponseEventName(msg.responseIndex),
         member ? { status: 'success', result: {} } : { status: 'error', errorCode: 'sync.notRoomMember' },
+      );
+    });
+    socket.on(socketEventNames.apiRequest, (msg: { name: string; data: unknown; responseIndex: number }) => {
+      apiReceived.push({ name: msg.name, data: msg.data, cookie, authToken: (socket.handshake.auth as { token?: unknown }).token });
+      socket.emit(
+        buildApiResponseEventName(msg.responseIndex),
+        msg.name === 'api/broken/crash/v1'
+          ? { status: 'error', errorCode: 'api.serverExecutionFailed', httpStatus: 500 }
+          : { status: 'success', result: {} },
       );
     });
     //? Mirrors presence: an intentional disconnect keeps the session and the
@@ -115,5 +130,54 @@ describe('createSocketProbeTransport', () => {
     intentionalDisconnects.length = 0;
     await transport.close?.();
     expect(intentionalDisconnects).toStrictEqual([`${COOKIE}=tok3`]);
+  });
+});
+
+//? API routes in a socket-mode project go through the `apiRequest` socket
+//? pipeline, not `/api/*` — the sweep must take that path too (ADR 0064).
+const [apiEndpoint, crashingEndpoint] = walkEndpoints({
+  user: { getProfile: { v1: 'GET' } },
+  broken: { crash: { v1: 'POST' } },
+});
+
+describe('createSocketProbeTransport for API routes', () => {
+  it('sends the real apiRequest shape over the socket, not HTTP', async () => {
+    if (!apiEndpoint) throw new Error('fixture endpoint missing');
+    const transport = createSocketProbeTransport({ baseUrl, receiver: 'lstest-room-e', sessionCookieName: COOKIE });
+    const response = await transport.send({
+      endpoint: apiEndpoint,
+      baseUrl,
+      body: { id: 'abc' },
+      headers: { Cookie: `${COOKIE}=tok4` },
+      requestTimeoutMs: 2000,
+    });
+    await transport.close?.();
+
+    expect(response).toStrictEqual({ parsed: { status: 'success', errorCode: undefined } });
+    expect(apiReceived.at(-1)).toMatchObject({ name: 'api/user/getProfile/v1', data: { id: 'abc' }, cookie: `${COOKIE}=tok4` });
+  });
+
+  it('carries a token-mode Bearer header as the socket identity', async () => {
+    if (!apiEndpoint) throw new Error('fixture endpoint missing');
+    const transport = createSocketProbeTransport({ baseUrl, receiver: 'lstest-room-f', sessionCookieName: COOKIE });
+    await transport.send({
+      endpoint: apiEndpoint,
+      baseUrl,
+      body: {},
+      headers: { Authorization: 'Bearer tok5' },
+      requestTimeoutMs: 2000,
+    });
+    await transport.close?.();
+
+    expect(apiReceived.at(-1)?.authToken).toBe('tok5');
+  });
+
+  it('surfaces the envelope httpStatus so a socket 5xx is visible to the checks', async () => {
+    if (!crashingEndpoint) throw new Error('fixture endpoint missing');
+    const transport = createSocketProbeTransport({ baseUrl, receiver: 'lstest-room-g', sessionCookieName: COOKIE });
+    const response = await transport.send({ endpoint: crashingEndpoint, baseUrl, body: {}, requestTimeoutMs: 2000 });
+    await transport.close?.();
+
+    expect(response).toStrictEqual({ httpStatus: 500, parsed: { status: 'error', errorCode: 'api.serverExecutionFailed' } });
   });
 });

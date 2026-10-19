@@ -1,24 +1,23 @@
-//? Socket.io probe transport for sync routes. A project on the default
-//? `transport.invocation: 'socket'` sends every sync request over the socket,
-//? which runs a different server pipeline (`handleSyncRequest`) than the
-//? `/sync/*` HTTP route. Probing over HTTP alone would leave that pipeline —
-//? the one real users hit — without coverage.
+//? Socket.io probe transport. A project on the default
+//? `transport.invocation: 'socket'` sends every API and sync request over the
+//? socket, which runs different server pipelines (`handleApiRequest`,
+//? `handleSyncRequest`) than the `/api/*` and `/sync/*` HTTP routes. Probing over
+//? HTTP alone would leave those pipelines — the ones real users hit — without
+//? coverage (ADR 0064).
 //?
-//? One socket per session identity (the probe's Cookie header, or none for an
-//? anonymous probe), opened lazily and reused for the whole sweep. An
-//? authenticated socket joins `receiver` once, so room-membership enforcement
-//? (`sync.requireRoomMembership`) sees a member, exactly like a real client that
-//? joined its room before syncing. API endpoints are delegated to HTTP — they
-//? have no socket transport in the sweep.
+//? One socket per session identity (the probe's session Cookie or Bearer
+//? header, or none for an anonymous probe), opened lazily and reused for the
+//? whole sweep. An authenticated socket joins `receiver` once, so
+//? room-membership enforcement (`sync.requireRoomMembership`) sees a member,
+//? exactly like a real client that joined its room before syncing.
 
 import type { Socket } from 'socket.io-client';
 import { tryCatch } from '@luckystack/core';
 
-import { connectTestSocket, emitSyncOverSocket, joinTestRoom, releaseTestSocket } from './testSocket';
-import { createHttpProbeTransport } from './probeRequest';
+import { connectTestSocket, emitApiOverSocket, emitSyncOverSocket, joinTestRoom, releaseTestSocket } from './testSocket';
 import type { ProbeResponse, ProbeTransport, ProbeTransportRequest } from './probeRequest';
 
-const LABEL = 'sync probe';
+const LABEL = 'socket probe';
 
 export interface SocketProbeTransportOptions {
   baseUrl: string;
@@ -38,10 +37,21 @@ const tokenFromCookieHeader = (cookieHeader: string | undefined, cookieName: str
   return null;
 };
 
+//? Token-mode sweeps carry the session as `Authorization: Bearer <token>`.
+const tokenFromHeaders = (headers: Record<string, string> | undefined, cookieName: string): string | null => {
+  const cookieToken = tokenFromCookieHeader(headers?.Cookie, cookieName);
+  if (cookieToken) return cookieToken;
+  const authorization = headers?.Authorization;
+  return authorization?.startsWith('Bearer ') ? authorization.slice('Bearer '.length) : null;
+};
+
+//? Socket replies carry the status the HTTP route would have answered with in
+//? the envelope's `httpStatus`, so a 5xx is visible to the checks either way.
 const toProbeResponse = (payload: unknown): ProbeResponse => {
   if (typeof payload !== 'object' || payload === null) return { parsed: null };
-  const record = payload as { status?: unknown; errorCode?: unknown };
+  const record = payload as { status?: unknown; errorCode?: unknown; httpStatus?: unknown };
   return {
+    ...(typeof record.httpStatus === 'number' ? { httpStatus: record.httpStatus } : {}),
     parsed: {
       status: typeof record.status === 'string' ? record.status : undefined,
       errorCode: typeof record.errorCode === 'string' ? record.errorCode : undefined,
@@ -50,7 +60,6 @@ const toProbeResponse = (payload: unknown): ProbeResponse => {
 };
 
 export const createSocketProbeTransport = (options: SocketProbeTransportOptions): ProbeTransport => {
-  const http = createHttpProbeTransport({ syncReceiver: options.receiver });
   //? Keyed by token ('' = anonymous). A failed connect is cached as `null` so
   //? an unreachable socket endpoint fails each probe fast instead of retrying.
   const sockets = new Map<string, Promise<Socket | null>>();
@@ -77,15 +86,17 @@ export const createSocketProbeTransport = (options: SocketProbeTransportOptions)
   };
 
   const send = async (request: ProbeTransportRequest): Promise<ProbeResponse | null> => {
-    if (request.endpoint.kind !== 'sync') return http.send(request);
-    const socket = await socketFor(tokenFromCookieHeader(request.headers?.Cookie, options.sessionCookieName));
+    const socket = await socketFor(tokenFromHeaders(request.headers, options.sessionCookieName));
     if (!socket) return null;
-    const outcome = await emitSyncOverSocket(socket, {
-      routePath: `${request.endpoint.page}/${request.endpoint.name}/${request.endpoint.version}`,
-      data: request.body,
-      receiver: options.receiver,
-      timeoutMs: request.requestTimeoutMs,
-    });
+    const routePath = `${request.endpoint.page}/${request.endpoint.name}/${request.endpoint.version}`;
+    const outcome = request.endpoint.kind === 'sync'
+      ? await emitSyncOverSocket(socket, {
+        routePath,
+        data: request.body,
+        receiver: options.receiver,
+        timeoutMs: request.requestTimeoutMs,
+      })
+      : await emitApiOverSocket(socket, { routePath, data: request.body, timeoutMs: request.requestTimeoutMs });
     return outcome.kind === 'response' ? toProbeResponse(outcome.payload) : null;
   };
 

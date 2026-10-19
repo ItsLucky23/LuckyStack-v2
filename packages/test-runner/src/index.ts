@@ -60,6 +60,7 @@ export {
 } from './customTests';
 export type {
   CustomTestCase,
+  CallApiOptions,
   CallSyncOptions,
   TestContext,
   TestExpect,

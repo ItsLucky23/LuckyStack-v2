@@ -5,6 +5,7 @@ import {
   requiresLogin,
   getRateLimit,
   calculateSummary,
+  hasSessionHeaders,
   metaMapFor,
   selectEndpoints,
   transportFor,
@@ -31,8 +32,10 @@ export interface RunRateLimitTestsInput {
   filter?: string;
   inputFor?: (endpoint: EndpointDescriptor) => unknown;
   headers?: Record<string, string>;
-  /** Transport for sync routes (e.g. the socket transport). API routes always use HTTP. */
+  /** Transport for sync routes (e.g. the socket transport). Defaults to HTTP. */
   syncTransport?: ProbeTransport;
+  /** Transport for API routes (e.g. the socket transport). Defaults to HTTP. */
+  apiTransport?: ProbeTransport;
   /**
    * Max rateLimit value to test. Endpoints with a higher limit are skipped
    * to avoid firing thousands of requests in CI.
@@ -63,11 +66,12 @@ export const runRateLimitTests = async (
   const skip = input.skip ?? [];
   const maxRateLimit = input.maxRateLimitToTest ?? 50;
   //? A login-required route returns `auth.required` BEFORE the rate limiter
-  //? runs, so it can only be rate-limit-tested with a session. A Cookie header
-  //? means an authenticated sweep. We deliberately do NOT auto-authenticate the
-  //? sweep — that would execute real mutations (delete/update) with junk input.
-  //? Set TEST_AUTH_TOKEN to opt in and cover login-gated routes.
-  const isAuthenticatedSweep = Boolean(input.headers?.Cookie);
+  //? runs, so it can only be rate-limit-tested with a session. A session Cookie
+  //? or Bearer header means an authenticated sweep. We deliberately do NOT
+  //? auto-authenticate the sweep — that would execute real mutations
+  //? (delete/update) with junk input. Set TEST_AUTH_TOKEN to opt in and cover
+  //? login-gated routes.
+  const isAuthenticatedSweep = hasSessionHeaders(input.headers);
   const results: ContractCheckResult[] = [];
 
   for (const endpoint of endpoints) {
@@ -87,7 +91,7 @@ export const runRateLimitTests = async (
       continue;
     }
 
-    //? In cookie-mode the rate-limit check fires the endpoint `rateLimit + 1`
+    //? In an authenticated sweep the rate-limit check fires the endpoint `rateLimit + 1`
     //? times with junk input. State-changing routes (POST/PUT/DELETE — every
     //? sync route) execute real mutation handlers on each hit — skip them to
     //? avoid side-effects on the test database. Their rate limits are better
@@ -97,7 +101,7 @@ export const runRateLimitTests = async (
         endpoint,
         status: 'skipped',
         durationMs: 0,
-        reason: 'state-changing route skipped in cookie-mode rate-limit sweep (mutation risk with junk bodies)',
+        reason: 'state-changing route skipped in authenticated rate-limit sweep (mutation risk with junk bodies)',
       };
       results.push(skipped);
       input.onResult?.(skipped);
@@ -140,7 +144,7 @@ export const runRateLimitTests = async (
       rateLimit,
       inputFor: input.inputFor,
       headers: input.headers,
-      transport: transportFor(endpoint, input.syncTransport),
+      transport: transportFor(endpoint, input.syncTransport, input.apiTransport),
     });
     results.push(result);
     input.onResult?.(result);

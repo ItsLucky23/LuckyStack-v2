@@ -1,5 +1,13 @@
 import { runFuzzCheck } from './fuzzCheck';
-import { shouldSkip, calculateSummary, selectEndpoints, transportFor, STATE_CHANGING_METHODS } from './testLayerHelpers';
+import { resetServerState } from './resetServerState';
+import {
+  shouldSkip,
+  calculateSummary,
+  hasSessionHeaders,
+  selectEndpoints,
+  transportFor,
+  STATE_CHANGING_METHODS,
+} from './testLayerHelpers';
 import type { ProbeTransport } from './probeRequest';
 import type { ApiMethodMap, ContractCheckResult, RunContractSummary, SyncMetaMap } from './types';
 
@@ -12,21 +20,29 @@ export interface RunFuzzTestsInput {
   /** Substring filter on `<page>/<name>/<version>`; other routes are not requested at all. */
   filter?: string;
   headers?: Record<string, string>;
-  /** Transport for sync routes (e.g. the socket transport). API routes always use HTTP. */
+  /** Transport for sync routes (e.g. the socket transport). Defaults to HTTP. */
   syncTransport?: ProbeTransport;
+  /** Transport for API routes (e.g. the socket transport). Defaults to HTTP. */
+  apiTransport?: ProbeTransport;
+  /**
+   * When given, rate limits are reset (`/_test/reset?only=rateLimits`) before
+   * each route, so the shared per-IP bucket cannot fill up mid-sweep and turn
+   * the remaining payloads into limiter rejections.
+   */
+  resetToken?: string;
   onResult?: (result: ContractCheckResult) => void;
 }
 
 export const runFuzzTests = async (input: RunFuzzTestsInput): Promise<RunContractSummary> => {
   const endpoints = selectEndpoints(input);
   const skip = input.skip ?? [];
-  //? In cookie-mode (authenticated sweep) junk bodies sent to state-changing
-  //? routes (POST/PUT/DELETE — every sync route) bypass the body-ignore
-  //? short-circuit and reach real mutation handlers — risking unintended
-  //? side-effects on the test database. Skip those endpoints here; the contract
-  //? layer already validates their shape with well-formed input, and the CSRF
-  //? layer probes their auth guard separately.
-  const isAuthenticatedSweep = Boolean(input.headers?.Cookie);
+  //? In an authenticated sweep (session Cookie or Bearer token) junk bodies sent
+  //? to state-changing routes (POST/PUT/DELETE — every sync route) bypass the
+  //? body-ignore short-circuit and reach real mutation handlers — risking
+  //? unintended side-effects on the test database. Skip those endpoints here;
+  //? the contract layer already validates their shape with well-formed input,
+  //? and the CSRF layer probes their auth guard separately.
+  const isAuthenticatedSweep = hasSessionHeaders(input.headers);
   const results: ContractCheckResult[] = [];
 
   for (const endpoint of endpoints) {
@@ -35,7 +51,7 @@ export const runFuzzTests = async (input: RunFuzzTestsInput): Promise<RunContrac
         endpoint,
         status: 'skipped',
         durationMs: 0,
-        reason: 'state-changing route skipped in cookie-mode fuzz sweep (mutation risk with junk bodies)',
+        reason: 'state-changing route skipped in authenticated fuzz sweep (mutation risk with junk bodies)',
       };
       results.push(skipped);
       input.onResult?.(skipped);
@@ -54,11 +70,15 @@ export const runFuzzTests = async (input: RunFuzzTestsInput): Promise<RunContrac
       continue;
     }
 
+    if (input.resetToken) {
+      await resetServerState({ baseUrl: input.baseUrl, token: input.resetToken, only: ['rateLimits'] });
+    }
+
     const result = await runFuzzCheck({
       endpoint,
       baseUrl: input.baseUrl,
       headers: input.headers,
-      transport: transportFor(endpoint, input.syncTransport),
+      transport: transportFor(endpoint, input.syncTransport, input.apiTransport),
     });
     results.push(result);
     input.onResult?.(result);
