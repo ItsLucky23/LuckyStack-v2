@@ -19,6 +19,7 @@ import { createRequire } from 'node:module';
 import {
   ensurePeerDepInstalled,
   getCurrentErrorTrackerIdentity,
+  hasErrorTrackerIdentityScope,
   sanitizeErrorString,
   sanitizeErrorStrings,
   type ErrorTracker,
@@ -26,6 +27,7 @@ import {
 } from '@luckystack/core';
 
 import { resolveExceptionEvent, resolveMessageEvent } from './runBeforeSend';
+import { toScrubbedError } from './scrubError';
 
 const localRequire = createRequire(import.meta.url);
 
@@ -67,14 +69,18 @@ export const createPostHogAdapter = (options: PostHogAdapterOptions): ErrorTrack
   //? captures resolve the distinctId from the ALS at capture time (ET-02).
   let fallbackDistinctId = anonymousDistinctId;
 
-  //? Resolve the distinctId at CAPTURE time: prefer the per-request ALS identity
-  //? (ET-02 — isolated per concurrent request, survives await boundaries) and only
-  //? fall back to the closure `fallbackDistinctId` when no request scope is active.
+  //? Resolve the distinctId at CAPTURE time from the per-request ALS identity
+  //? (ET-02 — isolated per concurrent request, survives await boundaries). An
+  //? anonymous request inside a scope gets the anonymous id, never the closure
+  //? fallback: that belongs to background code, and using it attributed the
+  //? anonymous error to another user.
   const resolveDistinctId = (): string => {
-    const alsUser = getCurrentErrorTrackerIdentity();
-    if (alsUser?.id) return alsUser.id;
-    return fallbackDistinctId;
+    if (!hasErrorTrackerIdentityScope()) return fallbackDistinctId;
+    return getCurrentErrorTrackerIdentity()?.id ?? anonymousDistinctId;
   };
+  //? Last identity sent through `identify`, so a repeated `setUser` with the
+  //? same user does not send another billable `$identify` event (with email).
+  let lastIdentifyKey: string | null = null;
 
   return {
     name: 'posthog',
@@ -114,16 +120,8 @@ export const createPostHogAdapter = (options: PostHogAdapterOptions): ErrorTrack
         //? message/stack even though `properties` already carries scrubbed
         //? copies. Rebuild a same-named Error with the scrubbed message/stack
         //? (or pass the scrubbed string for a non-Error throw) so nothing
-        //? unscrubbed reaches PostHog.
-        let payload: Error | string;
-        if (fwdError instanceof Error) {
-          const rebuilt = new Error(errorMessage);
-          rebuilt.name = fwdError.name;
-          if (errorStack !== undefined) rebuilt.stack = errorStack;
-          payload = rebuilt;
-        } else {
-          payload = errorMessage;
-        }
+        //? unscrubbed reaches PostHog. The scrubbed `cause` chain is kept.
+        const payload: Error | string = fwdError instanceof Error ? toScrubbedError(fwdError) : errorMessage;
         options.client.captureException(payload, distinctId, properties);
         return;
       }
@@ -155,7 +153,10 @@ export const createPostHogAdapter = (options: PostHogAdapterOptions): ErrorTrack
         return;
       }
       fallbackDistinctId = user.id;
+      const identifyKey = JSON.stringify([user.id, user.email, user.username]);
+      if (identifyKey === lastIdentifyKey) return;
       if (options.client.identify) {
+        lastIdentifyKey = identifyKey;
         options.client.identify({
           distinctId: user.id,
           properties: {

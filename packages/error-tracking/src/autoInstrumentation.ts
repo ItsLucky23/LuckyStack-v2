@@ -36,8 +36,6 @@ import {
 //? resolvable during the DTS emit step.
 import type { PostLogoutPayload } from '@luckystack/login';
 
-import { setSentryUser } from './sentry';
-
 //? WeakMap-pinning so a span opened in `preApiExecute` can be closed in
 //? `postApiExecute` without globals. Works because the framework handlers
 //? (`packages/api/src/handleApiRequest.ts` + `handleHttpApiRequest.ts`,
@@ -67,17 +65,18 @@ const createSentryUserContext = (
       }
     : null;
 
-//? ET-02 identity propagation. PRIMARY: write the per-request AsyncLocalStorage
+//? ET-02 identity propagation: write ONLY the per-request AsyncLocalStorage
 //? identity box (`setCurrentErrorTrackerIdentity`) — adapters read this at capture
-//? time, isolated per concurrent request. FALLBACK: keep mutating the legacy
-//? process-global Sentry scope (`setSentryUser`) so the legacy single-Sentry path
-//? and any background/non-request capture (no active ALS box) still gets a user.
-//? The request handlers also set the ALS box directly after `readSession`; this
-//? hook write is idempotent with that and remains the canonical mapping point.
+//? time, isolated per concurrent request. The process-global user
+//? (`setSentryUser` → every adapter's `setUser`) is deliberately NOT written
+//? here: writing it on every request made the last request to finish decide
+//? who an anonymous request's error was attributed to, and sent PostHog an
+//? `$identify` (with email) per request. The global stays for explicit
+//? background-only `setSentryUser` calls. The request handlers also set the
+//? ALS box directly after `readSession`; this hook write is idempotent with that
+//? and remains the canonical mapping point.
 const propagateIdentity = (user: HookUser): void => {
-  const context = createSentryUserContext(user);
-  setCurrentErrorTrackerIdentity(context);
-  setSentryUser(context);
+  setCurrentErrorTrackerIdentity(createSentryUserContext(user));
 };
 
 let installed = false;
@@ -129,12 +128,11 @@ export const enableErrorTrackingAutoInstrumentation = (): void => {
     syncSpans.get(payload)?.finish();
   });
 
-  //? Clear identity immediately on logout. Without this the next anonymous
-  //? request from the same socket would still appear as the logged-out user
-  //? in the error-tracker's context (until `preApiValidate` runs and resets
-  //? it). One round-trip earlier is worth the small type-only import cost.
+  //? Clear identity immediately on logout, so the rest of the logout request
+  //? is no longer attributed to the logged-out user. Only the request scope is
+  //? cleared: the process-global user is never set per request (see
+  //? `propagateIdentity`), so clearing it here would only wipe a background user.
   registerHook('postLogout', (_payload: PostLogoutPayload): void => {
     setCurrentErrorTrackerIdentity(null);
-    setSentryUser(null);
   });
 };

@@ -189,6 +189,7 @@ export {
   runWithErrorTrackerIdentityScope,
   setCurrentErrorTrackerIdentity,
   getCurrentErrorTrackerIdentity,
+  hasErrorTrackerIdentityScope,
 } from './errorTrackerIdentity';
 export * from './env';
 export * from './db';

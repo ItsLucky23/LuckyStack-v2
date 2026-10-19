@@ -21,6 +21,7 @@ import { createRequire } from 'node:module';
 import {
   ensurePeerDepInstalled,
   getCurrentErrorTrackerIdentity,
+  hasErrorTrackerIdentityScope,
   sanitizeErrorString,
   sanitizeErrorStrings,
   type ErrorTracker,
@@ -74,8 +75,33 @@ export interface DatadogAdapterOptions {
   statsd?: DdStatsd;
   /** Prefix prepended to every metric name. Default `'luckystack.'`. */
   metricPrefix?: string;
+  /**
+   * Capture-context keys copied onto the `error.exception` / `error.message`
+   * counter as StatsD tags. Every distinct tag value is a separate (billed)
+   * Datadog time series, so list only low-cardinality keys. Default:
+   * {@link DEFAULT_DATADOG_METRIC_TAG_KEYS}. The span always gets the full context.
+   */
+  metricTagKeys?: readonly string[];
   beforeSend?: (event: ErrorTrackerEvent) => ErrorTrackerEvent | null;
 }
+
+//? Framework call sites pass per-request values in the capture context
+//? (`requestId`, `routePath`, email `subject`/recipients). As metric tags each
+//? unique value became its own custom-metric series, so only these fixed,
+//? low-cardinality keys reach the counter by default.
+export const DEFAULT_DATADOG_METRIC_TAG_KEYS: readonly string[] = ['source', 'fn', 'hook', 'method'];
+
+const pickMetricTags = (
+  context: Record<string, unknown> | undefined,
+  keys: readonly string[],
+): Record<string, unknown> => {
+  const picked: Record<string, unknown> = {};
+  if (!context) return picked;
+  for (const key of keys) {
+    if (Object.hasOwn(context, key) && context[key] !== undefined) picked[key] = context[key];
+  }
+  return picked;
+};
 
 //? Coerce arbitrary context values to StatsD tag strings. Context is typed
 //? `Record<string, unknown>`, so a raw `${k}:${v}` would render objects as
@@ -105,6 +131,7 @@ export const createDatadogAdapter = (options: DatadogAdapterOptions): ErrorTrack
   );
 
   const prefix = options.metricPrefix ?? 'luckystack.';
+  const metricTagKeys = options.metricTagKeys ?? DEFAULT_DATADOG_METRIC_TAG_KEYS;
 
   //? Closure fallback identity, set by `setUser`. Used ONLY for non-request /
   //? background captures that run outside any per-request ALS scope. Datadog has
@@ -113,11 +140,12 @@ export const createDatadogAdapter = (options: DatadogAdapterOptions): ErrorTrack
   //? span on every identity set (which produced one junk span per request).
   let fallbackUser: Record<string, unknown> | null = null;
 
-  //? Resolve the user at CAPTURE time: prefer the per-request ALS identity (ET-02
-  //? — isolated per concurrent request, survives await boundaries) and fall back
-  //? to the closure `fallbackUser` only when no request scope is active.
+  //? Resolve the user at CAPTURE time from the per-request ALS identity (ET-02 —
+  //? isolated per concurrent request, survives await boundaries). Inside a scope
+  //? an anonymous request stays anonymous; the closure `fallbackUser` is used only
+  //? when no request scope is active, or another request's user leaks in.
   const resolveUser = (): ErrorTrackerUser | Record<string, unknown> | null =>
-    getCurrentErrorTrackerIdentity() ?? fallbackUser;
+    hasErrorTrackerIdentityScope() ? getCurrentErrorTrackerIdentity() : fallbackUser;
 
   const userTags = (): Record<string, unknown> => {
     const currentUser = resolveUser();
@@ -163,7 +191,10 @@ export const createDatadogAdapter = (options: DatadogAdapterOptions): ErrorTrack
       //? correlate the StatsD metric with the active trace span. Emitting after
       //? `span.finish()` caused the metric timestamp to lag the span close, which
       //? broke APM-to-metrics correlation in Datadog dashboards.
-      options.statsd?.increment(`${prefix}error.exception`, 1, formatTags(fwdContext));
+      options.statsd?.increment(`${prefix}error.exception`, 1, formatTags({
+        ...pickMetricTags(fwdContext, metricTagKeys),
+        'error.type': fwdError instanceof Error ? fwdError.name : typeof fwdError,
+      }));
       span.finish();
     },
 
@@ -184,7 +215,7 @@ export const createDatadogAdapter = (options: DatadogAdapterOptions): ErrorTrack
         },
       });
       //? ET-N4: same pattern as captureException — counter before finish for correlation.
-      options.statsd?.increment(`${prefix}error.message`, 1, [`level:${fwdLevel}`, ...formatTags(fwdContext)]);
+      options.statsd?.increment(`${prefix}error.message`, 1, [`level:${fwdLevel}`, ...formatTags(pickMetricTags(fwdContext, metricTagKeys))]);
       span.finish();
     },
 

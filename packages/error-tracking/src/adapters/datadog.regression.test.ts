@@ -55,7 +55,8 @@ describe('datadog adapter regression', () => {
     const { createDatadogAdapter } = await import('./datadog');
     const tracer = makeTracer();
     const statsd = makeStatsd();
-    const adapter = createDatadogAdapter({ tracer, statsd });
+    //? Opt the keys in: only listed context keys become metric tags.
+    const adapter = createDatadogAdapter({ tracer, statsd, metricTagKeys: ['meta', 'route'] });
 
     adapter.captureException(new Error('boom'), { meta: { a: 1 }, route: 'api/x' });
 
@@ -153,7 +154,7 @@ describe('datadog adapter regression', () => {
     const { createDatadogAdapter } = await import('./datadog');
     const tracer = makeTracer();
     const statsd = makeStatsd();
-    const adapter = createDatadogAdapter({ tracer, statsd });
+    const adapter = createDatadogAdapter({ tracer, statsd, metricTagKeys: ['marker'] });
 
     //? A symbol context value would make `String(value)` throw a TypeError and
     //? take the whole capture path down — formatTags must coerce it safely.
