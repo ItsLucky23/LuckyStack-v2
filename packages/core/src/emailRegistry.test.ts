@@ -11,7 +11,7 @@ import {
 
 const sender = (name: string): EmailSender => ({
   name,
-  send: () => Promise.resolve({ ok: true }),
+  send: () => Promise.resolve({ ok: true, id: `${name}-id` }),
 });
 
 describe('registerEmailSenders', () => {
