@@ -1068,11 +1068,12 @@ const runPrompts = async (presets: Record<string, string | string[]> = {}): Prom
     },
     {
       key: 'cron', type: 'select', label: 'Install @luckystack/cron?',
-      description: 'Leader-elected recurring jobs (cron expressions / intervals; runs on exactly one instance).',
+      description: 'Leader-elected recurring jobs (cron expressions / intervals; normally one instance fires each run — handlers must be idempotent).',
       details: [
         '@luckystack/cron — schedule recurring background jobs with cron expressions',
-        'or intervals. Leader-elected, so a job runs on exactly ONE instance even when',
-        'you scale out. Choosing Yes adds the dep only; it self-wires at boot and stays',
+        'or intervals. Leader-elected: normally one instance fires each run, but leases are',
+        'best-effort, so a stalled leader can overlap its successor — handlers must be idempotent.',
+        'Choosing Yes adds the dep only; it self-wires at boot and stays',
         'dormant until you register a job with registerCronJob(...) in a',
         'luckystack/cron/*.ts file. Zero jobs = zero timers.',
       ].join('\n'),

@@ -192,8 +192,46 @@ const assetFiles = (root: string): string[] => {
   return files;
 };
 
+const DOCKER_ENV_FILE = '.env.docker';
+
+const escapeRegex = (text: string): string => text.replaceAll(/[.+^${}()|[\]\\]/g, String.raw`\$&`);
+
+//? Approximates git for a root-level file name: blank lines and comments are
+//? skipped, `*`/`?` stay inside one path segment, a later `!` line re-includes
+//? and the last matching line wins. Anything this does not understand counts as
+//? "not covered", so the worst case is one redundant line.
+export const gitignoreCovers = (content: string, file: string): boolean => {
+  let covered = false;
+  for (const raw of content.split(/\r?\n/)) {
+    const line = raw.trim();
+    if (line.length === 0 || line.startsWith('#')) continue;
+    const negated = line.startsWith('!');
+    const pattern = (negated ? line.slice(1) : line).replace(/^(\*\*\/|\/)/, '');
+    if (pattern.endsWith('/')) continue;
+    const source = [...pattern].map((char) => {
+      if (char === '*') return '[^/]*';
+      if (char === '?') return '[^/]';
+      return escapeRegex(char);
+    }).join('');
+    if (new RegExp(`^${source}$`).test(file)) covered = !negated;
+  }
+  return covered;
+};
+
+//? `.env.docker` holds the remote database/Redis credentials the Docker docs
+//? tell you to put there, and the scaffold's .gitignore ignores it. A project
+//? that gets Docker later must not be one `git add .` away from committing it.
+const ensureDockerEnvIgnored = (root: string): boolean => {
+  const gitignorePath = path.join(root, '.gitignore');
+  const existing = fs.existsSync(gitignorePath) ? fs.readFileSync(gitignorePath, 'utf8') : '';
+  if (gitignoreCovers(existing, DOCKER_ENV_FILE)) return false;
+  const separator = existing.length === 0 || existing.endsWith('\n') ? '' : '\n';
+  fs.writeFileSync(gitignorePath, `${existing}${separator}${DOCKER_ENV_FILE}\n`);
+  return true;
+};
+
 //? `dbProvider` is the `--db=` flag: the answer when detection finds nothing.
-export const addDocker = (project: ConsumerProject, options: { dbProvider?: string } = {}): Result<void> => {
+export const addDocker =(project: ConsumerProject, options: { dbProvider?: string } = {}): Result<void> => {
   try {
     let dbProvider = detectDatabaseProvider(project.root);
     if (options.dbProvider !== undefined) {
@@ -217,6 +255,7 @@ export const addDocker = (project: ConsumerProject, options: { dbProvider?: stri
     setScript(project, 'docker:down', 'docker compose down');
     setScript(project, 'docker:check', 'luckystack docker check');
     console.log(written.length > 0 ? `• added Docker assets: ${written.join(', ')}` : '• Docker assets already present; nothing overwritten');
+    if (ensureDockerEnvIgnored(project.root)) console.log(`• added ${DOCKER_ENV_FILE} to .gitignore`);
     console.log('✓ Docker baseline ready. Review docs/DOCKER.md, then run `npm run docker:check`.');
     return ok();
   } catch (error) {

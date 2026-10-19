@@ -2,8 +2,9 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { removeRouter, setInvocationTransport } from './addRouter';
+import { addRouter, removeRouter, ROUTER_SCRIPT, setInvocationTransport } from './addRouter';
 import { assetPath, type ConsumerProject } from '../lib/project';
+import { ROUTER_SCRIPT as SCAFFOLDER_ROUTER_SCRIPT } from '../../../create-luckystack-app/src/index';
 
 let root: string;
 let project: ConsumerProject;
@@ -30,6 +31,22 @@ describe('router invocation transport wiring', () => {
 
     setInvocationTransport(project, routedLine, socketLine);
     expect(fs.readFileSync(path.join(root, 'config.ts'), 'utf8')).toContain(socketLine);
+  });
+});
+
+describe('router npm script (finding 049)', () => {
+  it('matches the scaffolder so `add router` and `--router` start the same command', () => {
+    expect(ROUTER_SCRIPT).toBe(SCAFFOLDER_ROUTER_SCRIPT);
+  });
+
+  it('writes that script, replacing the bare luckystack-router one', () => {
+    project.pkg.scripts = { router: 'luckystack-router' };
+    vi.spyOn(console, 'log').mockImplementation(() => { /* quiet */ });
+
+    expect(addRouter(project, { install: false, cliVersion: '0.15.0' }).ok).toBe(true);
+
+    const written = JSON.parse(fs.readFileSync(project.pkgPath, 'utf8')) as { scripts: Record<string, string> };
+    expect(written.scripts.router).toBe(ROUTER_SCRIPT);
   });
 });
 

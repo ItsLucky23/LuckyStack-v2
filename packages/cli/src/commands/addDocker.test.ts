@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { addDocker, checkDocker, renderDockerVariables } from './addDocker';
+import { addDocker, checkDocker, gitignoreCovers, renderDockerVariables } from './addDocker';
 import { buildDockerTemplateVars, DEFAULT_CHOICES } from '../../../create-luckystack-app/src/index';
 import type { ConsumerProject } from '../lib/project';
 
@@ -96,5 +96,38 @@ describe('Docker database detection (finding 022)', () => {
     expect(addDocker(project, { dbProvider: 'mysql' }).ok).toBe(true);
     expect(fs.readFileSync(path.join(root, 'compose.yaml'), 'utf8')).toContain('mysql:8.4');
     expect(addDocker(project, { dbProvider: 'oracle' }).ok).toBe(false);
+  });
+});
+
+describe('Docker .env.docker stays out of git (finding 010)', () => {
+  const gitignore = (): string => fs.readFileSync(path.join(root, '.gitignore'), 'utf8');
+
+  it('creates .gitignore with .env.docker when the project has none', () => {
+    expect(addDocker(project).ok).toBe(true);
+    expect(gitignore()).toBe('.env.docker\n');
+  });
+
+  it('appends .env.docker on its own line to an existing .gitignore', () => {
+    fs.writeFileSync(path.join(root, '.gitignore'), 'node_modules\n.env.local');
+    expect(addDocker(project).ok).toBe(true);
+    expect(gitignore()).toBe('node_modules\n.env.local\n.env.docker\n');
+  });
+
+  it('leaves a .gitignore that already covers it untouched, including the scaffold one', () => {
+    const scaffoldIgnore = fs.readFileSync(
+      path.join(import.meta.dirname, '..', '..', '..', 'create-luckystack-app', 'template', '_dot_gitignore'),
+      'utf8',
+    );
+    for (const content of ['.env.*\n', '/.env.docker\n', scaffoldIgnore]) {
+      fs.writeFileSync(path.join(root, '.gitignore'), content);
+      expect(addDocker(project).ok).toBe(true);
+      expect(gitignore()).toBe(content);
+    }
+  });
+
+  it('treats a later negation as not covered', () => {
+    expect(gitignoreCovers('.env*\n!.env.docker\n', '.env.docker')).toBe(false);
+    expect(gitignoreCovers('# .env.docker\n.env.dockerfile\nenv/\n', '.env.docker')).toBe(false);
+    expect(gitignoreCovers('.env.d?cker\n', '.env.docker')).toBe(true);
   });
 });

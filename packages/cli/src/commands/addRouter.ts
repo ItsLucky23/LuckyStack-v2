@@ -31,6 +31,12 @@ import { splitShippedFiles } from '../lib/shippedFiles';
 
 const PKG = '@luckystack/router';
 
+//? Same string as the scaffolder's `ROUTER_SCRIPT` (create-luckystack-app): the
+//? router CLI exits without --deploy/--services and the topology files are
+//? TypeScript, so a bare `luckystack-router` never started. A parity test keeps
+//? the two equal.
+export const ROUTER_SCRIPT = 'tsx --tsconfig tsconfig.server.json node_modules/@luckystack/router/dist/cli.js --deploy ./deploy.config.ts --services ./services.config.ts';
+
 //? Project-root-relative (posix, to match manifest + asset paths) topology files
 //? the router needs. Copy is handled wholesale by copyDirIfAbsent.
 const PRESET_LOADER = 'server/config/presetLoader.ts';
@@ -103,7 +109,7 @@ export const addRouter = (project: ConsumerProject, options: AddOptions): Result
   try {
     if (addDependency(project, PKG, range)) console.log(`• added ${PKG}@${range} to package.json`);
     else console.log(`• ${PKG} already in package.json`);
-    if (setScript(project, 'router', 'luckystack-router')) console.log("• added the `router` npm script (npm run router)");
+    if (setScript(project, 'router', ROUTER_SCRIPT)) console.log("• added the `router` npm script (npm run router)");
     else console.log("• 'router' npm script already present");
 
     //? Copy the topology files (idempotent — never clobbers a config the user has
