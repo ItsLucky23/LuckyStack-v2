@@ -11,7 +11,6 @@ import {
   getRuntimeSyncMaps as getRuntimeSyncMapsFromSource,
   validateRequest,
   extractTokenFromSocket,
-  formatRoomName,
   getIoInstance,
   tryCatch,
   parseTransportRouteName,
@@ -40,9 +39,17 @@ import { buildFormattedError } from './_shared/errorBuilders';
 import { processClientSyncForRecipient } from './_shared/clientFanout';
 import { resolveSyncValidationMode } from './_shared/validationMode';
 import { authorizeSyncReceiver } from './_shared/receiverAuth';
+import { resolvePhysicalReceiver } from './_shared/physicalReceiver';
+import { redactTokenRoom } from './_shared/redactToken';
 
 interface HttpSyncRequestParams {
   name: string;
+  /**
+   * Accepted for wire compatibility with the socket message shape and otherwise
+   * ignored. Recipients are always addressed by the server-resolved route: a
+   * client-chosen callback name reaching other sockets let a room member fire
+   * another route's callbacks (cross-route callback spoofing).
+   */
   cb?: string;
   data: Record<string, unknown>;
   receiver: string;
@@ -197,7 +204,6 @@ export type HttpSyncStreamEvent = SyncStreamPayload;
 
 interface HttpSyncContext {
   name: string;
-  cb: string | undefined;
   data: Record<string, unknown>;
   normalizedReceiver: string;
   ignoreSelf: boolean | undefined;
@@ -212,12 +218,12 @@ interface HttpSyncContext {
 
 // ─── Stage 1: parse and resolve the route name ───────────────────────────────
 
-//? Returns the resolved name + callback key, or an error response when parsing
-//? fails or the route is missing from the sync maps.
+//? Returns the resolved name, or an error response when parsing fails or the
+//? route is missing from the sync maps.
 async function stageResolveRoute(
   ctx: HttpSyncContext,
-): Promise<{ resolvedName: string; callbackName: string; error?: never } | { error: HttpSyncResponse; resolvedName?: never; callbackName?: never }> {
-  const { name, cb, data, normalizedReceiver, user, buildSyncError, preferredLocale } = ctx;
+): Promise<{ resolvedName: string; error?: never } | { error: HttpSyncResponse; resolvedName?: never }> {
+  const { name, data, normalizedReceiver, user, buildSyncError, preferredLocale } = ctx;
 
   if (!name || typeof name !== 'string') {
     return {
@@ -263,9 +269,6 @@ async function stageResolveRoute(
   }
 
   const resolvedName = parsedRoute.normalizedFullName;
-  const callbackName = typeof cb === 'string' && cb.trim().length > 0
-    ? cb.trim()
-    : `${parsedRoute.serviceRoute.normalizedRouteName}/${parsedRoute.version}`;
 
   if (!normalizedReceiver) {
     return {
@@ -308,7 +311,7 @@ async function stageResolveRoute(
     };
   }
 
-  return { resolvedName, callbackName };
+  return { resolvedName };
 }
 
 // ─── Stage 2: auth checks ─────────────────────────────────────────────────────
@@ -550,15 +553,15 @@ async function stageExecuteServer(
   resolvedName: string,
   serverSyncEntry: RuntimeSyncServerEntry,
   functionsObject: Record<string, unknown>,
-  ctx: Pick<HttpSyncContext, 'data' | 'normalizedReceiver' | 'name' | 'user' | 'preferredLocale' | 'buildSyncError' | 'effectiveAbortSignal' | 'cb' | 'stream'>,
+  ctx: Pick<HttpSyncContext, 'data' | 'normalizedReceiver' | 'name' | 'user' | 'preferredLocale' | 'buildSyncError' | 'effectiveAbortSignal' | 'token' | 'stream'>,
 ): Promise<{ serverOutput: Record<string, unknown>; error?: never } | { error: HttpSyncResponse; serverOutput?: never }> {
-  const { data, normalizedReceiver, user, preferredLocale, buildSyncError, effectiveAbortSignal, cb, stream } = ctx;
+  const { data, normalizedReceiver, user, preferredLocale, buildSyncError, effectiveAbortSignal, token, stream } = ctx;
   const { main: serverMain } = serverSyncEntry;
 
   const { emitServerSyncStream, emitBroadcastSyncStream, emitStreamToTokens, flushPressure } =
     buildSyncStreamEmitters({
-      cb,
       receiver: normalizedReceiver,
+      token,
       userId: user?.id ?? null,
       resolvedName,
       logLabel: 'http sync',
@@ -623,7 +626,8 @@ async function stageExecuteServer(
       userId: user?.id,
       //? Bug fix: was `name` (the raw route-name string) — should be
       //? `normalizedReceiver` to match the field's semantics and the socket handler.
-      receiver: normalizedReceiver,
+      //? A sync to your own token room carries the bearer token as `receiver`.
+      receiver: redactTokenRoom(normalizedReceiver, [token]),
       transport: 'http',
     },
   );
@@ -684,11 +688,11 @@ async function stageExecuteServer(
 //? error on this path is now a pre-commit rejection, so a retry is safe.
 async function stageResolveRecipients(
   resolvedName: string,
-  ctx: Pick<HttpSyncContext, 'normalizedReceiver' | 'user' | 'buildSyncError' | 'preferredLocale'>,
+  ctx: Pick<HttpSyncContext, 'normalizedReceiver' | 'token' | 'user' | 'buildSyncError' | 'preferredLocale'>,
 ): Promise<{ sockets: RoomSocket[]; error?: never } | { error: HttpSyncResponse; sockets?: never }> {
-  const { normalizedReceiver, user, buildSyncError, preferredLocale } = ctx;
+  const { normalizedReceiver, token, user, buildSyncError, preferredLocale } = ctx;
   const ioInstance = getIoInstance();
-  const physicalReceiver = normalizedReceiver === 'all' ? 'all' : formatRoomName(normalizedReceiver, { purpose: 'broadcast', userId: user?.id ?? null });
+  const physicalReceiver = resolvePhysicalReceiver(normalizedReceiver, { token, userId: user?.id ?? null });
   const sockets = physicalReceiver === 'all'
     ? await ioInstance!.fetchSockets()
     : await ioInstance!.in(physicalReceiver).fetchSockets();
@@ -720,15 +724,17 @@ async function stageResolveRecipients(
 
 //? Fans the serverOutput out to every recipient resolved in stage 5,
 //? respecting `ignoreSelf`, per-recipient hooks, and optional `_client` handlers.
+//? Runs the `preSyncFanout` gate itself and returns either its error or
+//? `deliver`, the per-recipient loop, which the caller starts only after it
+//? has answered the originator (see the early-answer note in the body).
 async function stageFanout(
   resolvedName: string,
-  callbackName: string,
   serverOutput: Record<string, unknown>,
   sockets: RoomSocket[],
   syncObject: Record<string, unknown>,
   functionsObject: Record<string, unknown>,
   ctx: Pick<HttpSyncContext, 'data' | 'normalizedReceiver' | 'token' | 'ignoreSelf' | 'user' | 'buildSyncError' | 'preferredLocale'>,
-): Promise<HttpSyncResponse | null> {
+): Promise<{ deliver: () => Promise<void>; error?: never } | { error: HttpSyncResponse; deliver?: never }> {
   const { data, normalizedReceiver, token, ignoreSelf, user, buildSyncError, preferredLocale } = ctx;
 
   //? @adr 0059
@@ -773,108 +779,114 @@ async function stageFanout(
     //? Parity with the socket handler: a preSyncFanout stop is a DENY decision,
     //? so the HTTP/SSE transport must surface it as an error response — not a
     //? silent success (which would let a deny hook be bypassed over HTTP).
-    return buildSyncError({
-      response: {
-        status: 'error',
-        errorCode: preFanoutResult.signal.errorCode,
-        httpStatus: preFanoutResult.signal.httpStatus,
-      },
-      preferred: preferredLocale,
-      userLanguage: user?.language,
-    });
+    return {
+      error: buildSyncError({
+        response: {
+          status: 'error',
+          errorCode: preFanoutResult.signal.errorCode,
+          httpStatus: preFanoutResult.signal.httpStatus,
+        },
+        preferred: preferredLocale,
+        userLanguage: user?.language,
+      }),
+    };
   }
 
-  let recipientCount = 0;
-  //? Yield to the event loop periodically so a giant `receiver: 'all'` fanout
-  //? doesn't starve other requests (parity with the socket handler). Tunables
-  //? live in projectConfig.sync. Clamp to >= 1 so a misconfigured
-  //? `fanoutYieldEvery: 0` doesn't produce `n % 0 === NaN` (never truthy).
-  const { fanoutYieldEvery, fanoutYieldMs } = getProjectConfig().sync;
-  const yieldEvery = Math.max(1, fanoutYieldEvery);
-  let fanoutIterCount = 1;
-  for (const tempSocket of sockets) {
-    fanoutIterCount++;
-    if (fanoutIterCount % yieldEvery === 0) { await new Promise(resolve => setTimeout(resolve, fanoutYieldMs)); }
+  const deliver = async (): Promise<void> => {
+    let recipientCount = 0;
+    //? Yield to the event loop periodically so a giant `receiver: 'all'` fanout
+    //? doesn't starve other requests (parity with the socket handler). Tunables
+    //? live in projectConfig.sync. Clamp to >= 1 so a misconfigured
+    //? `fanoutYieldEvery: 0` doesn't produce `n % 0 === NaN` (never truthy).
+    const { fanoutYieldEvery, fanoutYieldMs } = getProjectConfig().sync;
+    const yieldEvery = Math.max(1, fanoutYieldEvery);
+    let fanoutIterCount = 1;
+    for (const tempSocket of sockets) {
+      fanoutIterCount++;
+      if (fanoutIterCount % yieldEvery === 0) { await new Promise(resolve => setTimeout(resolve, fanoutYieldMs)); }
 
-    const tempToken = extractTokenFromSocket(tempSocket);
+      const tempToken = extractTokenFromSocket(tempSocket);
 
-    //? SYNC-O10 — `token &&` guard: an anonymous (token-less) originator is
-    //? never matched as "self" (null === null is always true). Parity with
-    //? the socket handler; `ignoreSelf` is a no-op for anonymous callers by design.
-    if (ignoreSelf && typeof ignoreSelf === 'boolean' && token && token === tempToken) {
-      continue;
-    }
+      //? SYNC-O10 — `token &&` guard: an anonymous (token-less) originator is
+      //? never matched as "self" (null === null is always true). Parity with
+      //? the socket handler; `ignoreSelf` is a no-op for anonymous callers by design.
+      if (ignoreSelf && typeof ignoreSelf === 'boolean' && token && token === tempToken) {
+        continue;
+      }
 
-    //? SYNC-22 — per-recipient fanout hook (parity with the socket handler).
-    //? A stop signal SKIPS just this recipient (loop continues; not counted).
-    //? `recipientUserId` is always null (no per-recipient session read on the
-    //? hot path); the recipient's TOKEN is already known here, so it is passed
-    //? along and a handler that needs the user reads the session by it.
-    const preRecipientResult = await dispatchHook('preSyncRecipient', {
-      routeName: resolvedName,
-      receiver: normalizedReceiver,
-      recipientSocketId: tempSocket.id,
-      recipientToken: tempToken,
-      recipientUserId: null,
-      serverOutput,
-    });
-    //? Parity with the socket handler (SYNC-O8): a stop signal with no
-    //? overrideOutput skips this recipient entirely; a stop signal WITH
-    //? overrideOutput sends the override in place of serverOutput.
-    if (preRecipientResult.stopped && preRecipientResult.signal.overrideOutput === undefined) {
-      continue;
-    }
-
-    const effectiveServerOutput = preRecipientResult.stopped
-      ? preRecipientResult.signal.overrideOutput
-      : serverOutput;
-
-    //? Count every recipient the request fanned out to — including ones whose
-    //? per-recipient `_client` handler later errors — matching the Socket.io
-    //? handler (handleSyncRequest.ts) so `postSyncFanout` sees the same total.
-    recipientCount++;
-
-    if (syncObject[`${resolvedName}_client`]) {
-      const clientSyncHandler = syncObject[`${resolvedName}_client`] as RuntimeSyncClientHandler;
-      await processClientSyncForRecipient({
-        tempSocket,
-        tempToken,
-        clientSyncHandler,
-        data,
-        functionsObject,
-        serverOutput: effectiveServerOutput,
+      //? SYNC-22 — per-recipient fanout hook (parity with the socket handler).
+      //? A stop signal SKIPS just this recipient (loop continues; not counted).
+      //? `recipientUserId` is always null (no per-recipient session read on the
+      //? hot path); the recipient's TOKEN is already known here, so it is passed
+      //? along and a handler that needs the user reads the session by it.
+      const preRecipientResult = await dispatchHook('preSyncRecipient', {
+        routeName: resolvedName,
         receiver: normalizedReceiver,
-        resolvedName,
-        callbackKey: callbackName,
-        transport: 'http',
-        handlerName: 'handleHttpSyncRequest',
-        logLabel: 'http sync',
-        shouldLogDev,
-        shouldLogStream,
-        buildSyncError,
-        //? HTTP transport prefers `accept-language` over `x-language`
-        //? (reversed vs. the socket handler) — preserved verbatim from the
-        //? previous inlined error path.
-        resolvePreferredLocale: (headers) =>
-          extractLanguageFromHeader(headers['accept-language'] || headers['x-language']),
-        sourceUserId: user?.id,
+        recipientSocketId: tempSocket.id,
+        recipientToken: tempToken,
+        recipientUserId: null,
+        serverOutput,
       });
-      continue;
+      //? Parity with the socket handler (SYNC-O8): a stop signal with no
+      //? overrideOutput skips this recipient entirely; a stop signal WITH
+      //? overrideOutput sends the override in place of serverOutput.
+      if (preRecipientResult.stopped && preRecipientResult.signal.overrideOutput === undefined) {
+        continue;
+      }
+
+      const effectiveServerOutput = preRecipientResult.stopped
+        ? preRecipientResult.signal.overrideOutput
+        : serverOutput;
+
+      //? Count every recipient the request fanned out to — including ones whose
+      //? per-recipient `_client` handler later errors — matching the Socket.io
+      //? handler (handleSyncRequest.ts) so `postSyncFanout` sees the same total.
+      recipientCount++;
+
+      if (syncObject[`${resolvedName}_client`]) {
+        const clientSyncHandler = syncObject[`${resolvedName}_client`] as RuntimeSyncClientHandler;
+        await processClientSyncForRecipient({
+          tempSocket,
+          tempToken,
+          clientSyncHandler,
+          data,
+          functionsObject,
+          serverOutput: effectiveServerOutput,
+          receiver: normalizedReceiver,
+          resolvedName,
+          transport: 'http',
+          handlerName: 'handleHttpSyncRequest',
+          logLabel: 'http sync',
+          shouldLogDev,
+          shouldLogStream,
+          buildSyncError,
+          //? HTTP transport prefers `accept-language` over `x-language`
+          //? (reversed vs. the socket handler) — preserved verbatim from the
+          //? previous inlined error path.
+          resolvePreferredLocale: (headers) =>
+            extractLanguageFromHeader(headers['accept-language'] || headers['x-language']),
+          sourceUserId: user?.id,
+        });
+        continue;
+      }
+
+      tempSocket.emit(socketEventNames.sync, {
+        //? Server-resolved route, never the client `cb` (parity with the socket
+        //? handler): recipients fire callbacks for both `fullName` and `cb`.
+        cb: resolvedName,
+        fullName: resolvedName,
+        serverOutput: effectiveServerOutput,
+        clientOutput: {},
+        message: `${resolvedName} sync success`,
+        status: 'success',
+      });
     }
 
-    tempSocket.emit(socketEventNames.sync, {
-      cb: callbackName,
-      fullName: resolvedName,
-      serverOutput: effectiveServerOutput,
-      clientOutput: {},
-      message: `${resolvedName} sync success`,
-      status: 'success',
-    });
-  }
+    fanoutPayload.recipientCount = recipientCount;
+    await dispatchHook('postSyncFanout', fanoutPayload);
+  };
 
-  fanoutPayload.recipientCount = recipientCount;
-  await dispatchHook('postSyncFanout', fanoutPayload);
-  return null;
+  return { deliver };
 }
 
 //? ET-02 — wrap the whole HTTP/SSE sync request in a per-request error-tracker
@@ -888,7 +900,6 @@ export default async function handleHttpSyncRequest(args: HttpSyncRequestParams)
 
 async function handleHttpSyncRequestScoped({
   name,
-  cb,
   data,
   receiver,
   ignoreSelf,
@@ -963,7 +974,6 @@ async function handleHttpSyncRequestScoped({
     // Build the shared context once — all stage helpers read from this.
     const ctx: HttpSyncContext = {
       name,
-      cb,
       data,
       normalizedReceiver,
       ignoreSelf,
@@ -979,7 +989,7 @@ async function handleHttpSyncRequestScoped({
     // Stage 1: parse and resolve the route name.
     const routeResult = await stageResolveRoute(ctx);
     if (routeResult.error) return routeResult.error;
-    const { resolvedName, callbackName } = routeResult;
+    const { resolvedName } = routeResult;
     currentRouteName = resolvedName;
 
     const { syncObject, functionsObject } = await getRuntimeSyncMapsFromSource();
@@ -1032,8 +1042,33 @@ async function handleHttpSyncRequestScoped({
     }
 
     // Stage 8: fanout to room members.
-    const fanoutError = await stageFanout(resolvedName, callbackName, serverOutput, sockets, syncObject, functionsObject, ctx);
-    if (fanoutError) return fanoutError;
+    const fanout = await stageFanout(resolvedName, serverOutput, sockets, syncObject, functionsObject, ctx);
+    if (fanout.error) return fanout.error;
+
+    //? Answer the originator as soon as the change is saved and `preSyncFanout`
+    //? allowed delivery, then deliver in the background — the same point the
+    //? socket transport acks (SYNC-O9). The per-recipient loop is serial and
+    //? awaits every `_client` handler, so on a large room it outlasts the
+    //? client's `requestTimeoutMs`: the caller got `sync.requestTimeout` about
+    //? a mutation that WAS saved, retried, and applied it twice. Delivery
+    //? problems are never reported on a saved mutation (ADR 0063), so nothing
+    //? the loop does may change this answer; its errors go to the logger and the
+    //? error tracker only. The ALS identity scope carries over to the detached
+    //? promise, so captures still attribute to this user.
+    void tryCatch(fanout.deliver, undefined, {
+      handler: 'handleHttpSyncRequest',
+      sync: resolvedName,
+      stage: 'fanout',
+      userId: user?.id,
+      receiver: redactTokenRoom(normalizedReceiver, [token]),
+      transport: 'http',
+    }).then(([fanoutError]) => {
+      if (fanoutError) {
+        getLogger().error(`http sync: ${resolvedName} fan-out failed after the originator was answered`, fanoutError, { sync: resolvedName, transport: 'http' });
+      } else if (shouldLogDev()) {
+        getLogger().debug(`http sync: ${resolvedName} fan-out completed`);
+      }
+    });
 
     if (shouldLogDev()) {
       getLogger().debug(`http sync: ${resolvedName} completed`);

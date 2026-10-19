@@ -1,6 +1,5 @@
 import {
   dispatchHook,
-  formatRoomName,
   getIoInstance,
   getLogger,
   getProjectConfig,
@@ -9,6 +8,7 @@ import {
 import type { Socket } from 'socket.io';
 import { shouldLogStream } from './logFlags';
 import { redactTokens } from './redactToken';
+import { resolvePhysicalReceiver } from './physicalReceiver';
 
 //? Chunk-index counters are intentionally per-request (built inside
 //? `buildSyncStreamEmitters`) so they are garbage-collected with the
@@ -137,9 +137,17 @@ const collectRoomSocketsForPressure = (receiver: string): Socket[] => {
   return out;
 };
 
+//? There is deliberately no client `cb` argument: every stream frame that
+//? reaches another socket is keyed on the server-resolved route only. Recipients
+//? fire callbacks for both `fullName` and `cb`, so a client-chosen `cb` here
+//? would let a room member trigger another route's stream callbacks.
 interface BuildSyncStreamEmittersArgs {
-  cb: string | undefined;
   receiver: string;
+  /**
+   * Session token of the request originator (or null when anonymous). Its own
+   * token room is joined raw, so `broadcastStream` must not format it.
+   */
+  token: string | null;
   /**
    * Session user id of the request originator (or null when anonymous). Threaded
    * through so `broadcastStream` / `flushPressure` can route the receiver room
@@ -174,8 +182,8 @@ interface BuildSyncStreamEmittersArgs {
 //? supplies that as `emitOriginatorChunk`. Broadcast/streamTo paths use
 //? Socket.io regardless of transport because recipients always live on sockets.
 export const buildSyncStreamEmitters = ({
-  cb,
   receiver,
+  token,
   userId,
   resolvedName,
   emitOriginatorChunk,
@@ -187,13 +195,13 @@ export const buildSyncStreamEmitters = ({
   //? `handleSyncRequest` (runSyncFanout) + `handleHttpSyncRequest` (stageFanout)
   //? resolve the physical room before `fetchSockets()`. Sockets physically JOIN
   //? the FORMATTED room, so a non-identity formatter (multi-tenant key) means the
-  //? RAW `receiver` is the wrong physical room. `'all'` and the empty-string
-  //? sentinel are passed through unchanged (matching the fanout's `=== 'all'`
-  //? branch + the broadcast/pressure guards on the raw `receiver` below).
-  const physicalReceiver =
-    !receiver || receiver === 'all'
-      ? receiver
-      : formatRoomName(receiver, { purpose: 'broadcast', userId: userId ?? null });
+  //? RAW `receiver` is the wrong physical room. The empty-string sentinel is
+  //? passed through unchanged (matching the broadcast/pressure guards on the raw
+  //? `receiver` below); `'all'` and the caller's own token room are handled by
+  //? `resolvePhysicalReceiver`, exactly as in the fanout.
+  const physicalReceiver = receiver
+    ? resolvePhysicalReceiver(receiver, { token, userId: userId ?? null })
+    : receiver;
   //? Per-request chunk counters keyed by recipient. Scoped to this closure
   //? so they are released when the request ends — no process-lifetime leak.
   const chunkCounters = new Map<string, number>();
@@ -213,7 +221,7 @@ export const buildSyncStreamEmitters = ({
 
   const buildBroadcastFrame = (payload: SyncStreamPayload) => ({
     ...payload,
-    cb,
+    cb: resolvedName,
     fullName: resolvedName,
     status: 'stream' as const,
   });
@@ -254,7 +262,17 @@ export const buildSyncStreamEmitters = ({
     //? another instance and collapsed broadcastStream into an originator-only
     //? stream. `streamTo` always used `io.to(...).emit` and never had this bug;
     //? this aligns broadcastStream with it.
-    io.to(physicalReceiver).emit(socketEventNames.sync, buildBroadcastFrame(payload));
+    //? `'all'` means every socket, as in the fanout's `fetchSockets()` branch.
+    //? `io.to('all')` would address a literal room of that name instead, which
+    //? no framework code joins, so the stream reached nobody (or only sockets
+    //? that deliberately joined a room called 'all'). `io.emit` is cluster-wide
+    //? through the adapter.
+    const frame = buildBroadcastFrame(payload);
+    if (physicalReceiver === 'all') {
+      io.emit(socketEventNames.sync, frame);
+      return;
+    }
+    io.to(physicalReceiver).emit(socketEventNames.sync, frame);
   };
 
   const emitStreamToTokens = (

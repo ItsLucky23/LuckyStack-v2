@@ -23,6 +23,21 @@ export const redactToken = (token: string | null): string | null => {
 };
 
 /**
+ * Redact a sync `receiver` for the error-tracker context when it is a session
+ * token room. A token room's NAME is the bearer token, so a raw `receiver` there
+ * leaks the credential exactly like a raw `targetToken` would. Ordinary room
+ * codes pass through unchanged so tracker events stay debuggable. `knownTokens`
+ * are the tokens the call site can compare against (requester and/or recipient).
+ */
+export const redactTokenRoom = (
+  receiver: string,
+  knownTokens: readonly (string | null | undefined)[],
+): string => {
+  if (!knownTokens.some((token) => Boolean(token) && token === receiver)) return receiver;
+  return redactToken(receiver) ?? receiver;
+};
+
+/**
  * Redact a list of tokens (e.g. the `streamTo` recipient list) for logging.
  */
 export const redactTokens = (tokens: readonly string[]): string[] =>

@@ -17,6 +17,8 @@ interface RoomEmitter {
 
 interface IoStub {
   to: ReturnType<typeof vi.fn>;
+  //? `io.emit` — every socket in the cluster (receiver 'all').
+  emit: ReturnType<typeof vi.fn>;
   //? The single `emit` spy shared by every `io.to(...)` return so tests can
   //? assert what was broadcast without digging into `to.mock.results` (whose
   //? `.value` is typed `any` by vitest and would trip the no-unsafe lint).
@@ -32,6 +34,8 @@ let ioInstance: IoStub | null = null;
 //? assert what `getLogger().debug` was called with (token redaction).
 const loggerDebug = vi.fn();
 let streamLogEnabled = false;
+const identityFormatter = (room: string): string => room;
+let roomFormatter = identityFormatter;
 
 const makeSocket = (): SocketStub => ({ emit: vi.fn() });
 
@@ -39,6 +43,7 @@ const makeIo = (): IoStub => {
   const roomEmit = vi.fn();
   return {
     to: vi.fn((): RoomEmitter => ({ emit: roomEmit })),
+    emit: vi.fn(),
     roomEmit,
     sockets: {
       sockets: new Map<string, SocketStub>(),
@@ -62,17 +67,19 @@ vi.mock("@luckystack/core", () => ({
   getLogger: () => ({ debug: loggerDebug, info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
   dispatchHook: vi.fn(),
   socketEventNames: { sync: "sync" },
-  //? Identity formatter (matches the default `defaultRoomNameFormatter`) so the
-  //? broadcast-room assertions below still target the raw room code; the real
-  //? formatter only diverges when a consumer registers a custom one.
-  formatRoomName: (room: string) => room,
+  //? Identity formatter by default (matches the default `defaultRoomNameFormatter`)
+  //? so the broadcast-room assertions below still target the raw room code; a
+  //? test swaps in a prefixing formatter to model a consumer-registered one.
+  formatRoomName: (room: string) => roomFormatter(room),
 }));
 
 import { buildSyncStreamEmitters } from "./streamEmitters";
 
+const OWN_TOKEN = "own-session-token-0123456789";
+
 const makeBaseArgs = () => ({
-  cb: "cb-1",
   receiver: "room-A",
+  token: OWN_TOKEN as string | null,
   resolvedName: "sync/chat/sendMessage/v1",
   logLabel: "sync",
   emitOriginatorChunk: vi.fn(),
@@ -82,6 +89,7 @@ describe("buildSyncStreamEmitters", () => {
   beforeEach(() => {
     ioInstance = makeIo();
     streamLogEnabled = false;
+    roomFormatter = identityFormatter;
     loggerDebug.mockClear();
   });
 
@@ -93,10 +101,22 @@ describe("buildSyncStreamEmitters", () => {
 
       expect(frame).toEqual({
         text: "hi",
-        cb: "cb-1",
+        cb: "sync/chat/sendMessage/v1",
         fullName: "sync/chat/sendMessage/v1",
         status: "stream",
       });
+    });
+
+    //? 003 — recipients fire stream callbacks for both `fullName` and `cb`, so a
+    //? frame must never carry a caller-chosen callback name; `cb` is the
+    //? server-resolved route, whatever the handler's payload contains.
+    it("keys cb on the resolved route even when the payload carries its own cb", () => {
+      const { buildBroadcastFrame } = buildSyncStreamEmitters(makeBaseArgs());
+
+      const frame = buildBroadcastFrame({ cb: "billing/progress/v1", chunk: "x" });
+
+      expect(frame.cb).toBe("sync/chat/sendMessage/v1");
+      expect(frame.fullName).toBe("sync/chat/sendMessage/v1");
     });
 
     it("preserves the payload data fields alongside the envelope", () => {
@@ -164,7 +184,7 @@ describe("buildSyncStreamEmitters", () => {
       expect(io.to).toHaveBeenCalledWith("room-A");
       expect(io.roomEmit).toHaveBeenCalledWith("sync", {
         text: "solo",
-        cb: "cb-1",
+        cb: "sync/chat/sendMessage/v1",
         fullName: "sync/chat/sendMessage/v1",
         status: "stream",
       });
@@ -182,7 +202,7 @@ describe("buildSyncStreamEmitters", () => {
       expect(io.to).toHaveBeenCalledWith("room-A");
       expect(io.roomEmit).toHaveBeenCalledWith("sync", {
         text: "many",
-        cb: "cb-1",
+        cb: "sync/chat/sendMessage/v1",
         fullName: "sync/chat/sendMessage/v1",
         status: "stream",
       });
@@ -209,6 +229,35 @@ describe("buildSyncStreamEmitters", () => {
 
       expect(io.to).toHaveBeenCalledTimes(1);
       expect(io.to).toHaveBeenCalledWith("room-A");
+    });
+
+    //? 016 — 'all' means every socket (as in the fanout), not a literal room
+    //? named 'all' that only deliberate joiners are in.
+    it("emits to every socket via io.emit for receiver 'all'", () => {
+      const io = getIo();
+      const { emitBroadcastSyncStream } = buildSyncStreamEmitters({ ...makeBaseArgs(), receiver: "all" });
+      emitBroadcastSyncStream({ text: "everyone" });
+
+      expect(io.to).not.toHaveBeenCalled();
+      expect(io.emit).toHaveBeenCalledWith("sync", {
+        text: "everyone",
+        cb: "sync/chat/sendMessage/v1",
+        fullName: "sync/chat/sendMessage/v1",
+        status: "stream",
+      });
+    });
+
+    //? 066 — the caller's own token room is joined RAW, so a prefixing formatter
+    //? must not be applied to it; ordinary rooms still are.
+    it("addresses the caller's own token room raw under a non-identity formatter", () => {
+      roomFormatter = (room) => `tenantA:${room}`;
+      const io = getIo();
+
+      buildSyncStreamEmitters({ ...makeBaseArgs(), receiver: OWN_TOKEN }).emitBroadcastSyncStream({ text: "self" });
+      buildSyncStreamEmitters(makeBaseArgs()).emitBroadcastSyncStream({ text: "room" });
+
+      expect(io.to).toHaveBeenNthCalledWith(1, OWN_TOKEN);
+      expect(io.to).toHaveBeenNthCalledWith(2, "tenantA:room-A");
     });
 
     it("returns early when receiver is empty (no room to target)", () => {
@@ -277,7 +326,7 @@ describe("buildSyncStreamEmitters", () => {
 
       expect(io.roomEmit).toHaveBeenCalledWith("sync", {
         delta: "d",
-        cb: "cb-1",
+        cb: "sync/chat/sendMessage/v1",
         fullName: "sync/chat/sendMessage/v1",
         status: "stream",
       });

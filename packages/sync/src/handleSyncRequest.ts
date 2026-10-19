@@ -16,7 +16,6 @@ import {
   getRuntimeSyncMaps,
   validateRequest,
   extractTokenFromSocket,
-  formatRoomName,
   getIoInstance,
   tryCatch,
   parseTransportRouteName,
@@ -50,6 +49,8 @@ import { buildFormattedError } from './_shared/errorBuilders';
 import { processClientSyncForRecipient } from './_shared/clientFanout';
 import { resolveSyncValidationMode } from './_shared/validationMode';
 import { authorizeSyncReceiver } from './_shared/receiverAuth';
+import { resolvePhysicalReceiver } from './_shared/physicalReceiver';
+import { redactTokenRoom } from './_shared/redactToken';
 
 type SyncErrorBuilder = (args: {
     response: SyncErrorEnvelopeInput;
@@ -528,6 +529,7 @@ function runReceiverAuth({
   buildSyncError,
   preferredLocale,
   user,
+  token,
   cleanupRequest,
 }: {
   receiver: string;
@@ -537,6 +539,7 @@ function runReceiverAuth({
   buildSyncError: SyncErrorBuilder;
   preferredLocale: string | null;
   user: SessionLayout | null;
+  token: string | null;
   cleanupRequest: () => void;
 }): boolean {
   //? SYNC-07 — default receiver authorization. Reject a cluster-wide `'all'`
@@ -557,9 +560,7 @@ function runReceiverAuth({
     //? registerRoomNameFormatter (multi-tenant) makes every joined member fail the
     //? check on the socket transport while HTTP still works.
     isMember: () =>
-      socket.rooms.has(
-        receiver === 'all' ? 'all' : formatRoomName(receiver, { purpose: 'broadcast', userId: user?.id ?? null }),
-      ),
+      socket.rooms.has(resolvePhysicalReceiver(receiver, { token, userId: user?.id ?? null })),
   });
   if (!receiverAuth.allowed) {
     if (shouldLogDev()) {
@@ -661,6 +662,7 @@ async function runSyncServerExecution({
   emitStreamToTokens,
   flushPressure,
   abortController,
+  token,
 }: {
   serverSyncEntry: RuntimeSyncServerEntry | undefined;
   resolvedName: string;
@@ -678,6 +680,7 @@ async function runSyncServerExecution({
   emitStreamToTokens: ReturnType<typeof buildSyncStreamEmitters>['emitStreamToTokens'];
   flushPressure: ReturnType<typeof buildSyncStreamEmitters>['flushPressure'];
   abortController: AbortController;
+  token: string | null;
 }): Promise<{ ok: false } | { ok: true; serverOutput: Record<string, unknown> }> {
   if (!serverSyncEntry) return { ok: true, serverOutput: {} };
 
@@ -803,7 +806,8 @@ async function runSyncServerExecution({
       sync: resolvedName,
       stage: 'server',
       userId: user?.id,
-      receiver,
+      //? A sync to your own token room carries the bearer token as `receiver`.
+      receiver: redactTokenRoom(receiver, [token]),
       transport: 'socket',
     },
   );
@@ -876,6 +880,7 @@ async function resolveSyncRecipients({
   receiver,
   resolvedName,
   user,
+  token,
   socket,
   responseIndex,
   buildSyncError,
@@ -886,13 +891,14 @@ async function resolveSyncRecipients({
   receiver: string;
   resolvedName: string;
   user: SessionLayout | null;
+  token: string | null;
   socket: Socket;
   responseIndex: number | undefined;
   buildSyncError: SyncErrorBuilder;
   preferredLocale: string | null;
   cleanupRequest: () => void;
 }): Promise<RoomSocket[] | null> {
-  const physicalReceiver = receiver === 'all' ? 'all' : formatRoomName(receiver, { purpose: 'broadcast', userId: user?.id ?? null });
+  const physicalReceiver = resolvePhysicalReceiver(receiver, { token, userId: user?.id ?? null });
   const sockets = physicalReceiver === 'all'
     ? await ioInstance!.fetchSockets()
     : await ioInstance!.in(physicalReceiver).fetchSockets();
@@ -1061,14 +1067,10 @@ async function runSyncFanout({
         functionsObject,
         serverOutput: effectiveServerOutput,
         receiver,
+        //? Recipient frames are keyed on `resolvedName` inside the helper (SYNC
+        //? security: no client `cb` reaches another socket). The client `cb`
+        //? stays only for the originator's own cancel handshake.
         resolvedName,
-        //? Server-authoritative callback key (SYNC security): route recipient
-        //? callbacks off the SERVER-resolved route, never the client-supplied
-        //? `cb`. Otherwise a room co-member could send a legit `name` but a `cb`
-        //? for a DIFFERENT route and fire other clients' handlers for that route
-        //? (cross-route callback spoofing). The client `cb` stays only for the
-        //? originator's own cancel handshake.
-        callbackKey: resolvedName,
         transport: 'socket',
         handlerName: 'handleSyncRequest',
         logLabel: 'sync',
@@ -1241,8 +1243,8 @@ async function handleSyncRequestInner({ msg, socket, token }: {
 
   const { emitServerSyncStream, emitBroadcastSyncStream, emitStreamToTokens, flushPressure } =
     buildSyncStreamEmitters({
-      cb,
       receiver,
+      token,
       userId: user?.id ?? null,
       resolvedName,
       logLabel: 'sync',
@@ -1264,7 +1266,7 @@ async function handleSyncRequestInner({ msg, socket, token }: {
   if (!runSyncAuth({ serverSyncEntry, user, resolvedName, socket, responseIndex, buildSyncError, preferredLocale, cleanupRequest })) return;
 
   // Stage 6 — receiver auth
-  if (!runReceiverAuth({ receiver, resolvedName, socket, responseIndex, buildSyncError, preferredLocale, user, cleanupRequest })) return;
+  if (!runReceiverAuth({ receiver, resolvedName, socket, responseIndex, buildSyncError, preferredLocale, user, token, cleanupRequest })) return;
 
   //? SYNC-O4 — rate-limit runs BEFORE the consumer `preSyncAuthorize` hook so
   //? an unauthenticated (login:false) caller cannot trigger potentially-expensive
@@ -1290,6 +1292,7 @@ async function handleSyncRequestInner({ msg, socket, token }: {
     receiver,
     resolvedName,
     user,
+    token,
     socket,
     responseIndex,
     buildSyncError,
@@ -1316,6 +1319,7 @@ async function handleSyncRequestInner({ msg, socket, token }: {
     emitStreamToTokens,
     flushPressure,
     abortController,
+    token,
   });
   if (!executionResult.ok) return;
 
@@ -1351,7 +1355,7 @@ async function handleSyncRequestInner({ msg, socket, token }: {
     sync: currentRouteName,
     stage: 'handler',
     userId: currentUserId,
-    receiver,
+    receiver: redactTokenRoom(receiver, [token]),
     transport: 'socket',
   });
   if (handlerError) {
