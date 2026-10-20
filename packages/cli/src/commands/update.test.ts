@@ -347,6 +347,28 @@ describe('applyUpdate + runUpdate (injected fresh render)', () => {
     expect(report).toContain('AGENTS.md');
   });
 
+  it('flags the retired sync_client template with a .removed marker and keeps updating its siblings', () => {
+    //? 0.16 stops shipping `.luckystack/templates/sync_client.template.ts`: no
+    //? selection rule ever chose it. A project scaffolded earlier still has it.
+    const retired = '.luckystack/templates/sync_client.template.ts';
+    const sibling = '.luckystack/templates/sync_client_paired.template.ts';
+    write(consumerDir, retired, 'legacy client template\n');
+    write(consumerDir, sibling, 'old paired\n');
+    manifestFor(consumerDir, { [retired]: 'legacy client template\n', [sibling]: 'old paired\n' });
+    write(freshDir, sibling, 'new paired\n');
+    manifestFor(freshDir, { [sibling]: 'new paired\n' }, { luckystackVersion: '0.16.0' });
+
+    const result = runUpdate(project(), {
+      cliVersion: '0.16.0',
+      renderFreshScaffold: () => ({ projectDir: freshDir, cleanup: () => undefined }),
+    });
+    expect(result.ok).toBe(true);
+
+    expect(fs.readFileSync(path.join(consumerDir, retired), 'utf8')).toBe('legacy client template\n');
+    expect(fs.readFileSync(path.join(consumerDir, `${retired}.removed`), 'utf8')).toContain(retired);
+    expect(fs.readFileSync(path.join(consumerDir, sibling), 'utf8')).toBe('new paired\n');
+  });
+
   it('re-flags an ignored removal on the next update, and stops once the file is gone', () => {
     write(consumerDir, 'scripts/generateRunbooks.mjs', 'retired generator\n');
     manifestFor(consumerDir, { 'scripts/generateRunbooks.mjs': 'retired generator\n' });

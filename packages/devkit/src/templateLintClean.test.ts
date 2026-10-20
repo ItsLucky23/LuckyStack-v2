@@ -24,7 +24,7 @@ vi.mock('@luckystack/core', async (importOriginal) => {
 });
 
 const { injectTemplate } = await import('./templateInjector');
-const { registerTemplateRule, resetTemplateRegistryForTests } = await import('./templateRegistry');
+const { resetTemplateRegistryForTests } = await import('./templateRegistry');
 
 vi.spyOn(console, 'log').mockImplementation(() => undefined);
 
@@ -76,7 +76,6 @@ const injectEveryKind = async (area: string): Promise<string[]> => {
     `src/${area}/_sync/update_server_v1.ts`,
     `src/${area}/_sync/update_client_v1.ts`,
     `src/${area}/_sync/notify_client_v1.ts`,
-    `src/${area}/legacy/_sync/ping_client_v1.ts`,
     `src/${area}/admin/page.tsx`,
     `src/${area}/about/page.tsx`,
   ].map((relative) => write(relative, ''));
@@ -89,12 +88,9 @@ describe('injected templates lint clean', () => {
     writeProject();
     const consumerTemplates = path.join(ROOT, '.luckystack', 'templates');
     const scaffoldTemplates = path.join(scaffold, '_dot_luckystack', 'templates');
-    //? `sync_client` is not a built-in kind: the scaffold ships it as a
-    //? consumer template, so route one path to that copy to cover it too.
-    write('.luckystack/templates/sync_client.template.ts', fs.readFileSync(path.join(scaffoldTemplates, 'sync_client.template.ts'), 'utf8'));
-    registerTemplateRule({ kind: 'sync_client', priority: 100, match: (ctx) => ctx.filePath.replaceAll('\\', '/').includes('/legacy/') });
     const bundled = await injectEveryKind('bundled');
 
+    fs.mkdirSync(consumerTemplates, { recursive: true });
     for (const name of fs.readdirSync(scaffoldTemplates).filter((entry) => entry.includes('.template.'))) {
       fs.copyFileSync(path.join(scaffoldTemplates, name), path.join(consumerTemplates, name));
     }
