@@ -1591,3 +1591,13 @@ PR #9 kreeg om een verwante reden nooit CI: `pull_request` draait tegen `refs/pu
 **Open (voorgelegd, niet gefixt):** bestaande Microsoft-accounts op een app met `tenant: 'common'` (standaard) blijven inlogbaar via een niet-geverifieerd `mail`; alleen gedocumenteerd + opstartwaarschuwing (ADR 0083).
 
 **Files:** `branch-logs/{main,INDEX}.md`. Tag `v0.15.0`.
+
+## 2026-10-20 16:20 — v0.16.0 gepubliceerd
+
+**User prompt (summary):** "1. c. 2. jouw advies. 3. ja mag jij allemaal doen" plus "microsoft oauth is nog nooit gebruikt dus geen legacy support bouwen", alle providers, zelfde werkwijze als 0.15 (werk op `feat/oauth-account-id-0.16`, zie die log).
+
+**Release.** `dda9e5a` fast-forward op GitHub `main` (vanaf `bbeb99e`), daarna tag `v0.16.0` → `ci` run 39437074216 groen (Node 22 en 24, ai-records, e2e-scaffold) en `publish.yml` run 39437077955 groen. Registry 17/17 met provenance (~1,5 min propagatie), `latest` = 0.16.0. Vooraf: `verify` 2877/2877, e2e-matrix 4/4 groen (run 3 nu met Google/GitHub/Microsoft-OAuth op MongoDB), `pack:dry` 18/18, `publish:dry` 17, `audit:production` critical 0 / high 0. Tarball-spotcheck: login-dist bevat `findByProviderAccountId` en `providerEmail`, docs-ui-dist `endpoint-summary`, devkit-dist geen `sync_client.template` meer, scaffold-schema heeft `providerAccountId`.
+
+**Gesloten:** het open punt van v0.15.0 (Microsoft-overname via niet-geverifieerd `mail`) via binding op de provider-ID (ADR 0086).
+
+**Files:** `branch-logs/{main,INDEX}.md`. Tag `v0.16.0`.
