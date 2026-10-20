@@ -38,6 +38,7 @@ const loadPureCore = (
   renderSyncEntry: (entry: unknown) => string;
   renderAuth: (auth: unknown) => string;
   passesFilter: (filter: string, page: string, name: string) => boolean;
+  findToggleTarget: (target: unknown, selectedText: string) => unknown;
 } => {
   const script = extractScript(renderDocsHtml('/_docs/api.json', 'Docs', { enableTryItOut }));
   //? Cut at the orchestrator `render` (the first DOM-bound function) so only
@@ -54,7 +55,7 @@ const loadPureCore = (
   const factory =
     // eslint-disable-next-line @typescript-eslint/no-implied-eval -- see comment above: source is our own rendered helper code, not untrusted input.
     new Function(
-      `${pureBody}\n return { buildGroups, renderEndpoint, renderSyncEntry, renderAuth, passesFilter };`,
+      `${pureBody}\n return { buildGroups, renderEndpoint, renderSyncEntry, renderAuth, passesFilter, findToggleTarget };`,
     ) as () => ReturnType<typeof loadPureCore>;
   return factory();
 };
@@ -340,6 +341,91 @@ describe('docsHtml orchestrator decomposition guard', () => {
     //? bindEndpointToggles now attaches one delegated listener on the
     //? container rather than re-binding per element on every filter keystroke.
     expect(html).toContain("content.addEventListener('click', (e) => {");
-    expect(html).toContain("e.target.closest('.endpoint')");
+    expect(html).toContain('const el = findToggleTarget(e.target, ');
+  });
+});
+
+//? Minimal stand-in for an element: `closest` walks the parent chain and
+//? matches the plain class selectors the delegated listener uses.
+interface FakeNode {
+  className: string;
+  parent: FakeNode | null;
+  closest: (selector: string) => FakeNode | null;
+}
+const fakeNode = (className: string, parent: FakeNode | null = null): FakeNode => {
+  const node: FakeNode = {
+    className,
+    parent,
+    closest: (selector) => {
+      for (let current: FakeNode | null = node; current; current = current.parent) {
+        if (selector.startsWith('.') && current.className.split(' ').includes(selector.slice(1))) return current;
+      }
+      return null;
+    },
+  };
+  return node;
+};
+
+//? An open panel collapsed on any click inside it (the try-it-out textarea,
+//? selecting output text) because every click bubbled to the delegated toggle.
+describe('live render core — endpoint toggle target', () => {
+  const endpoint = fakeNode('endpoint open');
+  const summary = fakeNode('endpoint-summary', endpoint);
+  const methodBadge = fakeNode('method GET', summary);
+  const detail = fakeNode('endpoint-detail', endpoint);
+  const tryItOut = fakeNode('try-it-out', detail);
+  const textarea = fakeNode('', tryItOut);
+  const outputPre = fakeNode('', fakeNode('detail-section', detail));
+
+  it('toggles from the summary row and its children', () => {
+    const { findToggleTarget } = loadPureCore(true);
+    expect(findToggleTarget(summary, '')).toBe(endpoint);
+    expect(findToggleTarget(methodBadge, '')).toBe(endpoint);
+  });
+
+  it('ignores clicks inside the expanded detail, including form controls', () => {
+    const { findToggleTarget } = loadPureCore(true);
+    expect(findToggleTarget(detail, '')).toBeNull();
+    expect(findToggleTarget(textarea, '')).toBeNull();
+    expect(findToggleTarget(outputPre, '')).toBeNull();
+  });
+
+  it('ignores a click that finishes a text selection, even on the summary', () => {
+    const { findToggleTarget } = loadPureCore(true);
+    expect(findToggleTarget(summary, '/api/p/n/v1')).toBeNull();
+  });
+
+  it('keeps an open panel open when the delegated listener sees a textarea click', () => {
+    const script = extractScript(renderDocsHtml('/_docs/api.json', 'Docs', { enableTryItOut: true }));
+    const pureBody = script.slice(0, script.indexOf('//? Thin orchestrator'));
+    const captured: { clickListener?: (event: unknown) => void } = {};
+    const fakeDocument = {
+      getElementById: () => ({
+        addEventListener: (_type: string, listener: (event: unknown) => void) => { captured.clickListener = listener; },
+      }),
+      getSelection: () => ({ toString: () => '' }),
+    };
+    // eslint-disable-next-line @typescript-eslint/no-implied-eval -- same rationale as loadPureCore: our own rendered helper code.
+    const factory = new Function('document', `${pureBody}\n return { bindEndpointToggles };`) as (
+      document: unknown,
+    ) => { bindEndpointToggles: () => void };
+    factory(fakeDocument).bindEndpointToggles();
+
+    const classes = new Set(['endpoint', 'open']);
+    const panel = Object.assign(fakeNode('endpoint open'), {
+      getAttribute: () => 'p/n@v1',
+      classList: {
+        contains: (name: string) => classes.has(name),
+        toggle: (name: string) => { if (!classes.delete(name)) classes.add(name); },
+      },
+    });
+    const panelSummary = fakeNode('endpoint-summary', panel);
+    const panelTextarea = fakeNode('', fakeNode('try-it-out', fakeNode('endpoint-detail', panel)));
+
+    captured.clickListener?.({ target: panelTextarea });
+    expect(classes.has('open')).toBe(true);
+
+    captured.clickListener?.({ target: panelSummary });
+    expect(classes.has('open')).toBe(false);
   });
 });

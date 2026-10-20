@@ -153,12 +153,11 @@ const renderDocsCss = (accent: string, fontFamily: string): string => `<style>
     border-bottom: 1px solid var(--border);
     font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, monospace;
     font-size: 13px;
-    cursor: pointer;
     transition: background 80ms;
   }
   .endpoint:last-child { border-bottom: none; }
   .endpoint:hover { background: var(--container-hover); }
-  .endpoint-summary { display: flex; align-items: center; gap: 12px; }
+  .endpoint-summary { display: flex; align-items: center; gap: 12px; cursor: pointer; }
   .method {
     display: inline-block;
     min-width: 56px;
@@ -511,6 +510,16 @@ const renderDocsScript = (jsonPath: string, tryItOutData: string): string => `<s
     return { summaryHtml, contentHtml };
   };
 
+  //? Only the summary row toggles an endpoint. Every click inside the open
+  //? detail (the try-it-out textarea, selecting output text) bubbles to the
+  //? delegated listener too and must not collapse the panel; a drag that ends
+  //? on the summary with text selected is a selection, not a toggle.
+  const findToggleTarget = (target, selectedText) => {
+    if (selectedText) return null;
+    const summary = target.closest('.endpoint-summary');
+    return summary ? summary.closest('.endpoint') : null;
+  };
+
   //? Event-delegation toggle: one listener on the #content container handles
   //? all endpoint clicks. This replaces the per-element re-bind that was
   //? called on every filter keystroke (DOCSUI-O13).
@@ -522,7 +531,8 @@ const renderDocsScript = (jsonPath: string, tryItOutData: string): string => `<s
         void runEndpoint(runButton, runButton.dataset.route, runButton.dataset.method, runButton.previousElementSibling);
         return;
       }
-      const el = e.target.closest('.endpoint');
+      const selection = document.getSelection ? document.getSelection() : null;
+      const el = findToggleTarget(e.target, selection ? selection.toString() : '');
       if (!el) return;
       const key = el.getAttribute('data-key');
       const next = !el.classList.contains('open');
