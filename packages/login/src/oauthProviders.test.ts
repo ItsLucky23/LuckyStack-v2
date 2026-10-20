@@ -202,7 +202,22 @@ describe("OAuth provider factories", () => {
     fresh.microsoftProvider({ ...baseInput, tenant: "Organizations" });
     fresh.microsoftProvider(baseInput);
     expect(warnSpy).toHaveBeenCalledTimes(1);
-    expect(warnSpy.mock.calls[0]?.[0]).toContain("nOAuth");
+    expect(warnSpy.mock.calls[0]?.[0]).toContain("new Microsoft users are refused");
+  });
+
+  //? ADR 0086: every built-in names the userinfo field that holds its stable id.
+  it.each([
+    ["google", () => googleProvider(baseInput), "sub"],
+    ["github", () => githubProvider(baseInput), "id"],
+    ["discord", () => discordProvider(baseInput), "id"],
+    ["facebook", () => facebookProvider(baseInput), "id"],
+    ["microsoft", () => microsoftProvider({ ...baseInput, tenant: "contoso.onmicrosoft.com" }), "id"],
+  ])("%s binds accounts by its stable id key", (_name, build, key) => {
+    expect(build().accountIdKey).toBe(key);
+  });
+
+  it("facebookProvider's default userinfo URL requests the id field", () => {
+    expect(facebookProvider(baseInput).userInfoURL).toMatch(/fields=id,/);
   });
 });
 

@@ -8,7 +8,7 @@ import { randomBytes, createHash, timingSafeEqual } from 'node:crypto';
 import { saveSession } from "./session"
 import validator from 'validator';
 import type { BaseSessionLayout as SessionLayout } from './sessionLayout';
-import { getUserAdapter, type UserRecord } from './userAdapter';
+import { getUserAdapter, type UserAdapter, type UserRecord } from './userAdapter';
 import { resolveUserByEmail } from './accountStrategy';
 import { validatePassword } from './passwordPolicy';
 import { isAccountLocked, clearAuthFailures } from './authLockout';
@@ -278,6 +278,15 @@ const readStringField = (record: Record<string, unknown>, key: string, fallback 
   if (typeof value === 'number' && Number.isFinite(value)) return String(value);
   if (typeof value === 'boolean') return String(value);
   return fallback;
+};
+
+//? A provider's stable user id (ADR 0086): a non-empty string, or an integer
+//? (GitHub). Anything else counts as missing, never as the string "undefined".
+const readAccountId = (record: Record<string, unknown>, key: string): string | undefined => {
+  const value = record[key];
+  if (typeof value === 'string' && value !== '') return value;
+  if (typeof value === 'number' && Number.isSafeInteger(value)) return String(value);
+  return undefined;
 };
 
 //? Random 6-digit hex color used as the avatar placeholder for users without
@@ -876,6 +885,12 @@ interface OAuthProfile {
    */
   emailVerified: boolean;
   /**
+   * The provider's stable user id, read through `accountIdKey` (ADR 0086).
+   * `undefined` only for a provider that does not set `accountIdKey`; such a
+   * provider keeps the email-only matching.
+   */
+  accountId: string | undefined;
+  /**
    * The RAW, un-stripped provider userInfo record. Threaded through so the
    * `extraSessionFields` hook receives every provider-specific claim (`sub`,
    * tenant id, custom claims) instead of the trimmed `{email,name,avatar}`
@@ -911,6 +926,22 @@ const fetchOAuthProfile = async (
   }
 
   const userData = asRecord(response);
+
+  //? A provider that declares a stable id but did not send one (for example a
+  //? custom `userInfoURL` without the field) is refused: falling back to the
+  //? email would bring back the takeover the binding closes (ADR 0086).
+  let accountId: string | undefined;
+  if (provider.accountIdKey) {
+    accountId = readAccountId(userData, provider.accountIdKey);
+    if (accountId === undefined) {
+      getLogger().warn('oauth: provider userinfo has no stable account id — refusing the login', {
+        provider: provider.name,
+        accountIdKey: provider.accountIdKey,
+      });
+      return null;
+    }
+  }
+
   //? Provider responses are untyped JSON; read each field through `readString`
   //? so a non-string (object/number/missing) value falls back instead of
   //? stringifying to `[object Object]`.
@@ -997,7 +1028,7 @@ const fetchOAuthProfile = async (
     email = normalizedEmail;
   }
 
-  return { email, name, avatar, emailVerified, rawUserData: userData };
+  return { email, name, avatar, emailVerified, accountId, rawUserData: userData };
 };
 
 interface ResolvedOAuthUser {
@@ -1005,11 +1036,52 @@ interface ResolvedOAuthUser {
   isNewUser: boolean;
 }
 
+//? An adapter without `findByProviderAccountId` cannot hold the binding, so the
+//? framework neither reads nor writes it there (ADR 0086). Warn once: such a
+//? project keeps email matching, refuses unverified emails on existing accounts,
+//? and starts a new account when the email changes at the provider.
+let warnedMissingAccountIdLookup = false;
+const supportsAccountBinding = (adapter: UserAdapter): boolean => {
+  if (typeof adapter.findByProviderAccountId === 'function') return true;
+  if (!warnedMissingAccountIdLookup) {
+    warnedMissingAccountIdLookup = true;
+    getLogger().warn(
+      '[login] the registered UserAdapter does not implement findByProviderAccountId — OAuth accounts are not bound to the provider id: existing accounts are still matched by verified email only, and an email change at the provider starts a new account. Implement findByProviderAccountId and store providerAccountId to enable binding.',
+    );
+  }
+  return false;
+};
+
+const signInExistingOAuthUser = async (
+  userAdapter: UserAdapter,
+  existing: UserRecord,
+): Promise<ResolvedOAuthUser> => {
+  //? LOGIN-F18 (OAuth path): same async stat lookup via the shared helper.
+  const uploadedAvatar = await resolveUploadedAvatar(existing.id);
+  if (uploadedAvatar) {
+    existing.avatar = uploadedAvatar;
+  }
+
+  const previousLogin = existing.lastLogin ?? null;
+  const nowLogin = new Date();
+  await tryCatch(() => userAdapter.update(existing.id, { lastLogin: nowLogin }));
+
+  return {
+    user: {
+      ...sanitizeUserForSession(existing),
+      token: '',
+      lastLogin: nowLogin,
+      previousLogin,
+    },
+    isNewUser: false,
+  };
+};
+
 const findOrCreateOAuthUser = async (
   provider: FullOAuthProvider,
   profile: OAuthProfile,
 ): Promise<ResolvedOAuthUser | null> => {
-  const { email, name, avatar, emailVerified } = profile;
+  const { email, name, avatar, emailVerified, accountId } = profile;
   if (!email) return null;
 
   const preLoginResult = await dispatchHook('preLogin', { email, provider: provider.name });
@@ -1019,9 +1091,28 @@ const findOrCreateOAuthUser = async (
   }
 
   const userAdapter = getUserAdapter();
-  //? Under `'unified'` this links to an existing account with the same email
-  //? created via ANY provider (incl. credentials); under `'per-provider'` it
-  //? stays scoped to this provider (existing behavior).
+  //? @adr 0086 — the id this login reads and writes; `undefined` when the
+  //? provider has no stable id or the adapter cannot store one.
+  const bindingId = accountId !== undefined && supportsAccountBinding(userAdapter) ? accountId : undefined;
+
+  //? Step 1: the account bound to this provider id. The provider vouches for
+  //? the person whatever email it reports today, so a changed email still
+  //? lands here. The stored email is NOT overwritten: it may be unverified
+  //? (multi-tenant Microsoft), and the app owns it once the account exists.
+  if (bindingId !== undefined) {
+    const [boundError, boundUser] = await tryCatch(async () =>
+      (await userAdapter.findByProviderAccountId?.({ provider: provider.name, providerAccountId: bindingId })) ?? null
+    );
+    if (boundError) {
+      getLogger().error('oauth: findByProviderAccountId failed', boundError);
+      return null;
+    }
+    if (boundUser?.id) return signInExistingOAuthUser(userAdapter, boundUser);
+  }
+
+  //? Step 2: the email. Under `'unified'` this links to an existing account with
+  //? the same email created via ANY provider (incl. credentials); under
+  //? `'per-provider'` it stays scoped to this provider (existing behavior).
   const [findError, findResponse] = await tryCatch(() =>
     resolveUserByEmail(userAdapter, { email, provider: provider.name })
   );
@@ -1038,7 +1129,8 @@ const findOrCreateOAuthUser = async (
     //? NOT positively verify the email (no `emailVerifiedKey` / `getEmail`
     //? verified-filter), an attacker who controls an unverified address equal to
     //? a victim's could take over that account. Refuse the link in that case —
-    //? same-provider re-login and first-time account CREATION are unaffected, so
+    //? same-provider re-login (guarded below by the provider id, ADR 0086) and
+    //? first-time account CREATION are unaffected, so
     //? existing flows for built-ins that DO verify (Google/GitHub/Discord) keep
     //? working. `'per-provider'` always matches within the same provider, so the
     //? cross-provider condition is never met there (no behaviour change).
@@ -1057,25 +1149,44 @@ const findOrCreateOAuthUser = async (
       return null;
     }
 
-    //? LOGIN-F18 (OAuth path): same async stat lookup via the shared helper.
-    const uploadedAvatar = await resolveUploadedAvatar(findResponse.id);
-    if (uploadedAvatar) {
-      findResponse.avatar = uploadedAvatar;
+    //? Same-provider email match for a provider with a stable id (ADR 0086).
+    //? The id column belongs to the row's own provider, so a cross-provider
+    //? link above is never bound and keeps relying on the verified email.
+    if (!isCrossProviderLink && accountId !== undefined) {
+      const storedId = typeof findResponse.providerAccountId === 'string' && findResponse.providerAccountId !== ''
+        ? findResponse.providerAccountId
+        : null;
+      //? Bound to another person at this provider who now reports the same
+      //? email: the nOAuth takeover. Never sign in.
+      if (storedId !== null && storedId !== accountId) {
+        getLogger().warn(
+          'oauth: refusing login — the account with this email is bound to a different provider account (account-takeover guard)',
+          { provider: provider.name, userId: findResponse.id },
+        );
+        return null;
+      }
+      if (storedId === null) {
+        //? Unbound (created before 0.16, or by an adapter without binding): only
+        //? an email the provider verified may claim it.
+        if (!emailVerified) {
+          getLogger().warn(
+            'oauth: refusing login — the account with this email is not bound to a provider id yet and the provider did not verify the email (account-takeover guard)',
+            { provider: provider.name, userId: findResponse.id },
+          );
+          return null;
+        }
+        if (bindingId !== undefined) {
+          const [bindError] = await tryCatch(() => userAdapter.update(findResponse.id, { providerAccountId: bindingId }));
+          if (bindError) {
+            getLogger().error('oauth: binding the account to the provider id failed', bindError);
+            return null;
+          }
+          findResponse.providerAccountId = bindingId;
+        }
+      }
     }
 
-    const previousLogin = findResponse.lastLogin ?? null;
-    const nowLogin = new Date();
-    await tryCatch(() => userAdapter.update(findResponse.id, { lastLogin: nowLogin }));
-
-    return {
-      user: {
-        ...sanitizeUserForSession(findResponse),
-        token: '',
-        lastLogin: nowLogin,
-        previousLogin,
-      },
-      isNewUser: false,
-    };
+    return signInExistingOAuthUser(userAdapter, findResponse);
   }
 
   //? Fail-closed account-CREATION guard (M2), symmetric with the cross-provider
@@ -1125,6 +1236,7 @@ const findOrCreateOAuthUser = async (
     avatar,
     avatarFallback: generateAvatarFallbackColor(),
     language: getProjectConfig().defaultLanguage,
+    ...(bindingId === undefined ? {} : { providerAccountId: bindingId }),
   });
   const [createError, createResponse] = await tryCatch(createNewUser);
   if (createError) {

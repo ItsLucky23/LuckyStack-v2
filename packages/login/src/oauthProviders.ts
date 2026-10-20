@@ -60,6 +60,15 @@ export interface FullOAuthProvider {
   nameKey: string;
   emailKey: string;
   /**
+   * Key on the userInfo response holding the provider's stable user id (a
+   * non-empty string or an integer). When set, an account is bound to
+   * (provider, id) and found by it before any email lookup, so an address the
+   * provider does not verify can never sign in to someone else's account
+   * (ADR 0086). Every built-in sets it; a custom provider opts in. A response
+   * without the id is refused rather than matched by email.
+   */
+  accountIdKey?: string;
+  /**
    * Optional key on the userInfo response holding a provider "email verified"
    * boolean. When set AND the field is present-and-falsy, the framework rejects
    * the profile rather than trusting an unverified address — defense-in-depth
@@ -213,6 +222,8 @@ export const googleProvider = (input: OAuthHelperInput): FullOAuthProvider => ({
   ], input.extraScopes),
   nameKey: 'name',
   emailKey: 'email',
+  //? OIDC subject: stable per Google account (and per client), unlike the email.
+  accountIdKey: 'sub',
   //? Google's OIDC userinfo returns `email_verified`; reject an unverified
   //? address so a Google account with an unverified email can't link to a
   //? victim's existing account under the `'unified'` strategy (SEC-21).
@@ -236,6 +247,8 @@ export const githubProvider = (input: OAuthHelperInput): FullOAuthProvider => ({
   scope: mergeScopes(['read:user', 'user:email'], input.extraScopes),
   nameKey: 'login',
   emailKey: 'email',
+  //? Numeric user id; the `login` handle can be renamed and then claimed by someone else.
+  accountIdKey: 'id',
   //? The `/user` public `email` has no verified flag, so taking it verbatim left
   //? every new user with a public email unverified (first-login creation
   //? refused). Always resolve through the verified-only `/user/emails` list.
@@ -301,6 +314,8 @@ export const discordProvider = (input: OAuthHelperInput): FullOAuthProvider => (
   scope: mergeScopes(['identify', 'email'], input.extraScopes),
   nameKey: 'username',
   emailKey: 'email',
+  //? Snowflake user id.
+  accountIdKey: 'id',
   //? Discord's /users/@me returns a `verified` boolean for the account email;
   //? reject the address when it is explicitly unverified (SEC-21).
   emailVerifiedKey: 'verified',
@@ -338,6 +353,8 @@ export const facebookProvider = (input: FacebookProviderInput): FullOAuthProvide
   scope: mergeScopes(['public_profile', 'email'], input.extraScopes),
   nameKey: 'name',
   emailKey: 'email',
+  //? App-scoped user id. A custom `userInfoURL` must keep `id` in `fields`.
+  accountIdKey: 'id',
   //? Facebook's Graph `/me` only returns `email` for an address the user has
   //? CONFIRMED with Facebook (unconfirmed emails are omitted), so there is no
   //? separate verified flag to gate on — the presence of `email` IS the verified
@@ -366,8 +383,9 @@ export interface MicrosoftProviderInput extends OAuthHelperInput {
    * user get an account: Graph `mail` is set by the tenant's admin, so under
    * `'common'` / `'organizations'` / `'consumers'` any tenant could assert any
    * address (the nOAuth attack). With those values the email counts as
-   * unverified, so only existing Microsoft accounts can sign in. Overriding
-   * `endpoints` does not change this; set `tenant`.
+   * unverified, so only Microsoft accounts already bound to their Microsoft id
+   * can sign in (ADR 0086). Overriding `endpoints` does not change this; set
+   * `tenant`.
    */
   tenant?: string;
   /** OAuth API version segment. Default `'v2.0'`. */
@@ -390,17 +408,17 @@ export interface MicrosoftProviderInput extends OAuthHelperInput {
 //? accounts), so no single admin vouches for the reported `mail`.
 const MICROSOFT_MULTI_TENANT_SEGMENTS = new Set(['common', 'organizations', 'consumers']);
 
-//? Treating multi-tenant `mail` as unverified only stops NEW accounts and
-//? cross-provider links. An EXISTING Microsoft account is still matched by
-//? (email, provider), so another tenant's admin who sets `mail` to that address
-//? signs in as its owner. Blocking that would lock out every existing
-//? multi-tenant login, so it stays a consumer decision; warn once at boot.
+//? Accounts are bound to the Microsoft object id (ADR 0086), so an unverified
+//? multi-tenant `mail` can no longer sign in as someone else. It also cannot
+//? create an account or bind an existing one, so on these tenants only accounts
+//? bound earlier (under a single-tenant setup) sign in. Warn once at boot so a
+//? project on the default tenant learns why every new Microsoft login fails.
 let warnedMultiTenant = false;
 const warnMultiTenantOnce = (tenant: string): void => {
   if (warnedMultiTenant) return;
   warnedMultiTenant = true;
   getLogger().warn(
-    `[login] microsoftProvider tenant '${tenant}' accepts accounts from any Entra tenant: an existing Microsoft account is matched on an unverified Graph mail, so another tenant's admin can sign in as its owner (nOAuth). Set \`tenant\` to your organisation's tenant id or domain to close this.`,
+    `[login] microsoftProvider tenant '${tenant}' accepts accounts from any Entra tenant, so Graph mail is not verified: new Microsoft users are refused and existing accounts sign in only once bound to their Microsoft id. Set \`tenant\` to your organisation's tenant id or domain to enable Microsoft sign-in.`,
   );
 };
 
@@ -428,6 +446,10 @@ export const microsoftProvider = (input: MicrosoftProviderInput): FullOAuthProvi
   scope: mergeScopes(['openid', 'profile', 'email', 'User.Read'], input.extraScopes),
   nameKey: 'displayName',
   emailKey: 'mail',
+  //? Graph `/me` `id` is the user's Entra object id: assigned by Entra, never
+  //? editable by a tenant admin (unlike `mail`), and a GUID that no other tenant
+  //? can reproduce. `/me` carries no tenant id to combine it with (ADR 0086).
+  accountIdKey: 'id',
   //? Graph `mail` has no verified flag; it is trusted only when one tenant's
   //? admin owns it (see `MicrosoftProviderInput.tenant`).
   emailImpliesVerified: isSingleTenant,

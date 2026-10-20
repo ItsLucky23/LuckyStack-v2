@@ -61,21 +61,25 @@ datasource db {
 // ============================================
 
 model User {
-  id             String    @id @default(uuid()) @map("_id")
-  email          String
-  name           String
-  password       String?
-  admin          Boolean   @default(false)
-  avatar         String    @default("")
-  avatarFallback String    @default("")
-  language       LANGUAGE  @default(en)
-  theme          THEME     @default(dark)
-  provider       PROVIDERS
-  preferences    Json?
-  lastLogin      DateTime?
-  createdAt      DateTime  @default(now())
-  updatedAt      DateTime  @updatedAt
+  id                String    @id @default(uuid()) @map("_id")
+  email             String
+  name              String
+  password          String?
+  admin             Boolean   @default(false)
+  avatar            String    @default("")
+  avatarFallback    String    @default("")
+  language          LANGUAGE  @default(en)
+  theme             THEME     @default(dark)
+  provider          PROVIDERS
+  // The OAuth provider's stable user id (ADR 0086); null for credentials accounts.
+  providerAccountId String?
+  preferences       Json?
+  lastLogin         DateTime?
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
 
+  // An index, not @@unique: on MongoDB a unique index rejects a second null.
+  @@index([provider, providerAccountId])
   @@map("users")
 }
 

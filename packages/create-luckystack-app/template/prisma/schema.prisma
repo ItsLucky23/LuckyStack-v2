@@ -42,6 +42,10 @@ model User {
   email           String
   password        String?
   provider        PROVIDERS @default(credentials)
+  //? The OAuth provider's stable user id (ADR 0086); null for credentials
+  //? accounts. Sign-in matches it before the email, so an address the provider
+  //? does not verify cannot take over an account.
+  providerAccountId String?
 
   name            String?
   avatar          String    @default("")
@@ -65,4 +69,7 @@ model User {
   recoveryCodes   Json?
 
   @@unique([email, provider])
+  //? An index, not @@unique: on MongoDB a unique index rejects the second row
+  //? whose providerAccountId is null (ADR 0086).
+  @@index([provider, providerAccountId])
 }

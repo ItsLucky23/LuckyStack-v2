@@ -3,8 +3,9 @@
 //? non-Prisma data layer can plug their own implementation.
 //?
 //? `defaultPrismaUserAdapter()` implements the framework's recommended schema
-//? (id, email, password?, provider, name, avatar, avatarFallback, admin,
-//? language) and is used automatically when no adapter has been registered.
+//? (id, email, password?, provider, providerAccountId?, name, avatar,
+//? avatarFallback, admin, language) and is used automatically when no adapter
+//? has been registered.
 
 import { prisma, type BaseSessionLayout } from '@luckystack/core';
 
@@ -16,11 +17,20 @@ export interface UserAdapterCreateInput {
   avatar?: string | null;
   avatarFallback?: string | null;
   language?: string | null;
+  /** The OAuth provider's stable user id (ADR 0086). Absent for credentials accounts. */
+  providerAccountId?: string | null;
 }
 
 export interface UserRecord extends BaseSessionLayout {
   password?: string | null;
   provider?: string | null;
+  /**
+   * The stable user id of the OAuth provider in `provider` (ADR 0086). Null for
+   * credentials accounts and for OAuth accounts not bound yet. Binds only the
+   * row's own provider: under `'unified'` another provider that links by email
+   * is not stored here.
+   */
+  providerAccountId?: string | null;
   /** Most recent successful login. Mirrors the optional `lastLogin` column on User. */
   lastLogin?: Date | null;
   /**
@@ -51,6 +61,16 @@ export interface UserAdapter {
    * logs a one-time warning and falls back to provider-scoped lookup.
    */
   findByEmailAnyProvider?: (params: { email: string }) => Promise<UserRecord | null>;
+  /**
+   * Look up the account bound to an OAuth provider's stable user id (ADR 0086).
+   * Optional so existing custom adapters keep compiling. Without it the
+   * framework neither reads nor writes the binding: it warns once, refuses an
+   * unverified provider email on an existing account, and otherwise matches by
+   * email as before (an email change at the provider then starts a new
+   * account). An adapter that implements it must also persist
+   * `providerAccountId` from `create` and `update`.
+   */
+  findByProviderAccountId?: (params: { provider: string; providerAccountId: string }) => Promise<UserRecord | null>;
   findById: (id: string) => Promise<UserRecord | null>;
   create: (input: UserAdapterCreateInput) => Promise<UserRecord>;
   update: (id: string, patch: Partial<UserRecord>) => Promise<UserRecord>;
@@ -91,7 +111,10 @@ export const isUserAdapterRegistered = (): boolean => registeredAdapter !== null
 //? register their own `UserAdapter` via `registerUserAdapter(...)` rather
 //? than relying on this default.
 interface PrismaUserDelegate {
-  findFirst: (args: { where: { email: string; provider?: string }; orderBy?: { createdAt?: 'asc' | 'desc' } }) => Promise<UserRecord | null>;
+  findFirst: (args: {
+    where: { email: string; provider?: string } | { provider: string; providerAccountId: string };
+    orderBy?: { createdAt?: 'asc' | 'desc' };
+  }) => Promise<UserRecord | null>;
   findUnique: (args: { where: { id: string } }) => Promise<UserRecord | null>;
   create: (args: { data: Record<string, unknown> }) => Promise<UserRecord>;
   update: (args: { where: { id: string }; data: Record<string, unknown> }) => Promise<UserRecord>;
@@ -117,6 +140,11 @@ export const defaultPrismaUserAdapter = (): UserAdapter => {
     //? different User rows AND the cross-provider link guard flips non-deterministically.
     findByEmailAnyProvider: async ({ email }) =>
       getPrismaUser().findFirst({ where: { email }, orderBy: { createdAt: 'asc' } }),
+    //? The (provider, providerAccountId) index is not unique (a Mongo unique
+    //? index rejects a second null), so two concurrent first logins can bind
+    //? two rows; resolve to the oldest, like `findByEmailAnyProvider`.
+    findByProviderAccountId: async ({ provider, providerAccountId }) =>
+      getPrismaUser().findFirst({ where: { provider, providerAccountId }, orderBy: { createdAt: 'asc' } }),
     findById: async (id) =>
       getPrismaUser().findUnique({ where: { id } }),
     create: async (input) =>
@@ -129,6 +157,9 @@ export const defaultPrismaUserAdapter = (): UserAdapter => {
           avatar: input.avatar ?? '',
           avatarFallback: input.avatarFallback,
           language: input.language,
+          //? Only OAuth sign-ups send it, so credentials registration keeps
+          //? working on a schema that has not added the column yet.
+          ...(input.providerAccountId ? { providerAccountId: input.providerAccountId } : {}),
         },
       }),
     update: async (id, patch) =>

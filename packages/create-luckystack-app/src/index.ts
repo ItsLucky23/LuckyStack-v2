@@ -2347,12 +2347,13 @@ export const USER_ADAPTER_STARTERS: Record<'drizzle' | 'mikro-orm', string> = {
 //?        email: text('email').notNull(),
 //?        password: text('password'),
 //?        provider: text('provider').notNull().default('credentials'),
+//?        providerAccountId: text('provider_account_id'),
 //?        name: text('name'),
 //?        avatar: text('avatar').notNull().default(''),
 //?        avatarFallback: text('avatar_fallback').notNull().default(''),
 //?        language: text('language').notNull().default('en'),
 //?        theme: text('theme').notNull().default('light'),
-//?      });
+//?      }, (t) => [uniqueIndex('users_provider_account_idx').on(t.provider, t.providerAccountId)]);
 //?
 //? 2. Uncomment everything below. (mysql2 note: \`.returning()\` is Postgres/
 //?    SQLite — on mysql re-select the row after insert/update instead.)
@@ -2376,6 +2377,11 @@ export const USER_ADAPTER_STARTERS: Record<'drizzle' | 'mikro-orm', string> = {
 //       .where(eq(users.email, email)).orderBy(asc(users.createdAt)).limit(1);
 //     return row ? toRecord(row) : null;
 //   },
+//   findByProviderAccountId: async ({ provider, providerAccountId }) => {
+//     const [row] = await db.select().from(users)
+//       .where(and(eq(users.provider, provider), eq(users.providerAccountId, providerAccountId))).limit(1);
+//     return row ? toRecord(row) : null;
+//   },
 //   findById: async (id) => {
 //     const [row] = await db.select().from(users).where(eq(users.id, Number(id))).limit(1);
 //     return row ? toRecord(row) : null;
@@ -2389,6 +2395,7 @@ export const USER_ADAPTER_STARTERS: Record<'drizzle' | 'mikro-orm', string> = {
 //       avatar: input.avatar ?? '',
 //       avatarFallback: input.avatarFallback ?? '',
 //       language: input.language ?? 'en',
+//       providerAccountId: input.providerAccountId ?? null,
 //     }).returning();
 //     return toRecord(row);
 //   },
@@ -2416,7 +2423,8 @@ export {};
 //?
 //?      export interface User {
 //?        id: number; createdAt: Date; email: string; password: string | null;
-//?        provider: string; name: string | null; avatar: string;
+//?        provider: string; providerAccountId: string | null;
+//?        name: string | null; avatar: string;
 //?        avatarFallback: string; language: string; theme: string;
 //?      }
 //?      export const UserSchema = new EntitySchema<User>({
@@ -2427,12 +2435,14 @@ export {};
 //?          email: { type: 'string' },
 //?          password: { type: 'string', nullable: true },
 //?          provider: { type: 'string', default: 'credentials' },
+//?          providerAccountId: { type: 'string', nullable: true },
 //?          name: { type: 'string', nullable: true },
 //?          avatar: { type: 'string', default: '' },
 //?          avatarFallback: { type: 'string', default: '' },
 //?          language: { type: 'string', default: 'en' },
 //?          theme: { type: 'string', default: 'light' },
 //?        },
+//?        indexes: [{ properties: ['provider', 'providerAccountId'] }],
 //?      });
 //?      (MongoDB: use \`_id: { type: 'ObjectId', primary: true }\` +
 //?       \`id: { type: 'string', serializedPrimaryKey: true }\` instead.)
@@ -2451,6 +2461,8 @@ export {};
 //     toRecord(await (await getEm()).findOne<User>('User', { email, provider })),
 //   findByEmailAnyProvider: async ({ email }) =>
 //     toRecord(await (await getEm()).findOne<User>('User', { email }, { orderBy: { createdAt: 'asc' } })),
+//   findByProviderAccountId: async ({ provider, providerAccountId }) =>
+//     toRecord(await (await getEm()).findOne<User>('User', { provider, providerAccountId }, { orderBy: { createdAt: 'asc' } })),
 //   findById: async (id) =>
 //     toRecord(await (await getEm()).findOne<User>('User', { id: Number(id) })),
 //   create: async (input) => {
@@ -2463,6 +2475,7 @@ export {};
 //       avatar: input.avatar ?? '',
 //       avatarFallback: input.avatarFallback ?? '',
 //       language: input.language ?? 'en',
+//       providerAccountId: input.providerAccountId ?? null,
 //     });
 //     await em.persistAndFlush(user);
 //     return toRecord(user) as UserRecord;

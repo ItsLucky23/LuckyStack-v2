@@ -105,12 +105,13 @@ const DRIZZLE_USER_ADAPTER_STARTER = `//? Custom UserAdapter starter — data la
 //?        email: text('email').notNull(),
 //?        password: text('password'),
 //?        provider: text('provider').notNull().default('credentials'),
+//?        providerAccountId: text('provider_account_id'),
 //?        name: text('name'),
 //?        avatar: text('avatar').notNull().default(''),
 //?        avatarFallback: text('avatar_fallback').notNull().default(''),
 //?        language: text('language').notNull().default('en'),
 //?        theme: text('theme').notNull().default('light'),
-//?      });
+//?      }, (t) => [uniqueIndex('users_provider_account_idx').on(t.provider, t.providerAccountId)]);
 //?
 //? 2. Uncomment everything below. (mysql2 note: \`.returning()\` is Postgres/
 //?    SQLite — on mysql re-select the row after insert/update instead.)
@@ -134,6 +135,11 @@ const DRIZZLE_USER_ADAPTER_STARTER = `//? Custom UserAdapter starter — data la
 //       .where(eq(users.email, email)).orderBy(asc(users.createdAt)).limit(1);
 //     return row ? toRecord(row) : null;
 //   },
+//   findByProviderAccountId: async ({ provider, providerAccountId }) => {
+//     const [row] = await db.select().from(users)
+//       .where(and(eq(users.provider, provider), eq(users.providerAccountId, providerAccountId))).limit(1);
+//     return row ? toRecord(row) : null;
+//   },
 //   findById: async (id) => {
 //     const [row] = await db.select().from(users).where(eq(users.id, Number(id))).limit(1);
 //     return row ? toRecord(row) : null;
@@ -147,6 +153,7 @@ const DRIZZLE_USER_ADAPTER_STARTER = `//? Custom UserAdapter starter — data la
 //       avatar: input.avatar ?? '',
 //       avatarFallback: input.avatarFallback ?? '',
 //       language: input.language ?? 'en',
+//       providerAccountId: input.providerAccountId ?? null,
 //     }).returning();
 //     return toRecord(row);
 //   },
@@ -175,7 +182,8 @@ const MIKRO_USER_ADAPTER_STARTER = `//? Custom UserAdapter starter — data laye
 //?
 //?      export interface User {
 //?        id: number; createdAt: Date; email: string; password: string | null;
-//?        provider: string; name: string | null; avatar: string;
+//?        provider: string; providerAccountId: string | null;
+//?        name: string | null; avatar: string;
 //?        avatarFallback: string; language: string; theme: string;
 //?      }
 //?      export const UserSchema = new EntitySchema<User>({
@@ -186,12 +194,14 @@ const MIKRO_USER_ADAPTER_STARTER = `//? Custom UserAdapter starter — data laye
 //?          email: { type: 'string' },
 //?          password: { type: 'string', nullable: true },
 //?          provider: { type: 'string', default: 'credentials' },
+//?          providerAccountId: { type: 'string', nullable: true },
 //?          name: { type: 'string', nullable: true },
 //?          avatar: { type: 'string', default: '' },
 //?          avatarFallback: { type: 'string', default: '' },
 //?          language: { type: 'string', default: 'en' },
 //?          theme: { type: 'string', default: 'light' },
 //?        },
+//?        indexes: [{ properties: ['provider', 'providerAccountId'] }],
 //?      });
 //?      (MongoDB: use \`_id: { type: 'ObjectId', primary: true }\` +
 //?       \`id: { type: 'string', serializedPrimaryKey: true }\` instead.)
@@ -210,6 +220,8 @@ const MIKRO_USER_ADAPTER_STARTER = `//? Custom UserAdapter starter — data laye
 //     toRecord(await (await getEm()).findOne<User>('User', { email, provider })),
 //   findByEmailAnyProvider: async ({ email }) =>
 //     toRecord(await (await getEm()).findOne<User>('User', { email }, { orderBy: { createdAt: 'asc' } })),
+//   findByProviderAccountId: async ({ provider, providerAccountId }) =>
+//     toRecord(await (await getEm()).findOne<User>('User', { provider, providerAccountId }, { orderBy: { createdAt: 'asc' } })),
 //   findById: async (id) =>
 //     toRecord(await (await getEm()).findOne<User>('User', { id: Number(id) })),
 //   create: async (input) => {
@@ -222,6 +234,7 @@ const MIKRO_USER_ADAPTER_STARTER = `//? Custom UserAdapter starter — data laye
 //       avatar: input.avatar ?? '',
 //       avatarFallback: input.avatarFallback ?? '',
 //       language: input.language ?? 'en',
+//       providerAccountId: input.providerAccountId ?? null,
 //     });
 //     await em.persistAndFlush(user);
 //     return toRecord(user) as UserRecord;
@@ -256,6 +269,7 @@ const NONE_USER_ADAPTER_STARTER = `//? Custom UserAdapter starter — data layer
 // const adapter: UserAdapter = {
 //   findByEmail: async ({ email, provider }) => { /* TODO */ return null; },
 //   findByEmailAnyProvider: async ({ email }) => { /* TODO */ return null; },
+//   findByProviderAccountId: async ({ provider, providerAccountId }) => { /* TODO */ return null; },
 //   findById: async (id) => { /* TODO */ return null; },
 //   create: async (input) => { /* TODO */ throw new Error('UserAdapter.create not implemented'); },
 //   update: async (id, patch) => { /* TODO */ throw new Error('UserAdapter.update not implemented'); },

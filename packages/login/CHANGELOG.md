@@ -5,6 +5,25 @@ All notable changes to `@luckystack/login` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-10-20
+
+### Added
+
+- **`FullOAuthProvider.accountIdKey`** names the userinfo field that holds the provider's stable user id. Every built-in sets it: Google `sub`, GitHub `id`, Discord `id`, Facebook `id`, Microsoft `id` (the Entra object id). A custom provider opts in by setting it (ADR 0086).
+- **Optional `UserAdapter.findByProviderAccountId({ provider, providerAccountId })`**, plus `providerAccountId` on `UserRecord` and `UserAdapterCreateInput`. The default Prisma adapter implements it.
+
+### Changed
+
+- **Breaking:** OAuth accounts are bound to the provider's user id (ADR 0086). A sign-in first looks up the account by provider and id; an account found that way signs in even when the email changed at the provider, and its stored email is kept. Only when no account has the id does the email decide: an account of the same provider bound to a different id is refused, even with a verified email; an unbound account signs in, and is bound, only when the provider verified the email. A new account stores the id. Upgrade: add a nullable `providerAccountId` with an index on `(provider, providerAccountId)` to the user schema and run `prisma db push` or a migration; with the default adapter, OAuth logins fail until the column exists (credentials logins keep working). Existing Google, GitHub, Discord and Facebook users bind on their next login.
+- **Breaking:** a userinfo response without the provider's declared id is refused instead of matched by email. Upgrade: if you override a built-in's `userInfoURL` (for example Facebook `fields`), keep the id field in the response.
+- **Breaking:** (custom adapters) a `UserAdapter` without `findByProviderAccountId` keeps email matching and logs a warning once, but an unverified provider email can no longer sign in to an existing unbound account. Upgrade: implement `findByProviderAccountId` and persist `providerAccountId` from `create` and `update`.
+- Under `providerAccountStrategy: 'unified'` an account stores only the id of the provider it was created with. Another provider still links to it by verified email and is not bound.
+
+### Security
+
+- **An admin of another Entra tenant can no longer sign in as an existing Microsoft user** by setting Graph `mail` to that user's address on a multi-tenant app (`tenant` `common`, `organizations` or `consumers`). This closes the residual risk ADR 0083 recorded. On such an app an existing Microsoft account signs in only once it is bound to its Microsoft id, and an unverified `mail` can never bind one, so in practice only a single-tenant app supports Microsoft sign-in.
+- **The `microsoftProvider` boot warning for multi-tenant `tenant` values now explains** that new Microsoft users are refused and unbound accounts cannot sign in, instead of warning about the takeover.
+
 ## [0.15.0] - 2026-10-19
 
 ### Added

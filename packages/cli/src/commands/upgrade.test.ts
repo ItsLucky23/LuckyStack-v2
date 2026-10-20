@@ -41,20 +41,33 @@ describe('buildUpgradePlan', () => {
     }
   });
 
+  const cliDir = path.resolve(import.meta.dirname, '../..');
+  const scaffoldChangelog = path.resolve(cliDir, '../create-luckystack-app/CHANGELOG.md');
+  //? First numbered step under `heading` inside the `version` section, so a newer
+  //? release's upgrade list never shadows the one being checked.
+  const firstStep = (file: string, version: string, heading: string): string => {
+    const changelog = fs.readFileSync(file, 'utf8');
+    const versionStart = changelog.indexOf(version);
+    expect(versionStart).toBeGreaterThan(-1);
+    const start = changelog.indexOf(heading, versionStart);
+    expect(start).toBeGreaterThan(-1);
+    return changelog.slice(start).split('\n').find((line) => line.startsWith('1. ')) ?? '';
+  };
+
   it('carries the 0.15 router step, binding new services in deploy.config.ts, in both changelogs', () => {
     //? Declaring `settings` / `reset-password` in services.config.ts is not enough:
     //? without a deploy.config.ts binding the router answers serviceNotAssigned.
-    const cliDir = path.resolve(import.meta.dirname, '../..');
-    const firstStep = (file: string, heading: string): string => {
-      const changelog = fs.readFileSync(file, 'utf8');
-      const start = changelog.indexOf(heading);
-      expect(start).toBeGreaterThan(-1);
-      return changelog.slice(start).split('\n').find((line) => line.startsWith('1. ')) ?? '';
-    };
-    const cliStep = firstStep(path.join(cliDir, 'CHANGELOG.md'), '### Upgrading a project scaffolded before 0.15');
-    const scaffoldStep = firstStep(path.resolve(cliDir, '../create-luckystack-app/CHANGELOG.md'), '### Upgrading an existing project');
+    const cliStep = firstStep(path.join(cliDir, 'CHANGELOG.md'), '## [0.15.0]', '### Upgrading a project scaffolded before 0.15');
+    const scaffoldStep = firstStep(scaffoldChangelog, '## [0.15.0]', '### Upgrading an existing project');
     expect(cliStep).toContain('deploy.config.ts');
     expect(cliStep).toContain('serviceNotAssigned');
+    expect(cliStep).toBe(scaffoldStep);
+  });
+
+  it('carries the 0.16 provider-id schema step in both changelogs', () => {
+    const cliStep = firstStep(path.join(cliDir, 'CHANGELOG.md'), '## [0.16.0]', '### Upgrading a project scaffolded before 0.16');
+    const scaffoldStep = firstStep(scaffoldChangelog, '## [0.16.0]', '### Upgrading an existing project');
+    expect(cliStep).toContain('@@index([provider, providerAccountId])');
     expect(cliStep).toBe(scaffoldStep);
   });
 

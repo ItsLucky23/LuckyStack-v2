@@ -133,4 +133,25 @@ describe("defaultPrismaUserAdapter delegation", () => {
       data: { email: "new@b.test" },
     });
   });
+
+  //? ADR 0086: the provider id binding.
+  it("create stores providerAccountId for an OAuth sign-up", async () => {
+    prismaUser.create.mockResolvedValue(sampleRecord);
+    const adapter = defaultPrismaUserAdapter();
+    await adapter.create({ email: "a@b.test", provider: "google", providerAccountId: "sub-1" });
+    expect(prismaUser.create.mock.calls[0]?.[0]).toMatchObject({
+      data: { provider: "google", providerAccountId: "sub-1" },
+    });
+  });
+
+  it("findByProviderAccountId resolves the oldest row bound to (provider, id)", async () => {
+    prismaUser.findFirst.mockResolvedValue(sampleRecord);
+    const adapter = defaultPrismaUserAdapter();
+    const found = await adapter.findByProviderAccountId?.({ provider: "github", providerAccountId: "42" });
+    expect(found).toEqual(sampleRecord);
+    expect(prismaUser.findFirst).toHaveBeenCalledWith({
+      where: { provider: "github", providerAccountId: "42" },
+      orderBy: { createdAt: "asc" },
+    });
+  });
 });

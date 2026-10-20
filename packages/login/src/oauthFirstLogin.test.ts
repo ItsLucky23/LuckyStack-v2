@@ -137,7 +137,7 @@ describe('OAuth first-login account creation per built-in provider (007)', () =>
     const provider = googleProvider(helperInput('google'));
     stubFetch({
       [provider.tokenExchangeURL]: { access_token: 'at' },
-      [provider.userInfoURL]: { name: 'Ada', email: 'Ada@Example.com', email_verified: true },
+      [provider.userInfoURL]: { sub: 'g-1', name: 'Ada', email: 'Ada@Example.com', email_verified: true },
     });
     const result = await runCallback(provider);
     expect(result && result.isNewUser).toBe(true);
@@ -148,7 +148,7 @@ describe('OAuth first-login account creation per built-in provider (007)', () =>
     const provider = githubProvider(helperInput('github'));
     stubFetch({
       [provider.tokenExchangeURL]: { access_token: 'at' },
-      [provider.userInfoURL]: { login: 'octo', email: 'public@octo.dev' },
+      [provider.userInfoURL]: { id: 1, login: 'octo', email: 'public@octo.dev' },
       'https://api.github.com/user/emails': [
         { email: 'primary@octo.dev', primary: true, verified: true },
         { email: 'public@octo.dev', primary: false, verified: true },
@@ -164,7 +164,7 @@ describe('OAuth first-login account creation per built-in provider (007)', () =>
     const provider = githubProvider(helperInput('github'));
     stubFetch({
       [provider.tokenExchangeURL]: { access_token: 'at' },
-      [provider.userInfoURL]: { login: 'octo', email: 'victim@corp.test' },
+      [provider.userInfoURL]: { id: 1, login: 'octo', email: 'victim@corp.test' },
       'https://api.github.com/user/emails': [
         { email: 'victim@corp.test', primary: false, verified: false },
         { email: 'primary@octo.dev', primary: true, verified: true },
@@ -179,7 +179,7 @@ describe('OAuth first-login account creation per built-in provider (007)', () =>
     const provider = githubProvider(helperInput('github'));
     stubFetch({
       [provider.tokenExchangeURL]: { access_token: 'at' },
-      [provider.userInfoURL]: { login: 'octo', email: null },
+      [provider.userInfoURL]: { id: 1, login: 'octo', email: null },
       'https://api.github.com/user/emails': [{ email: 'primary@octo.dev', primary: true, verified: true }],
     });
     const result = await runCallback(provider);
@@ -230,9 +230,13 @@ describe('OAuth first-login account creation per built-in provider (007)', () =>
     expect(adapterMock.create).not.toHaveBeenCalled();
   });
 
-  it('microsoft (common tenant): an EXISTING Microsoft account still signs in', async () => {
+  //? ADR 0086: only an account already bound to this object id; an unbound one
+  //? is refused (see oauthAccountBinding.test.ts).
+  it('microsoft (common tenant): an existing account bound to the same Microsoft id still signs in', async () => {
     const provider = microsoftProvider(helperInput('microsoft'));
-    adapterMock.findByEmail.mockResolvedValue({ id: 'existing', email: 'alice@contoso.com', provider: 'microsoft', name: 'Alice' });
+    adapterMock.findByEmail.mockResolvedValue({
+      id: 'existing', email: 'alice@contoso.com', provider: 'microsoft', name: 'Alice', providerAccountId: 'ms-1',
+    });
     stubFetch({
       [provider.tokenExchangeURL]: { access_token: 'at' },
       [provider.userInfoURL]: { id: 'ms-1', displayName: 'Ms', mail: 'alice@contoso.com' },
