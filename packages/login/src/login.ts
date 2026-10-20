@@ -1109,6 +1109,8 @@ const signInExistingOAuthUser = async (
 //? the email the provider reports today (ADR 0086): a bound account still signs
 //? in after an email change at the provider, so a block on the stored email or
 //? the id must still catch it. A new account has only the provider's email.
+//? `providerEmail` always carries today's address, so a policy on the current
+//? email (an allowed domain) can still check it.
 const passesOAuthPreLogin = async (
   provider: FullOAuthProvider,
   providerEmail: string,
@@ -1119,6 +1121,7 @@ const passesOAuthPreLogin = async (
     email: storedEmail ?? providerEmail,
     provider: provider.name,
     ...(existing ? { userId: existing.id } : {}),
+    providerEmail,
   });
   if (preLoginResult.stopped) {
     getLogger().warn(`oauth login aborted by preLogin hook`, { errorCode: preLoginResult.signal.errorCode });

@@ -22,6 +22,8 @@ export interface PreLoginPayload {
   provider: string;
   /** The existing account an OAuth login resolved to; absent for credentials and for a new account. */
   userId?: string;
+  /** The email the OAuth provider reports on this login, which can differ from `email` for an existing account; absent for credentials. */
+  providerEmail?: string;
 }
 
 export interface PostLoginPayload {

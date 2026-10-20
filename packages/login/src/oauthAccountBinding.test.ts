@@ -514,12 +514,31 @@ describe('OAuth account binding: preLogin sees the account, not the provider ema
     [provider.userInfoURL]: { sub: 'sub-ada', name: 'Ada', email: 'ada@new.example', email_verified: true },
   });
 
-  it('a bound login passes the stored email and the user id to preLogin', async () => {
+  it('a bound login passes the stored email, the user id and the provider email to preLogin', async () => {
     const provider = googleProvider(helperInput('google'));
     adapterMock.findByProviderAccountId = vi.fn(async () => boundAda());
     stubFetch(changedEmailRoutes(provider));
     await runCallback(provider);
-    expect(hookPayloads('preLogin')).toEqual([{ email: 'ada@old.example', provider: 'google', userId: 'ada' }]);
+    expect(hookPayloads('preLogin')).toEqual([
+      { email: 'ada@old.example', provider: 'google', userId: 'ada', providerEmail: 'ada@new.example' },
+    ]);
+  });
+
+  it('a domain policy on providerEmail refuses a bound account whose provider email left the domain', async () => {
+    const provider = googleProvider(helperInput('google'));
+    adapterMock.findByProviderAccountId = vi.fn(async () => ({ ...boundAda(), email: 'ada@corp.example' }));
+    vi.mocked(dispatchHook).mockImplementationOnce(async (_name, payload) => {
+      const current = (payload as { providerEmail?: string }).providerEmail ?? '';
+      return current.endsWith('@corp.example')
+        ? { stopped: false }
+        : { stopped: true, signal: { stop: true, errorCode: 'auth.domainNotAllowed' } };
+    });
+    stubFetch(changedEmailRoutes(provider));
+    expect(await runCallback(provider)).toBe(false);
+    expect(saveSessionMock).not.toHaveBeenCalled();
+    expect(hookPayloads('preLogin')).toEqual([
+      expect.objectContaining({ email: 'ada@corp.example', providerEmail: 'ada@new.example' }),
+    ]);
   });
 
   it('a preLogin veto on a bound account refuses the login and reports the account', async () => {
@@ -541,7 +560,7 @@ describe('OAuth account binding: preLogin sees the account, not the provider ema
       [provider.userInfoURL]: { sub: 'sub-new', name: 'N', email: 'n@example.com', email_verified: true },
     });
     await runCallback(provider);
-    expect(hookPayloads('preLogin')).toEqual([{ email: 'n@example.com', provider: 'google' }]);
+    expect(hookPayloads('preLogin')).toEqual([{ email: 'n@example.com', provider: 'google', providerEmail: 'n@example.com' }]);
   });
 });
 

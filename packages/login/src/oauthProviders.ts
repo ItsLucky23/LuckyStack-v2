@@ -354,6 +354,8 @@ export const facebookProvider = (input: FacebookProviderInput): FullOAuthProvide
   nameKey: 'name',
   emailKey: 'email',
   //? App-scoped user id. A custom `userInfoURL` must keep `id` in `fields`.
+  //? A new Facebook App ID gives every user a new id, so bound accounts are
+  //? refused until their `providerAccountId` is set to null (ADR 0086).
   accountIdKey: 'id',
   //? Facebook's Graph `/me` only returns `email` for an address the user has
   //? CONFIRMED with Facebook (unconfirmed emails are omitted), so there is no

@@ -59,7 +59,10 @@ creation guards (verified email, `allowRegistration`, `preRegister`).
   token, which the code does not keep.
 - **Hooks and session:** `preLogin` for an existing account receives the
   stored email and the `userId`, so a block on the account still holds after
-  an email change at the provider. A refusal reports its own `loginFailed`
+  an email change at the provider. Every OAuth `preLogin` also receives
+  `providerEmail`, the address the provider reports on this login, so a
+  policy on the current email (for example an allowed domain) still sees a
+  user who moved their provider email elsewhere. A refusal reports its own `loginFailed`
   reason (`oauth.accountIdMissing`, `oauth.accountBoundElsewhere`,
   `oauth.emailUnverified`) and the `userId` when it concerns an account. The id
   never reaches the session; only the server-side lookup needs it.
@@ -109,6 +112,10 @@ creation guards (verified email, `allowRegistration`, `preRegister`).
   cannot sign in to the bound account until it returns one again.
 - Under `'unified'`, a secondary provider's sign-in still depends on a verified
   email and does not follow an email change at that provider.
+- Facebook ids are app-scoped: the same person gets a different id under
+  another Facebook App ID. Moving to a new app refuses every bound Facebook
+  account (`oauth.accountBoundElsewhere`) until its `providerAccountId` is set
+  to null; such rows rebind on their next verified login.
 - Two concurrent first logins can still create two rows bound to the same id
   (the index is not unique). Both belong to the same provider identity; the
   oldest is used afterwards. This is not a takeover.
