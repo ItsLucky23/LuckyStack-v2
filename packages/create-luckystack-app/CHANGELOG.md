@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Breaking:** the Prisma `User` model gains a nullable `providerAccountId` and `@@index([provider, providerAccountId])`, which `@luckystack/login` 0.16 uses to bind OAuth accounts to the provider's user id (ADR 0086). The index is not unique on purpose: on MongoDB a unique index rejects the second account without an id. Upgrade: see step 1 below.
 - **Breaking:** the drizzle and mikro-orm starter `luckystack/login/userAdapter.ts` adds the `providerAccountId` column (drizzle: a unique index, mikro-orm: an index on `provider` + `providerAccountId`), stores it on `create` and implements `findByProviderAccountId`. Upgrade: see step 2 below.
 
+### Removed
+
+- **`.luckystack/templates/sync_client.template.ts` is no longer scaffolded.** No selection rule ever chose it. In existing projects `npx luckystack update` puts a `.removed` notice next to it; delete both once nothing references the file.
+
 ### Upgrading an existing project
 
 1. **Prisma:** add `providerAccountId String?` and `@@index([provider, providerAccountId])` to `model User` in `prisma/schema.prisma`, then run `npm run prisma:db:push` (or `npm run prisma:migrate:dev`) and `npm run prisma:generate`. `update` never overwrites an edited schema, so do this by hand. Until the column exists, OAuth logins fail; credentials logins keep working. Existing Google, GitHub, Discord and Facebook users bind on their next login.

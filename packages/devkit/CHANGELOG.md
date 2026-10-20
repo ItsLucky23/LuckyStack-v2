@@ -5,6 +5,12 @@ All notable changes to `@luckystack/devkit` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.16.0] - 2026-10-20
+
+### Removed
+
+- **The bundled `sync_client.template.ts`.** No selection rule ever chose it; new sync client files get `sync_client_paired` or `sync_client_standalone`. Only a custom rule that registers the kind `sync_client` without its own `.luckystack/templates/sync_client.template.ts` now gets the "No content for custom template kind" warning.
+
 ## [0.15.0] - 2026-10-19
 
 ### Changed
