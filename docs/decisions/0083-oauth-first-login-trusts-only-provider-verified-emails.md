@@ -6,7 +6,7 @@ date: 2026-10-19
 deciders: [ItsLucky23]
 tags: [auth, oauth, security, login]
 supersedes: []
-relates: [0019]
+relates: [0019, 0086]
 ---
 
 ## Context
@@ -60,3 +60,8 @@ provider.
   default scope grants.
 - This record does not number the M2 creation guard or the SEC-21 link guard;
   no ADR records them, and none is invented here.
+- Amended 2026-10-20: ADR 0086 binds OAuth accounts to the provider's user id,
+  which this record rejected. That closes the residual risk above; on a
+  multi-tenant Microsoft app an existing account now signs in only once it is
+  bound, so "existing accounts still sign in" no longer holds there. The rest
+  of this decision stands.
