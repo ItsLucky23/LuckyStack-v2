@@ -149,8 +149,13 @@ const saveSession = async (
     const [sanitizeErr, sanitized] = tryCatchSync(() => applySessionSanitizer(data));
     if (sanitizeErr) {
       getLogger().error('saveSession: session sanitizer threw — falling back to password-stripped projection', sanitizeErr, { tokenPrefix: token.slice(0, 8) });
-      const { password: _password, totpSecret: _totpSecret, recoveryCodes: _recoveryCodes, ...safe } =
-        data as SessionLayout & { password?: unknown; totpSecret?: unknown; recoveryCodes?: unknown };
+      const {
+        password: _password,
+        totpSecret: _totpSecret,
+        recoveryCodes: _recoveryCodes,
+        providerAccountId: _providerAccountId,
+        ...safe
+      } = data as SessionLayout & { password?: unknown; totpSecret?: unknown; recoveryCodes?: unknown; providerAccountId?: unknown };
       persisted = safe;
     } else if (sanitized) {
       persisted = sanitized;

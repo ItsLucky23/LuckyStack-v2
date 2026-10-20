@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 //? `saveSession(..., { onlyIfExists: true })` is the write used by socket room
 //? joins / location updates after an earlier read. A logout or revoke that
@@ -34,6 +34,7 @@ vi.mock('@luckystack/core', () => ({
 
 import { saveSession } from './session';
 import { redisSessionAdapter, registerSessionAdapter, type SessionAdapter } from './sessionAdapter';
+import { registerSessionSanitizer, resetSessionSanitizerForTests } from './sessionSanitizer';
 
 const makeAdapter = (initial: Record<string, string>, withAtomic: boolean) => {
   const records = new Map(Object.entries(initial));
@@ -115,5 +116,27 @@ describe('redisSessionAdapter.setRawIfExists', () => {
     await expect(setRawIfExists('t', 'v', 60)).resolves.toBe(true);
     await expect(setRawIfExists('t', 'v', 60)).resolves.toBe(false);
     expect(redisSetMock).toHaveBeenCalledWith('p-session:t', 'v', 'EX', 60, 'XX');
+  });
+});
+
+describe('saveSession sanitizer fallback', () => {
+  afterEach(() => {
+    resetSessionSanitizerForTests();
+  });
+
+  it('a throwing sanitizer still keeps the provider id, 2FA material and password out of the session (ADR 0086)', async () => {
+    const { adapter, records } = makeAdapter({}, true);
+    registerSessionAdapter(adapter);
+    registerSessionSanitizer(() => { throw new Error('sanitizer bug'); });
+
+    const record = { id: 'u1', password: 'hash', totpSecret: 's', recoveryCodes: ['r'], providerAccountId: 'sub-1' };
+    const result = await saveSession('tok', record);
+
+    expect(result).toEqual({ ok: true });
+    const stored = JSON.parse(records.get('tok') ?? '{}') as Record<string, unknown>;
+    expect(stored.id).toBe('u1');
+    for (const key of ['password', 'totpSecret', 'recoveryCodes', 'providerAccountId']) {
+      expect(stored).not.toHaveProperty(key);
+    }
   });
 });

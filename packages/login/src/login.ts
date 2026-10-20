@@ -289,6 +289,16 @@ const readAccountId = (record: Record<string, unknown>, key: string): string | u
   return undefined;
 };
 
+//? The id a row already holds, compared with the provider's id (ADR 0086). Any
+//? value except null, undefined and '' counts as bound, because a custom adapter
+//? may return a number (a numeric GitHub id column). It matches only when its
+//? string form equals the provider's id, so an unexpected type fails closed.
+const compareStoredAccountId = (stored: unknown, accountId: string): 'unbound' | 'match' | 'mismatch' => {
+  if (stored === null || stored === undefined || stored === '') return 'unbound';
+  const comparable = typeof stored === 'string' || typeof stored === 'number' || typeof stored === 'bigint';
+  return comparable && String(stored) === accountId ? 'match' : 'mismatch';
+};
+
 //? Random 6-digit hex color used as the avatar placeholder for users without
 //? an uploaded image. Shared by the credentials-register and OAuth-create paths.
 const generateAvatarFallbackColor = (): string =>
@@ -304,12 +314,19 @@ const resolveUploadedAvatar = async (userId: string): Promise<string | null> => 
 };
 
 //? Strips every column that must never reach Redis or the client: the bcrypt
-//? hash AND the 2FA material (ADR 0024). Consumers with more sensitive columns
-//? add a `registerSessionSanitizer` on top; this is the always-on floor.
-const sanitizeUserForSession = <T extends { password?: unknown; totpSecret?: unknown; recoveryCodes?: unknown }>(
+//? hash, the 2FA material (ADR 0024) and the OAuth provider id (ADR 0086), which
+//? only the server-side account lookup needs. Consumers with more sensitive
+//? columns add a `registerSessionSanitizer` on top; this is the always-on floor.
+const sanitizeUserForSession = <T extends { password?: unknown; totpSecret?: unknown; recoveryCodes?: unknown; providerAccountId?: unknown }>(
   user: T,
-): Omit<T, 'password' | 'totpSecret' | 'recoveryCodes'> => {
-  const { password: _password, totpSecret: _totpSecret, recoveryCodes: _recoveryCodes, ...safeUser } = user;
+): Omit<T, 'password' | 'totpSecret' | 'recoveryCodes' | 'providerAccountId'> => {
+  const {
+    password: _password,
+    totpSecret: _totpSecret,
+    recoveryCodes: _recoveryCodes,
+    providerAccountId: _providerAccountId,
+    ...safeUser
+  } = user;
   return safeUser;
 };
 
@@ -899,10 +916,21 @@ interface OAuthProfile {
   rawUserData: OAuthUserData;
 }
 
+//? Why an OAuth login was refused, reported as the `loginFailed` reason. `userId`
+//? is set when the refusal concerns an existing account, so an audit hook can
+//? tell an attack on that account from a failing provider.
+interface OAuthRefusal {
+  refusal: string;
+  userId?: string;
+}
+
+const refuseOAuth = (refusal = 'oauth.userResolveFailed', userId?: string): OAuthRefusal =>
+  (userId === undefined ? { refusal } : { refusal, userId });
+
 const fetchOAuthProfile = async (
   provider: FullOAuthProvider,
   accessToken: string,
-): Promise<OAuthProfile | null> => {
+): Promise<OAuthProfile | OAuthRefusal | null> => {
   const getUserData = async (): Promise<unknown> => {
     const response = await fetch(provider.userInfoURL, {
       method: 'GET',
@@ -938,7 +966,7 @@ const fetchOAuthProfile = async (
         provider: provider.name,
         accountIdKey: provider.accountIdKey,
       });
-      return null;
+      return refuseOAuth('oauth.accountIdMissing');
     }
   }
 
@@ -1077,18 +1105,34 @@ const signInExistingOAuthUser = async (
   };
 };
 
+//? `preLogin` for an existing account gets the account's own email and id, not
+//? the email the provider reports today (ADR 0086): a bound account still signs
+//? in after an email change at the provider, so a block on the stored email or
+//? the id must still catch it. A new account has only the provider's email.
+const passesOAuthPreLogin = async (
+  provider: FullOAuthProvider,
+  providerEmail: string,
+  existing?: UserRecord,
+): Promise<boolean> => {
+  const storedEmail = typeof existing?.email === 'string' && existing.email !== '' ? existing.email : undefined;
+  const preLoginResult = await dispatchHook('preLogin', {
+    email: storedEmail ?? providerEmail,
+    provider: provider.name,
+    ...(existing ? { userId: existing.id } : {}),
+  });
+  if (preLoginResult.stopped) {
+    getLogger().warn(`oauth login aborted by preLogin hook`, { errorCode: preLoginResult.signal.errorCode });
+    return false;
+  }
+  return true;
+};
+
 const findOrCreateOAuthUser = async (
   provider: FullOAuthProvider,
   profile: OAuthProfile,
-): Promise<ResolvedOAuthUser | null> => {
+): Promise<ResolvedOAuthUser | OAuthRefusal> => {
   const { email, name, avatar, emailVerified, accountId } = profile;
-  if (!email) return null;
-
-  const preLoginResult = await dispatchHook('preLogin', { email, provider: provider.name });
-  if (preLoginResult.stopped) {
-    getLogger().warn(`oauth login aborted by preLogin hook`, { errorCode: preLoginResult.signal.errorCode });
-    return null;
-  }
+  if (!email) return refuseOAuth();
 
   const userAdapter = getUserAdapter();
   //? @adr 0086 — the id this login reads and writes; `undefined` when the
@@ -1105,9 +1149,12 @@ const findOrCreateOAuthUser = async (
     );
     if (boundError) {
       getLogger().error('oauth: findByProviderAccountId failed', boundError);
-      return null;
+      return refuseOAuth();
     }
-    if (boundUser?.id) return signInExistingOAuthUser(userAdapter, boundUser);
+    if (boundUser?.id) {
+      if (!(await passesOAuthPreLogin(provider, email, boundUser))) return refuseOAuth(undefined, boundUser.id);
+      return signInExistingOAuthUser(userAdapter, boundUser);
+    }
   }
 
   //? Step 2: the email. Under `'unified'` this links to an existing account with
@@ -1118,7 +1165,7 @@ const findOrCreateOAuthUser = async (
   );
   if (findError) {
     getLogger().error('oauth: findByEmail failed', findError);
-    return null;
+    return refuseOAuth();
   }
 
   if (findResponse?.id) {
@@ -1146,26 +1193,28 @@ const findOrCreateOAuthUser = async (
         'oauth: refusing to link an unverified provider email to an existing account created by a different provider (account-takeover guard)',
         { provider: provider.name, existingProvider },
       );
-      return null;
+      return refuseOAuth('oauth.emailUnverified', findResponse.id);
     }
 
-    //? Same-provider email match for a provider with a stable id (ADR 0086).
-    //? The id column belongs to the row's own provider, so a cross-provider
-    //? link above is never bound and keeps relying on the verified email.
-    if (!isCrossProviderLink && accountId !== undefined) {
-      const storedId = typeof findResponse.providerAccountId === 'string' && findResponse.providerAccountId !== ''
-        ? findResponse.providerAccountId
-        : null;
+    //? Email match for a provider with a stable id (ADR 0086). The id column
+    //? belongs to the row's own provider. It is compared on a row of this
+    //? provider and, failing closed, on a row whose provider is unknown (a
+    //? custom adapter that leaves `provider` out). A row of another provider (a
+    //? `'unified'` link) holds that provider's id, so it is neither compared nor
+    //? bound and the link keeps relying on the verified email.
+    let bindTo: string | undefined;
+    if (accountId !== undefined && (!isCrossProviderLink || existingProvider === null)) {
+      const stored = compareStoredAccountId(findResponse.providerAccountId, accountId);
       //? Bound to another person at this provider who now reports the same
       //? email: the nOAuth takeover. Never sign in.
-      if (storedId !== null && storedId !== accountId) {
+      if (stored === 'mismatch') {
         getLogger().warn(
           'oauth: refusing login — the account with this email is bound to a different provider account (account-takeover guard)',
           { provider: provider.name, userId: findResponse.id },
         );
-        return null;
+        return refuseOAuth('oauth.accountBoundElsewhere', findResponse.id);
       }
-      if (storedId === null) {
+      if (stored === 'unbound' && !isCrossProviderLink) {
         //? Unbound (created before 0.16, or by an adapter without binding): only
         //? an email the provider verified may claim it.
         if (!emailVerified) {
@@ -1173,21 +1222,27 @@ const findOrCreateOAuthUser = async (
             'oauth: refusing login — the account with this email is not bound to a provider id yet and the provider did not verify the email (account-takeover guard)',
             { provider: provider.name, userId: findResponse.id },
           );
-          return null;
+          return refuseOAuth('oauth.emailUnverified', findResponse.id);
         }
-        if (bindingId !== undefined) {
-          const [bindError] = await tryCatch(() => userAdapter.update(findResponse.id, { providerAccountId: bindingId }));
-          if (bindError) {
-            getLogger().error('oauth: binding the account to the provider id failed', bindError);
-            return null;
-          }
-          findResponse.providerAccountId = bindingId;
-        }
+        bindTo = bindingId;
+      }
+    }
+
+    if (!(await passesOAuthPreLogin(provider, email, findResponse))) return refuseOAuth(undefined, findResponse.id);
+
+    if (bindTo !== undefined) {
+      const providerAccountId = bindTo;
+      const [bindError] = await tryCatch(() => userAdapter.update(findResponse.id, { providerAccountId }));
+      if (bindError) {
+        getLogger().error('oauth: binding the account to the provider id failed', bindError);
+        return refuseOAuth(undefined, findResponse.id);
       }
     }
 
     return signInExistingOAuthUser(userAdapter, findResponse);
   }
+
+  if (!(await passesOAuthPreLogin(provider, email))) return refuseOAuth();
 
   //? Fail-closed account-CREATION guard (M2), symmetric with the cross-provider
   //? LINK guard above. When NO account exists, a provider that did not positively
@@ -1208,7 +1263,7 @@ const findOrCreateOAuthUser = async (
       'oauth: refusing first-login account creation for an unverified provider email (account-squatting guard)',
       { provider: provider.name },
     );
-    return null;
+    return refuseOAuth();
   }
 
   //? Gate OAuth first-login account CREATION on the same `auth.allowRegistration`
@@ -1220,13 +1275,13 @@ const findOrCreateOAuthUser = async (
   //? hook can still veto, but the documented gate must hold by construction.
   if (!getProjectConfig().auth.allowRegistration) {
     getLogger().warn('oauth: registration disabled — refusing first-login account creation');
-    return null;
+    return refuseOAuth();
   }
 
   const preRegisterResult = await dispatchHook('preRegister', { email, provider: provider.name, name });
   if (preRegisterResult.stopped) {
     getLogger().warn(`oauth register aborted by preRegister hook`, { errorCode: preRegisterResult.signal.errorCode });
-    return null;
+    return refuseOAuth();
   }
 
   const createNewUser = async () => userAdapter.create({
@@ -1241,9 +1296,9 @@ const findOrCreateOAuthUser = async (
   const [createError, createResponse] = await tryCatch(createNewUser);
   if (createError) {
     getLogger().error('oauth: user create failed', createError);
-    return null;
+    return refuseOAuth();
   }
-  if (!createResponse) return null;
+  if (!createResponse) return refuseOAuth();
 
   return {
     user: { ...sanitizeUserForSession(createResponse), token: '' },
@@ -1415,10 +1470,20 @@ const loginCallback = async (
     emitLoginFailed({ provider: providerName, reason: 'oauth.profileFetchFailed', stage: 'oauth' });
     return false;
   }
+  if ('refusal' in profile) {
+    emitLoginFailed({ provider: providerName, reason: profile.refusal, stage: 'oauth' });
+    return false;
+  }
 
   const resolved = await findOrCreateOAuthUser(provider, profile);
-  if (!resolved) {
-    emitLoginFailed({ provider: providerName, email: profile.email, reason: 'oauth.userResolveFailed', stage: 'oauth' });
+  if ('refusal' in resolved) {
+    emitLoginFailed({
+      provider: providerName,
+      email: profile.email,
+      ...(resolved.userId === undefined ? {} : { userId: resolved.userId }),
+      reason: resolved.refusal,
+      stage: 'oauth',
+    });
     return false;
   }
 

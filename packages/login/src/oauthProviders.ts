@@ -222,7 +222,7 @@ export const googleProvider = (input: OAuthHelperInput): FullOAuthProvider => ({
   ], input.extraScopes),
   nameKey: 'name',
   emailKey: 'email',
-  //? OIDC subject: stable per Google account (and per client), unlike the email.
+  //? OIDC subject: stable per Google account, unlike the email.
   accountIdKey: 'sub',
   //? Google's OIDC userinfo returns `email_verified`; reject an unverified
   //? address so a Google account with an unverified email can't link to a

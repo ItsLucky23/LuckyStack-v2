@@ -24,14 +24,18 @@ multi-tenant users need to keep working.
 
 OAuth accounts are bound to the provider's stable user id. A sign-in first
 looks up (provider, provider id) and signs in that account, whatever email the
-provider reports now; the stored email is not overwritten, because the new
-value may be unverified (multi-tenant Microsoft) and the app owns the email
-once the account exists. Only when no account carries the id does the email
-decide. A same-provider email match whose stored id differs is always refused,
-even with a verified email. An email match with no stored id signs in only when
-the provider verified the email, and is bound on that login. Otherwise a new
-account is created with the id, behind the existing creation guards (verified
-email, `allowRegistration`, `preRegister`).
+provider reports now, as long as it still reports a usable email (a login
+without one is refused before the lookup); the stored email is not overwritten,
+because the new value may be unverified (multi-tenant Microsoft) and the app
+owns the email once the account exists. Only when no account carries the id
+does the email decide. An email match whose stored id differs is always
+refused, even with a verified email, on a row of this provider and on a row
+whose provider is unknown (a custom adapter that leaves `provider` out). Any
+stored value counts as an id, and it matches only when its string form equals
+the provider's id. An email match on this provider's row with no stored id
+signs in only when the provider verified the email, and is bound on that
+login. Otherwise a new account is created with the id, behind the existing
+creation guards (verified email, `allowRegistration`, `preRegister`).
 
 - **Storage:** one nullable `providerAccountId` column on the user row, owned by
   the row's own `provider`. Under `'unified'` a row is bound only for its own
@@ -49,9 +53,16 @@ email, `allowRegistration`, `preRegister`).
   Graph `id` (the Entra object id). A custom provider opts in. A response
   without the declared id is refused, never matched by email.
 - **Microsoft tenant id:** Graph `/me` carries no tenant id, so the object id is
-  used alone. It is assigned by Entra, cannot be set by a tenant admin and is a
-  GUID no other tenant reproduces. Reading `tid` would need the id token, which
-  the code does not keep.
+  used alone. It is assigned by Microsoft and cannot be set by a tenant admin:
+  a GUID for work and school accounts, a 16-hex-digit id for personal
+  accounts, unique to that user either way. Reading `tid` would need the id
+  token, which the code does not keep.
+- **Hooks and session:** `preLogin` for an existing account receives the
+  stored email and the `userId`, so a block on the account still holds after
+  an email change at the provider. A refusal reports its own `loginFailed`
+  reason (`oauth.accountIdMissing`, `oauth.accountBoundElsewhere`,
+  `oauth.emailUnverified`) and the `userId` when it concerns an account. The id
+  never reaches the session; only the server-side lookup needs it.
 - **Adapter fallback:** `findByProviderAccountId` is optional. Without it the
   framework warns once and neither reads nor writes the binding: verified
   emails sign in as before, an unverified email on an existing account is
@@ -93,6 +104,9 @@ email, `allowRegistration`, `preRegister`).
 - A bound account keeps the email it was created with; the user changes it at
   the provider, but the app's copy does not follow. A different person who
   later holds that address at the same provider is refused, not merged.
+- A bound login still needs a usable email from the provider. A provider that
+  stops returning one (for example a GitHub account without a verified email)
+  cannot sign in to the bound account until it returns one again.
 - Under `'unified'`, a secondary provider's sign-in still depends on a verified
   email and does not follow an email change at that provider.
 - Two concurrent first logins can still create two rows bound to the same id

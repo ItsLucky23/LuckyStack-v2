@@ -360,7 +360,8 @@ const config = createConfig(resolvedEnvironment);
 export type { SessionLocation, AuthProps } from '@luckystack/core';
 
 // Project-specific session shape — extends the Prisma User model and satisfies BaseSessionLayout.
-interface SessionLayoutBase extends Omit<User, 'password'> {
+// `providerAccountId` is stripped by @luckystack/login before a session is saved (ADR 0086).
+interface SessionLayoutBase extends Omit<User, 'password' | 'providerAccountId'> {
   avatarFallback: string;
   token: string;
   roomCodes?: string[];

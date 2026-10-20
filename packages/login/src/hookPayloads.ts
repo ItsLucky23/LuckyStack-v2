@@ -17,8 +17,11 @@ import type { BaseSessionLayout } from './sessionLayout';
 //? key space using ids from the payload.
 
 export interface PreLoginPayload {
+  /** For an existing OAuth account its stored email, not the one the provider reports now. */
   email: string;
   provider: string;
+  /** The existing account an OAuth login resolved to; absent for credentials and for a new account. */
+  userId?: string;
 }
 
 export interface PostLoginPayload {

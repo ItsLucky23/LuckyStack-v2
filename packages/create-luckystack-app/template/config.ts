@@ -244,9 +244,10 @@ export type { AuthProps } from '@luckystack/core';
  * `user.createdAt.getTime()` would compile inside an API handler and then throw.
  *
  * The write side is unaffected: login builds the session from a live Prisma user
- * and the serializer converts on the way in.
+ * and the serializer converts on the way in. `providerAccountId` is left out
+ * because `@luckystack/login` strips it before a session is saved (ADR 0086).
  */
-export interface SessionLayout extends Jsonify<Omit<User, 'password'>> {
+export interface SessionLayout extends Jsonify<Omit<User, 'password' | 'providerAccountId'>> {
   avatarFallback: string;
   token: string;
   roomCodes?: string[];

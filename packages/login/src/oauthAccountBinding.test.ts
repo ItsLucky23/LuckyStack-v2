@@ -69,6 +69,7 @@ vi.mock('@luckystack/core', () => {
 vi.mock('./session', () => ({ saveSession: saveSessionMock }));
 vi.mock('./userAdapter', () => ({ getUserAdapter: () => adapterMock }));
 
+import { dispatchHook } from '@luckystack/core';
 import { createOAuthState, loginCallback } from './login';
 import {
   discordProvider,
@@ -118,6 +119,14 @@ const setStrategy = (providerAccountStrategy: 'per-provider' | 'unified'): void 
 
 const warned = (fragment: string): boolean =>
   logger.warn.mock.calls.some((call: unknown[]) => typeof call[0] === 'string' && call[0].includes(fragment));
+
+const hookPayloads = (name: string): unknown[] =>
+  (vi.mocked(dispatchHook).mock.calls as unknown[][])
+    .filter((call) => call[0] === name)
+    .map((call) => call[1]);
+
+const savedSession = (): Record<string, unknown> =>
+  ((saveSessionMock.mock.calls as unknown[][])[0]?.[1] ?? {}) as Record<string, unknown>;
 
 const bindCalls = (): unknown[] =>
   adapterMock.update.mock.calls.filter((call: unknown[]) => {
@@ -436,5 +445,176 @@ describe("OAuth account binding under the 'unified' strategy (ADR 0086)", () => 
     const result = await runCallback(provider);
     expect(result && result.userId).toBe('ada');
     expect(adapterMock.update).toHaveBeenCalledWith('ada', { providerAccountId: 'sub-ada' });
+  });
+});
+
+describe('OAuth account binding: stored ids a custom adapter returns (ADR 0086)', () => {
+  //? Single-tenant Microsoft trusts Graph `mail`, so a second person in the
+  //? tenant can report the same verified email with a different object id.
+  const microsoftSingleTenant = () => microsoftProvider({ ...helperInput('microsoft'), tenant: 'contoso.onmicrosoft.com' });
+
+  it('a row without `provider` that holds a different id is refused, even with a verified email', async () => {
+    const provider = microsoftSingleTenant();
+    adapterMock.findByEmail.mockResolvedValue({ id: 'victim', email: 'victim@contoso.com', name: 'Victim', providerAccountId: 'victim-oid' });
+    stubFetch({
+      [provider.tokenExchangeURL]: { access_token: 'at' },
+      [provider.userInfoURL]: msUserInfo('other-oid', 'victim@contoso.com'),
+    });
+    expect(await runCallback(provider)).toBe(false);
+    expect(warned('bound to a different provider account')).toBe(true);
+    expect(saveSessionMock).not.toHaveBeenCalled();
+  });
+
+  it('a row without `provider` that holds the same id signs in, and an unbound one is not bound', async () => {
+    const provider = microsoftSingleTenant();
+    adapterMock.findByEmail.mockResolvedValueOnce({ id: 'alice', email: 'alice@contoso.com', name: 'A', providerAccountId: 'alice-oid' });
+    stubFetch({
+      [provider.tokenExchangeURL]: { access_token: 'at' },
+      [provider.userInfoURL]: msUserInfo('alice-oid', 'alice@contoso.com'),
+    });
+    const bound = await runCallback(provider);
+    expect(bound && bound.userId).toBe('alice');
+
+    adapterMock.findByEmail.mockResolvedValueOnce({ id: 'alice', email: 'alice@contoso.com', name: 'A' });
+    const unbound = await runCallback(provider);
+    expect(unbound && unbound.userId).toBe('alice');
+    expect(bindCalls()).toHaveLength(0);
+  });
+
+  it('a numeric stored id counts as bound: the same number signs in without rebinding', async () => {
+    const provider = githubProvider(helperInput('github'));
+    adapterMock.findByEmail.mockResolvedValue({ id: 'octo', email: 'octo@example.com', provider: 'github', name: 'Octo', providerAccountId: 583231 });
+    stubFetch({
+      [provider.tokenExchangeURL]: { access_token: 'at' },
+      [provider.userInfoURL]: { id: 583231, login: 'octo' },
+      'https://api.github.com/user/emails': [{ email: 'octo@example.com', primary: true, verified: true }],
+    });
+    const result = await runCallback(provider);
+    expect(result && result.userId).toBe('octo');
+    expect(bindCalls()).toHaveLength(0);
+  });
+
+  it('a numeric stored id that differs is refused instead of overwritten', async () => {
+    const provider = githubProvider(helperInput('github'));
+    adapterMock.findByEmail.mockResolvedValue({ id: 'octo', email: 'octo@example.com', provider: 'github', name: 'Octo', providerAccountId: 1 });
+    stubFetch({
+      [provider.tokenExchangeURL]: { access_token: 'at' },
+      [provider.userInfoURL]: { id: 583231, login: 'octo' },
+      'https://api.github.com/user/emails': [{ email: 'octo@example.com', primary: true, verified: true }],
+    });
+    expect(await runCallback(provider)).toBe(false);
+    expect(bindCalls()).toHaveLength(0);
+  });
+});
+
+describe('OAuth account binding: preLogin sees the account, not the provider email (ADR 0086)', () => {
+  const boundAda = () => ({ id: 'ada', email: 'ada@old.example', provider: 'google', name: 'Ada', providerAccountId: 'sub-ada' });
+  const changedEmailRoutes = (provider: FullOAuthProvider) => ({
+    [provider.tokenExchangeURL]: { access_token: 'at' },
+    [provider.userInfoURL]: { sub: 'sub-ada', name: 'Ada', email: 'ada@new.example', email_verified: true },
+  });
+
+  it('a bound login passes the stored email and the user id to preLogin', async () => {
+    const provider = googleProvider(helperInput('google'));
+    adapterMock.findByProviderAccountId = vi.fn(async () => boundAda());
+    stubFetch(changedEmailRoutes(provider));
+    await runCallback(provider);
+    expect(hookPayloads('preLogin')).toEqual([{ email: 'ada@old.example', provider: 'google', userId: 'ada' }]);
+  });
+
+  it('a preLogin veto on a bound account refuses the login and reports the account', async () => {
+    const provider = googleProvider(helperInput('google'));
+    adapterMock.findByProviderAccountId = vi.fn(async () => boundAda());
+    vi.mocked(dispatchHook).mockImplementationOnce(async () => ({ stopped: true, signal: { stop: true, errorCode: 'auth.banned' } }));
+    stubFetch(changedEmailRoutes(provider));
+    expect(await runCallback(provider)).toBe(false);
+    expect(saveSessionMock).not.toHaveBeenCalled();
+    expect(hookPayloads('loginFailed')).toEqual([
+      expect.objectContaining({ userId: 'ada', reason: 'oauth.userResolveFailed', stage: 'oauth' }),
+    ]);
+  });
+
+  it('a new account passes the provider email without a user id', async () => {
+    const provider = googleProvider(helperInput('google'));
+    stubFetch({
+      [provider.tokenExchangeURL]: { access_token: 'at' },
+      [provider.userInfoURL]: { sub: 'sub-new', name: 'N', email: 'n@example.com', email_verified: true },
+    });
+    await runCallback(provider);
+    expect(hookPayloads('preLogin')).toEqual([{ email: 'n@example.com', provider: 'google' }]);
+  });
+});
+
+describe('OAuth account binding: loginFailed reasons (ADR 0086)', () => {
+  it('a response without the declared id reports oauth.accountIdMissing', async () => {
+    const provider = googleProvider(helperInput('google'));
+    stubFetch({
+      [provider.tokenExchangeURL]: { access_token: 'at' },
+      [provider.userInfoURL]: { name: 'Ada', email: 'ada@example.com', email_verified: true },
+    });
+    await runCallback(provider);
+    expect(hookPayloads('loginFailed')).toEqual([
+      expect.objectContaining({ provider: 'google', reason: 'oauth.accountIdMissing', stage: 'oauth' }),
+    ]);
+  });
+
+  it('an account bound to another id reports oauth.accountBoundElsewhere with its user id', async () => {
+    const provider = microsoftCommon();
+    adapterMock.findByEmail.mockResolvedValue(victimRow({ providerAccountId: 'victim-oid' }));
+    stubFetch({
+      [provider.tokenExchangeURL]: { access_token: 'at' },
+      [provider.userInfoURL]: msUserInfo('attacker-oid', 'victim@contoso.com'),
+    });
+    await runCallback(provider);
+    expect(hookPayloads('loginFailed')).toEqual([
+      expect.objectContaining({ userId: 'victim', reason: 'oauth.accountBoundElsewhere', stage: 'oauth' }),
+    ]);
+  });
+
+  it('an unverified email on an unbound account reports oauth.emailUnverified with its user id', async () => {
+    const provider = microsoftCommon();
+    adapterMock.findByEmail.mockResolvedValue(victimRow());
+    stubFetch({
+      [provider.tokenExchangeURL]: { access_token: 'at' },
+      [provider.userInfoURL]: msUserInfo('attacker-oid', 'victim@contoso.com'),
+    });
+    await runCallback(provider);
+    expect(hookPayloads('loginFailed')).toEqual([
+      expect.objectContaining({ userId: 'victim', reason: 'oauth.emailUnverified', stage: 'oauth' }),
+    ]);
+  });
+});
+
+describe('OAuth account binding: the provider id stays out of the session (ADR 0086)', () => {
+  it('a bound sign-in does not put providerAccountId in the session', async () => {
+    const provider = googleProvider(helperInput('google'));
+    adapterMock.findByProviderAccountId = vi.fn(async () => ({
+      id: 'ada', email: 'ada@example.com', provider: 'google', name: 'Ada', providerAccountId: 'sub-ada',
+    }));
+    stubFetch({
+      [provider.tokenExchangeURL]: { access_token: 'at' },
+      [provider.userInfoURL]: { sub: 'sub-ada', name: 'Ada', email: 'ada@example.com', email_verified: true },
+    });
+    await runCallback(provider);
+    expect(savedSession().id).toBe('ada');
+    expect(savedSession()).not.toHaveProperty('providerAccountId');
+  });
+
+  it('a first-time bind and a new account do not put providerAccountId in the session', async () => {
+    const provider = googleProvider(helperInput('google'));
+    adapterMock.findByEmail.mockResolvedValueOnce({ id: 'ada', email: 'ada@example.com', provider: 'google', name: 'Ada' });
+    stubFetch({
+      [provider.tokenExchangeURL]: { access_token: 'at' },
+      [provider.userInfoURL]: { sub: 'sub-ada', name: 'Ada', email: 'ada@example.com', email_verified: true },
+    });
+    await runCallback(provider);
+    expect(adapterMock.update).toHaveBeenCalledWith('ada', { providerAccountId: 'sub-ada' });
+    expect(savedSession()).not.toHaveProperty('providerAccountId');
+
+    saveSessionMock.mockClear();
+    await runCallback(provider);
+    expect(adapterMock.create.mock.calls[0]?.[0]).toMatchObject({ providerAccountId: 'sub-ada' });
+    expect(savedSession().id).toBe('new-user');
+    expect(savedSession()).not.toHaveProperty('providerAccountId');
   });
 });

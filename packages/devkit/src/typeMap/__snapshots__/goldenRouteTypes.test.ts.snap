@@ -31,7 +31,6 @@ exports[`golden baseline — generated route types > pins the inlined input + ou
     language: 'de' | 'en' | 'fr' | 'nl';
     theme: 'dark' | 'light';
     provider: 'apple' | 'credentials' | 'discord' | 'facebook' | 'github' | 'google' | 'instagram' | 'linkedIn' | 'microsoft' | 'x';
-    providerAccountId: null | string;
     preferences: JsonValue;
     lastLogin: null | string;
     createdAt: string;
