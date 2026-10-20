@@ -43,15 +43,15 @@ describe('buildUpgradePlan', () => {
 
   const cliDir = path.resolve(import.meta.dirname, '../..');
   const scaffoldChangelog = path.resolve(cliDir, '../create-luckystack-app/CHANGELOG.md');
-  //? First numbered step under `heading` inside the `version` section, so a newer
+  //? Numbered step `step` under `heading` inside the `version` section, so a newer
   //? release's upgrade list never shadows the one being checked.
-  const firstStep = (file: string, version: string, heading: string): string => {
+  const firstStep = (file: string, version: string, heading: string, step = 1): string => {
     const changelog = fs.readFileSync(file, 'utf8');
     const versionStart = changelog.indexOf(version);
     expect(versionStart).toBeGreaterThan(-1);
     const start = changelog.indexOf(heading, versionStart);
     expect(start).toBeGreaterThan(-1);
-    return changelog.slice(start).split('\n').find((line) => line.startsWith('1. ')) ?? '';
+    return changelog.slice(start).split('\n').find((line) => line.startsWith(`${String(step)}. `)) ?? '';
   };
 
   it('carries the 0.15 router step, binding new services in deploy.config.ts, in both changelogs', () => {
@@ -68,6 +68,15 @@ describe('buildUpgradePlan', () => {
     const cliStep = firstStep(path.join(cliDir, 'CHANGELOG.md'), '## [0.16.0]', '### Upgrading a project scaffolded before 0.16');
     const scaffoldStep = firstStep(scaffoldChangelog, '## [0.16.0]', '### Upgrading an existing project');
     expect(cliStep).toContain('@@index([provider, providerAccountId])');
+    expect(cliStep).toContain('npx luckystack add login');
+    expect(cliStep).toBe(scaffoldStep);
+  });
+
+  it('carries the 0.16 adapter step, persisting the id from create and update, in both changelogs', () => {
+    //? Login binds an existing account with `update(id, { providerAccountId })`.
+    const cliStep = firstStep(path.join(cliDir, 'CHANGELOG.md'), '## [0.16.0]', '### Upgrading a project scaffolded before 0.16', 2);
+    const scaffoldStep = firstStep(scaffoldChangelog, '## [0.16.0]', '### Upgrading an existing project', 2);
+    expect(cliStep).toContain('`create` and `update`');
     expect(cliStep).toBe(scaffoldStep);
   });
 

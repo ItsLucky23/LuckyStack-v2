@@ -112,6 +112,8 @@ const DRIZZLE_USER_ADAPTER_STARTER = `//? Custom UserAdapter starter — data la
 //?        language: text('language').notNull().default('en'),
 //?        theme: text('theme').notNull().default('light'),
 //?      }, (t) => [uniqueIndex('users_provider_account_idx').on(t.provider, t.providerAccountId)]);
+//?      (mysql cannot index TEXT: declare the indexed columns as
+//?       varchar('provider', { length: 32 }) and varchar('provider_account_id', { length: 255 }).)
 //?
 //? 2. Uncomment everything below. (mysql2 note: \`.returning()\` is Postgres/
 //?    SQLite — on mysql re-select the row after insert/update instead.)
@@ -158,8 +160,17 @@ const DRIZZLE_USER_ADAPTER_STARTER = `//? Custom UserAdapter starter — data la
 //     return toRecord(row);
 //   },
 //   update: async (id, patch) => {
-//     const { id: _id, ...data } = patch;
-//     const [row] = await db.update(users).set(data).where(eq(users.id, Number(id))).returning();
+//     //? The patch allows null for columns this table declares NOT NULL;
+//     //? undefined leaves such a column unchanged.
+//     const { id: _id, email, provider, avatar, avatarFallback, language, ...data } = patch;
+//     const [row] = await db.update(users).set({
+//       ...data,
+//       email: email ?? undefined,
+//       provider: provider ?? undefined,
+//       avatar: avatar ?? undefined,
+//       avatarFallback: avatarFallback ?? undefined,
+//       language: language ?? undefined,
+//     }).where(eq(users.id, Number(id))).returning();
 //     return toRecord(row);
 //   },
 //   delete: async (id) => {
@@ -227,6 +238,7 @@ const MIKRO_USER_ADAPTER_STARTER = `//? Custom UserAdapter starter — data laye
 //   create: async (input) => {
 //     const em = await getEm();
 //     const user = em.create<User>('User', {
+//       createdAt: new Date(),
 //       email: input.email,
 //       provider: input.provider,
 //       name: input.name ?? null,
@@ -234,6 +246,7 @@ const MIKRO_USER_ADAPTER_STARTER = `//? Custom UserAdapter starter — data laye
 //       avatar: input.avatar ?? '',
 //       avatarFallback: input.avatarFallback ?? '',
 //       language: input.language ?? 'en',
+//       theme: 'light',
 //       providerAccountId: input.providerAccountId ?? null,
 //     });
 //     await em.persistAndFlush(user);
@@ -321,6 +334,15 @@ const adaptAuthToDataLayer = (project: ConsumerProject, orm: string): void => {
   );
 };
 
+//? @luckystack/login 0.16 binds OAuth accounts through `User.providerAccountId`
+//? (ADR 0086). A Prisma schema from before 0.16 lacks the column, OAuth logins
+//? fail until it exists, and nothing else edits the schema, so say it here.
+const PRISMA_SCHEMA = 'prisma/schema.prisma';
+const prismaSchemaLacksProviderAccountId = (root: string): boolean => {
+  const schemaPath = path.join(root, PRISMA_SCHEMA);
+  return fs.existsSync(schemaPath) && !fs.readFileSync(schemaPath, 'utf8').includes('providerAccountId');
+};
+
 const EN_LOCALE = 'src/_locales/en.json';
 
 //? Locale keys the files this call copied use and the project's English locale
@@ -356,6 +378,9 @@ export const addLogin = (project: ConsumerProject, options: AddOptions): Result<
     scaffoldOrm: readScaffoldOrm(project.root),
   });
   adaptAuthToDataLayer(project, orm);
+  if (orm === 'prisma' && prismaSchemaLacksProviderAccountId(project.root)) {
+    console.warn(`⚠ ${PRISMA_SCHEMA} has no providerAccountId: add \`providerAccountId String?\` and \`@@index([provider, providerAccountId])\` to model User and push the schema, or OAuth logins fail.`);
+  }
   //? Copy the WHOLE auth bundle (src/ UI + functions/session.ts + server/hooks)
   //? into the project (idempotent, skip-if-exists so consumer edits are kept).
   //? IMPORTANT: the list of files/dirs this copies is the authoritative surface that

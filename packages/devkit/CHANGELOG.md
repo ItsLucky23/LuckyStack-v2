@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-- **The bundled `sync_client.template.ts`.** No selection rule ever chose it; new sync client files get `sync_client_paired` or `sync_client_standalone`. Only a custom rule that registers the kind `sync_client` without its own `.luckystack/templates/sync_client.template.ts` now gets the "No content for custom template kind" warning.
+- **The bundled `sync_client.template.ts`.** The injector never read it: `sync_client` is not a built-in kind and no selection rule chose it; new sync client files get `sync_client_paired` or `sync_client_standalone`. No behaviour change.
 
 ## [0.15.0] - 2026-10-19
 

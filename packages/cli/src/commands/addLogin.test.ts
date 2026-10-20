@@ -100,6 +100,47 @@ describe('addLogin locale-key hint', () => {
   });
 });
 
+describe('add login names the missing providerAccountId column (ADR 0086)', () => {
+  let root: string;
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'ls-add-login-schema-'));
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  const run = (dependencies: Record<string, string>, schema: string | null): string => {
+    const pkg = { name: 'app', dependencies };
+    const pkgPath = path.join(root, 'package.json');
+    fs.writeFileSync(pkgPath, JSON.stringify(pkg));
+    if (schema !== null) {
+      fs.mkdirSync(path.join(root, 'prisma'), { recursive: true });
+      fs.writeFileSync(path.join(root, 'prisma', 'schema.prisma'), schema);
+    }
+    const warnings: string[] = [];
+    vi.spyOn(console, 'log').mockImplementation(() => { /* quiet */ });
+    vi.spyOn(console, 'warn').mockImplementation((line: unknown) => { warnings.push(String(line)); });
+    expect(addLogin({ root, pkg, pkgPath }, { install: false, cliVersion: '0.16.0' }).ok).toBe(true);
+    return warnings.join('\n');
+  };
+
+  const PRE_016_USER = 'model User {\n  id String @id\n  email String\n  provider String\n}\n';
+
+  it('warns on a Prisma schema from before 0.16', () => {
+    expect(run({ '@prisma/client': '^6.0.0' }, PRE_016_USER)).toContain('prisma/schema.prisma has no providerAccountId');
+  });
+
+  it('stays quiet when the schema has the column', () => {
+    const schema = PRE_016_USER.replace('}\n', '  providerAccountId String?\n  @@index([provider, providerAccountId])\n}\n');
+    expect(run({ '@prisma/client': '^6.0.0' }, schema)).not.toContain('providerAccountId');
+  });
+
+  it('stays quiet without a Prisma schema', () => {
+    expect(run({ '@prisma/client': '^6.0.0' }, null)).not.toContain('providerAccountId');
+  });
+});
+
 describe('add login restores the /login guard in the new-page generators (review 2 T2)', () => {
   let root: string;
   beforeEach(() => {

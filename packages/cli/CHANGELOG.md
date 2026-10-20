@@ -10,13 +10,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **Breaking:** the drizzle and mikro-orm starter `luckystack/login/userAdapter.ts` that `add login` and the ORM switch write adds the `providerAccountId` column (drizzle: a unique index, mikro-orm: an index on `provider` + `providerAccountId`), stores it on `create` and implements `findByProviderAccountId`, which `@luckystack/login` 0.16 uses to bind OAuth accounts to the provider's user id (ADR 0086). The `orm: 'none'` starter lists the new method. Upgrade: see step 2 below.
+- **`add login` warns when `prisma/schema.prisma` has no `providerAccountId`**, because OAuth logins fail until the column exists. Upgrade: see step 1 below.
+
+### Fixed
+
+- **The drizzle and mikro-orm starter `luckystack/login/userAdapter.ts` typechecks once uncommented.** The drizzle `update` no longer passes `null` to NOT NULL columns, and the mikro-orm `create` sets `createdAt` and `theme`. The drizzle starter notes that MySQL needs `varchar` for the indexed `provider` and `provider_account_id` columns.
 
 ### Upgrading a project scaffolded before 0.16
 
 These steps are also in the `create-luckystack-app` 0.16.0 changelog, which a project never installs.
 
-1. **Prisma:** add `providerAccountId String?` and `@@index([provider, providerAccountId])` to `model User` in `prisma/schema.prisma`, then run `npm run prisma:db:push` (or `npm run prisma:migrate:dev`) and `npm run prisma:generate`. `update` never overwrites an edited schema, so do this by hand. Until the column exists, OAuth logins fail; credentials logins keep working. Existing Google, GitHub, Discord and Facebook users bind on their next login.
-2. **drizzle or mikro-orm with auth:** your `luckystack/login/userAdapter.ts` is your own file. Add the `providerAccountId` column and index to your user table or entity, pass `providerAccountId` through in `create`, and add `findByProviderAccountId` (copy it from a fresh scaffold). Without it login keeps email matching, warns once on the first OAuth login, and refuses an unverified provider email on an existing account.
+1. **Prisma:** add `providerAccountId String?` and `@@index([provider, providerAccountId])` to `model User` in `prisma/schema.prisma`, then run `npm run prisma:db:push` (or `npm run prisma:migrate:dev`) and `npm run prisma:generate`. `update` never overwrites an edited schema, so do this by hand. Until the column exists, OAuth logins fail; credentials logins keep working. Existing Google, GitHub, Discord and Facebook users bind on their next login. Do this in a project without auth too: `npx luckystack add login` relies on the column and does not add it.
+2. **drizzle or mikro-orm with auth:** your `luckystack/login/userAdapter.ts` is your own file. Add the `providerAccountId` column and index to your user table or entity (on MySQL as `varchar`, because TEXT cannot be indexed), pass `providerAccountId` through in `create` and `update` (login binds an existing account with `update`), and add `findByProviderAccountId` (copy it from a fresh scaffold). Without it login keeps email matching, warns once on the first OAuth login, and refuses an unverified provider email on an existing account.
 
 ## [0.15.0] - 2026-10-19
 

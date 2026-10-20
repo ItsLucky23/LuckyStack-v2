@@ -2354,6 +2354,8 @@ export const USER_ADAPTER_STARTERS: Record<'drizzle' | 'mikro-orm', string> = {
 //?        language: text('language').notNull().default('en'),
 //?        theme: text('theme').notNull().default('light'),
 //?      }, (t) => [uniqueIndex('users_provider_account_idx').on(t.provider, t.providerAccountId)]);
+//?      (mysql cannot index TEXT: declare the indexed columns as
+//?       varchar('provider', { length: 32 }) and varchar('provider_account_id', { length: 255 }).)
 //?
 //? 2. Uncomment everything below. (mysql2 note: \`.returning()\` is Postgres/
 //?    SQLite — on mysql re-select the row after insert/update instead.)
@@ -2400,8 +2402,17 @@ export const USER_ADAPTER_STARTERS: Record<'drizzle' | 'mikro-orm', string> = {
 //     return toRecord(row);
 //   },
 //   update: async (id, patch) => {
-//     const { id: _id, ...data } = patch;
-//     const [row] = await db.update(users).set(data).where(eq(users.id, Number(id))).returning();
+//     //? The patch allows null for columns this table declares NOT NULL;
+//     //? undefined leaves such a column unchanged.
+//     const { id: _id, email, provider, avatar, avatarFallback, language, ...data } = patch;
+//     const [row] = await db.update(users).set({
+//       ...data,
+//       email: email ?? undefined,
+//       provider: provider ?? undefined,
+//       avatar: avatar ?? undefined,
+//       avatarFallback: avatarFallback ?? undefined,
+//       language: language ?? undefined,
+//     }).where(eq(users.id, Number(id))).returning();
 //     return toRecord(row);
 //   },
 //   delete: async (id) => {
@@ -2468,6 +2479,7 @@ export {};
 //   create: async (input) => {
 //     const em = await getEm();
 //     const user = em.create<User>('User', {
+//       createdAt: new Date(),
 //       email: input.email,
 //       provider: input.provider,
 //       name: input.name ?? null,
@@ -2475,6 +2487,7 @@ export {};
 //       avatar: input.avatar ?? '',
 //       avatarFallback: input.avatarFallback ?? '',
 //       language: input.language ?? 'en',
+//       theme: 'light',
 //       providerAccountId: input.providerAccountId ?? null,
 //     });
 //     await em.persistAndFlush(user);
