@@ -5,6 +5,12 @@ All notable changes to `@luckystack/devkit` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`generateTypeMapFile()` produces complete types in one run on a clean checkout.** Before, routes were read before `apiTypes.generated.ts` existed, so `Functions`, `ApiResponse` and the other shared types resolved to `any` and every route output that used them came out as `any` until a second run. The generator now writes the `Functions` interface and the shared types first when the file is missing or out of date, then reads the routes. When the file is already current, nothing extra runs. Consumers can drop the second `generateArtifacts` run from CI.
+
 ## [0.16.0] - 2026-10-20
 
 ### Removed
