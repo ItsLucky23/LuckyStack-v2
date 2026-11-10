@@ -5,6 +5,12 @@ All notable changes to `@luckystack/server` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **The page after a Cloudflare Access or OAuth login, or behind a Cloudflare tunnel, no longer answers "Forbidden".** The origin gate rejected every request whose `Referer` came from a site not in `allowedOrigins`, so the landing page worked only after a reload. A GET page load from a foreign site now gets the SPA shell and static files. API, sync, auth and upload routes, custom routes, foreign CORS reads and state-changing requests stay blocked (ADR 0087).
+
 ## [0.15.0] - 2026-10-19
 
 ### Changed
