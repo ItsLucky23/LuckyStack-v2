@@ -151,7 +151,7 @@
   "overrides": {
     "@eslint/eslintrc@<3.3.6": "3.3.6",
     "@hono/node-server@<1.19.15": "1.19.15",
-    "body-parser@>=2.0.0 <2.2.3": "2.3.0",
+    "body-parser@>=2.0.0 <2.4.0": "2.4.0",
     "brace-expansion@<1.1.18": "1.1.18",
     "esbuild": "0.28.1",
     "fast-uri@>=3.0.0 <3.1.5": "3.1.5",
