@@ -1601,3 +1601,15 @@ PR #9 kreeg om een verwante reden nooit CI: `pull_request` draait tegen `refs/pu
 **Gesloten:** het open punt van v0.15.0 (Microsoft-overname via niet-geverifieerd `mail`) via binding op de provider-ID (ADR 0086).
 
 **Files:** `branch-logs/{main,INDEX}.md`. Tag `v0.16.0`.
+
+## 2026-11-12 12:50 — v0.16.1 gepubliceerd
+
+**User prompt (summary):** ADR 0087 accepteren, OAuth-callback ook bij een vreemde `Referer` toestaan, beide fixes pushen met een PR per branch en samen uitbrengen als 0.16.1; de dependency-update voor de audit gaat mee in deze release (werk op `fix/cloudflare-redirect-forbidden` en `fix/devkit-typemap-single-run`, zie die logs).
+
+**Release.** PR #10 (fix(server): no 403 after a Cloudflare or OAuth login redirect) en PR #11 (fix(devkit): complete type map in one generation run on a clean checkout) met `--no-ff` samengevoegd op `release/v0.16.1`, bump naar 0.16.1, daarna `ba2ce3a` fast-forward op GitHub `main` (vanaf `34561df`); beide PR's staan daardoor op MERGED. `ci` run 43208559058 groen, daarna tag `v0.16.1` → `publish.yml` run 43211149111 groen. Registry 17/17 met provenance (~5 min propagatie). Vooraf: `verify` 2893/2893, `pack:dry` 18/18, `publish:dry` 17, `audit:production` critical 0 / high 0 na de update. Tarball-spotcheck: server-dist bevat de callback-uitzondering, devkit-dist `prepareFixedTypeMapPart`. Lokale e2e-matrix niet gedraaid; de `e2e-scaffold`-job in CI was groen.
+
+**Audit.** Nieuwe advisories met prioriteit hoog blokkeerden de publish-audit: `zod` <4.6.6 (GHSA-mrhx-c7xc-m3w5) en `body-parser` <2.4.0 (GHSA-27r3-jxmh-p828, via `express` in `@modelcontextprotocol/sdk`). Lockfile naar `zod` 4.6.7, override naar `body-parser` 2.4.0; geen gepubliceerde range veranderd. 7 moderate blijven (hono, fast-uri, ip-address, qs e.a.).
+
+**Opgemerkt:** de GitHub-account was tijdelijk geblokkeerd door een betalingsprobleem (CI-jobs startten niet); door de gebruiker opgelost. `sendEmailBatch.test.ts` ("slot reserved by a mail of a sender blocked meanwhile") faalde één keer met 96 ms bij load ~14 op deze machine; daarna 6× groen. Wankele timingtest, niet aangeraakt.
+
+**Files:** `package.json`, `package-lock.json`, `branch-logs/{main,INDEX}.md`. Tag `v0.16.1`.
