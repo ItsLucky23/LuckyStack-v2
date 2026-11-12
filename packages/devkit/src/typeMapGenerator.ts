@@ -13,6 +13,7 @@ import {
   getSyncServerStreamPayloadTypeDetailsFromFile,
 } from './typeMap/extractors';
 import { generateServerFunctions } from './typeMap/functionsMeta';
+import { prepareFixedTypeMapPart, type FixedTypeMapPart } from './typeMap/typeMapBootstrap';
 import { disposeTsApi, invalidateProgramCache } from './typeMap/tsApi';
 import { getSrcDir } from '@luckystack/core';
 import { assertNoDuplicateNormalizedRouteKeys, assertNoDuplicatePageRoutes, assertValidRouteNaming } from './routeNamingValidation';
@@ -213,6 +214,15 @@ const collectSyncTypes = (
   return syncTypesByPage;
 };
 
+//? Renders the route-independent part on the current server Program, with
+//? fresh import collectors so a re-render after a bootstrap starts clean.
+const renderFixedTypeMapPart = (): FixedTypeMapPart => {
+  const namedImports = new Map<string, Set<string>>();
+  const defaultImports = new Map<string, string>();
+  const functionsInterface = generateServerFunctions({ namedImports, defaultImports });
+  return { namedImports, defaultImports, functionsInterface };
+};
+
 const runTypeMapGeneration = (options: GenerateTypeMapOptions): void => {
   const { quiet = false } = options;
   assertValidRouteNaming({
@@ -234,11 +244,14 @@ const runTypeMapGeneration = (options: GenerateTypeMapOptions): void => {
   // Rebuild the TypeScript Program on each generation to pick up file changes.
   invalidateProgramCache();
 
+  //? Functions + shared types first: routes import them from the generated
+  //? file, so it must be current before route extraction (see typeMapBootstrap).
+  const fixedPart = prepareFixedTypeMapPart(renderFixedTypeMapPart);
+
   //? Local per-call maps — previously module-level mutable state, which
   //? meant a second call (e.g. from a test or a race) would share and corrupt
   //? state across calls. Moved here so each invocation gets a fresh set.
   const namedImports = new Map<string, Set<string>>();
-  const defaultImports = new Map<string, string>();
 
   const unresolvedTypeAliases = new Set<string>();
   const collectors: TypeMapCollectors = { namedImports, unresolvedTypeAliases, quiet };
@@ -256,7 +269,12 @@ const runTypeMapGeneration = (options: GenerateTypeMapOptions): void => {
   const syncClientFiles = findAllSyncClientFiles(getSrcDir());
   const syncTypesByPage = collectSyncTypes(syncServerFiles, syncClientFiles, collectors);
 
-  const functionsInterface = generateServerFunctions({ namedImports, defaultImports });
+  //? Route imports first, then Functions imports: the header order the file
+  //? had when Functions was rendered after the routes.
+  for (const [importPath, names] of fixedPart.namedImports) {
+    const merged = getOrInit(namedImports, importPath, () => new Set<string>());
+    for (const name of names) merged.add(name);
+  }
 
   if (unresolvedTypeAliases.size > 0) {
     const unresolvedList = [...unresolvedTypeAliases].toSorted().join(', ');
@@ -267,8 +285,8 @@ const runTypeMapGeneration = (options: GenerateTypeMapOptions): void => {
     typesByPage,
     syncTypesByPage,
     namedImports,
-    defaultImports,
-    functionsInterface,
+    defaultImports: fixedPart.defaultImports,
+    functionsInterface: fixedPart.functionsInterface,
   });
 
   writeTypeMapArtifacts({ content, docsData, schemasContent, diagnosticsData });
