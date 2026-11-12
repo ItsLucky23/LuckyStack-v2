@@ -125,11 +125,35 @@ const dispatchRoutes = async (handlers: HttpRouteHandler[], ctx: HttpRouteContex
   return false;
 };
 
+//? Paths whose handlers act on the session or return private data. A request
+//? from a foreign site never reaches them.
+const ORIGIN_GATED_PREFIXES = ['/api/', '/sync/', '/auth/', '/uploads/'];
+
+//? A plain GET from a foreign site (Referer only, no Origin header): a link,
+//? an OAuth or Cloudflare Access login redirect, a Cloudflare tunnel. Browsers
+//? send `Origin` on CORS reads, so a script cannot use this path to read data.
+//? Rejecting these made the landing page after an external login answer 403
+//? until the user reloaded without a Referer.
+const isForeignPageLoad = (req: IncomingMessage, routePath: string): boolean =>
+  req.method === 'GET'
+  && req.headers.origin === undefined
+  && !ORIGIN_GATED_PREFIXES.some((prefix) => routePath.startsWith(prefix) || `${routePath}/` === prefix);
+
+//? The identity provider redirects the browser to the OAuth callback, and some
+//? providers send their own site as Referer. The callback needs no origin
+//? check: it accepts only a `state` bound to the `ls-oauth-state` cookie of the
+//? browser that started the login, so a foreign site cannot finish a login for
+//? another browser (ADR 0087).
+const isForeignOAuthCallback = (req: IncomingMessage, routePath: string): boolean =>
+  req.method === 'GET'
+  && req.headers.origin === undefined
+  && routePath.startsWith('/auth/callback/');
+
 const enforceOriginPolicy = (
   req: IncomingMessage,
   res: ServerResponse,
   routePath: string,
-): { origin: string; rejected: boolean } => {
+): { origin: string; rejected: boolean; pageOnly?: boolean } => {
   //? Do NOT fall back to `req.headers.host` — host always equals the bound
   //? origin so non-browser callers (curl, native apps) would silently bypass
   //? `allowedOrigin()`. Only browsers attach Origin/Referer.
@@ -170,6 +194,13 @@ const enforceOriginPolicy = (
       return { origin, rejected: true };
     }
   } else if (!allowedOrigin(origin)) {
+    if (isForeignPageLoad(req, routePath)) {
+      //? Empty origin: nothing is reflected into `Access-Control-Allow-Origin`.
+      return { origin: '', rejected: false, pageOnly: true };
+    }
+    if (isForeignOAuthCallback(req, routePath)) {
+      return { origin: '', rejected: false };
+    }
     res.statusCode = 403;
     res.setHeader('Content-Type', 'text/plain');
     res.end('Forbidden');
@@ -264,7 +295,7 @@ const handleHttpRequestInner = async (
   const routePath = decodedPath;
   const queryString = queryStringRaw ?? '';
 
-  const { origin, rejected } = enforceOriginPolicy(req, res, routePath);
+  const { origin, rejected, pageOnly } = enforceOriginPolicy(req, res, routePath);
   if (rejected) return;
 
   setSecurityHeaders(req, res, origin);
@@ -309,6 +340,15 @@ const handleHttpRequestInner = async (
     res.statusCode = 404;
     res.setHeader('Content-Type', 'text/plain');
     res.end(`method: ${String(method)} not supported, use one of: GET, POST, PUT, DELETE`);
+    return;
+  }
+
+  //? A foreign page load gets only static files and the SPA shell, which are
+  //? public. Custom routes are skipped too: they may act on the session.
+  if (pageOnly) {
+    await handleStaticAndSpaFallback({
+      req, res, options, routePath, queryString, method, token: null, requestId, sessionCookieOptions, params: {},
+    });
     return;
   }
 
