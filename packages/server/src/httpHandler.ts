@@ -139,6 +139,16 @@ const isForeignPageLoad = (req: IncomingMessage, routePath: string): boolean =>
   && req.headers.origin === undefined
   && !ORIGIN_GATED_PREFIXES.some((prefix) => routePath.startsWith(prefix) || `${routePath}/` === prefix);
 
+//? The identity provider redirects the browser to the OAuth callback, and some
+//? providers send their own site as Referer. The callback needs no origin
+//? check: it accepts only a `state` bound to the `ls-oauth-state` cookie of the
+//? browser that started the login, so a foreign site cannot finish a login for
+//? another browser (ADR 0087).
+const isForeignOAuthCallback = (req: IncomingMessage, routePath: string): boolean =>
+  req.method === 'GET'
+  && req.headers.origin === undefined
+  && routePath.startsWith('/auth/callback/');
+
 const enforceOriginPolicy = (
   req: IncomingMessage,
   res: ServerResponse,
@@ -187,6 +197,9 @@ const enforceOriginPolicy = (
     if (isForeignPageLoad(req, routePath)) {
       //? Empty origin: nothing is reflected into `Access-Control-Allow-Origin`.
       return { origin: '', rejected: false, pageOnly: true };
+    }
+    if (isForeignOAuthCallback(req, routePath)) {
+      return { origin: '', rejected: false };
     }
     res.statusCode = 403;
     res.setHeader('Content-Type', 'text/plain');

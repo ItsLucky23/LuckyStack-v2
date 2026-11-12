@@ -15,3 +15,14 @@
 **Notes / decisions:**
 - `npm run verify` green (2888 tests). Not tested through a real Cloudflare tunnel or in a browser.
 - Open: the OAuth callback `/auth/callback/*` still answers 403 when a provider sends a foreign `Referer`; a custom route linked from another site now gets the SPA shell instead of 403.
+
+## 2026-11-12 — OAuth callback accepts a foreign Referer; ADR 0087 accepted
+
+**User prompt (summary):** answers to the open questions: accept ADR 0087, also let the OAuth callback through for a foreign `Referer`, release both fixes as 0.16.1.
+
+**What I did:**
+- A GET without `Origin` to `/auth/callback/<provider>` now runs the normal pipeline with no CORS reflection. The login `state` check, bound to the `ls-oauth-state` cookie, stays the protection. A foreign `Origin` header or a POST keeps the 403.
+- Test: a callback with a Google `Referer` reaches the login and gets 401 from the state check; foreign `Origin` and POST get 403.
+- ADR 0087 set to `accepted` and extended with the callback exception; server CHANGELOG and `security-defaults.md` updated.
+
+**Files touched:** `packages/server/src/httpHandler.ts`, `packages/server/src/httpHandler.foreignOrigin.test.ts`, `packages/server/CHANGELOG.md`, `packages/server/docs/security-defaults.md`, `docs/decisions/0087-a-foreign-page-load-gets-only-public-static-content.md`.

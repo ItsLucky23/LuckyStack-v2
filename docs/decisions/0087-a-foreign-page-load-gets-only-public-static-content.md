@@ -1,10 +1,10 @@
 ---
 name: a-foreign-page-load-gets-only-public-static-content
-title: A GET page load from a foreign site gets the SPA shell and static files, not a 403; every session route stays origin-gated
-status: proposed
+title: A GET page load from a foreign site gets the SPA shell and static files, not a 403; every session route except the OAuth callback stays origin-gated
+status: accepted
 date: 2026-11-10
 deciders: [ItsLucky23]
-tags: [security, http, cors, origin, cloudflare]
+tags: [security, http, cors, origin, cloudflare, oauth]
 supersedes: []
 relates: []
 ---
@@ -17,6 +17,8 @@ The HTTP origin gate takes the origin from `Origin`, else from `Referer`, and an
 
 A GET without an `Origin` header whose `Referer` names a foreign site is served by the static/SPA handler only. Nothing is reflected into `Access-Control-Allow-Origin`, no session cookie is refreshed, and custom routes are skipped. Paths under `/api/`, `/sync/`, `/auth/` and `/uploads/` keep the 403, and so does every request with a foreign `Origin` header and every state-changing request.
 
+One session route is excepted: a GET without `Origin` to `/auth/callback/<provider>` runs the normal pipeline, again with nothing reflected into `Access-Control-Allow-Origin`. Some identity providers send their own site as `Referer` on that redirect. The callback does not need the origin check, because it accepts only a `state` that is bound to the `ls-oauth-state` cookie of the browser that started the login. A foreign site therefore cannot finish a login in another browser.
+
 ## Rejected alternatives
 
 - **Tell projects to add the foreign site to `allowedOrigins`.** That allow-lists the login provider or Access team for CORS on every route, including credentialed API reads. It also has to be repeated for every site that links to the app.
@@ -25,4 +27,4 @@ A GET without an `Origin` header whose `Referer` names a foreign site is served 
 
 ## Consequences
 
-A link from another site to a custom route path now gets the SPA shell (the client router shows its not-found page) instead of 403. A custom route that must answer foreign page loads needs a separate opt-in, which does not exist yet. The `/auth/callback/*` route still requires that the identity provider sends no foreign `Referer`; widening that is a separate choice because the callback creates a session.
+A link from another site to a custom route path now gets the SPA shell (the client router shows its not-found page) instead of 403. A custom route that must answer foreign page loads needs a separate opt-in, which does not exist yet. The OAuth callback now depends on the state-cookie binding alone for cross-site protection; a change that weakens that binding must restore an origin check on the callback.
