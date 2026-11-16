@@ -9,7 +9,7 @@ import {
 } from '@luckystack/core';
 import type { StopLuckyStackServerOptions } from './types';
 
-const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10_000;
+export const DEFAULT_SHUTDOWN_TIMEOUT_MS = 10_000;
 
 export interface GracefulShutdownDeps {
   httpServer: HttpServer;

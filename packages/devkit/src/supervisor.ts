@@ -214,6 +214,7 @@ let crashRestartTimer: NodeJS.Timeout | null = null;
 let childBootStartedAt = 0;
 let consecutiveFastCrashes = 0;
 let isShuttingDown = false;
+let childShutdownGraceMs = 0;
 
 export const startChild = () => {
   if (isShuttingDown) return;
@@ -246,6 +247,7 @@ export const startChild = () => {
     },
   });
   childProcess = spawned;
+  childShutdownGraceMs = 0;
 
   //? Name the runtime explicitly. `bun run server` silently serving from Node is
   //? the bug this file guards against, so the runtime must be observable rather
@@ -262,8 +264,18 @@ export const startChild = () => {
 
   //? A route dependency changed in the child. Ignore a message from a child
   //? that has already been replaced: restarting would kill its successor.
-  spawned.on('message', (message) => {
-    if (childProcess !== spawned || !isDevRestartMessage(message)) return;
+  spawned.on('message', (message: unknown) => {
+    if (childProcess !== spawned) return;
+    //? Server announces its configured drain ceiling over the existing IPC
+    //? channel. Never import server/core here: that would load stale env files.
+    if (typeof message === 'object' && message !== null
+      && 'type' in message && message.type === 'luckystack:shutdown-grace'
+      && 'graceMs' in message && typeof message.graceMs === 'number'
+      && Number.isSafeInteger(message.graceMs) && message.graceMs > 0) {
+      childShutdownGraceMs = Math.min(message.graceMs, 2_147_483_647);
+      return;
+    }
+    if (!isDevRestartMessage(message)) return;
     scheduleRestart({ event: 'route dependency change', changedPath: message.reason });
   });
 
@@ -372,7 +384,7 @@ export const scheduleRestart = ({
   }, RESTART_DEBOUNCE_MS);
 };
 
-const shutdownSupervisor = () => {
+export const shutdownSupervisor = () => {
   isShuttingDown = true;
 
   if (restartTimer) {
@@ -391,7 +403,7 @@ const shutdownSupervisor = () => {
     //? and call process.exit(0) once the child is gone. Force-exit after a
     //? short grace period in case the child ignores SIGTERM (Windows).
     childProcess.kill('SIGTERM');
-    setTimeout(() => process.exit(0), SHUTDOWN_GRACE_MS).unref();
+    setTimeout(() => process.exit(0), Math.max(SHUTDOWN_GRACE_MS, childShutdownGraceMs)).unref();
   } else {
     //? No child running (e.g. we were between crashes, sitting in the
     //? crash-restart setTimeout we just cleared above) — exit immediately.
@@ -414,11 +426,11 @@ const bootSupervisor = () => {
     //? from a process manager (systemd, Docker) kills the supervisor instantly
     //? and the child may never exit cleanly.
     process.on('SIGINT', () => {
-      isShuttingDown = true;
+      if (isShuttingDown) process.exit(1);
       shutdownSupervisor();
     });
     process.on('SIGTERM', () => {
-      isShuttingDown = true;
+      if (isShuttingDown) process.exit(1);
       shutdownSupervisor();
     });
     startChild();

@@ -1,5 +1,5 @@
 import http, { type Server as HttpServer } from 'node:http';
-import { registerBindAddress, registerBoundAddress, writeBootUuid, startBootUuidHeartbeat, getLogger, getProjectConfig, tryCatch, tryCatchSync, resolveRuntimeMode, dispatchHook } from '@luckystack/core';
+import { registerBindAddress, registerBoundAddress, writeBootUuid, startBootUuidHeartbeat, getLogger, getProjectConfig, tryCatch, tryCatchSync, resolveRuntimeMode } from '@luckystack/core';
 import { handleHttpRequest } from './httpHandler';
 import { loadSocket } from './loadSocket';
 import { verifyBootstrap } from './verifyBootstrap';
@@ -11,6 +11,7 @@ import { writeDevServerInfo, clearDevServerInfo } from './devServerInfo';
 import { markDevToolsInitFailed } from './devToolsStatus';
 import { normalizeServerPort, resolveServerPort } from './portResolution';
 import { runAfterListenTask } from './afterListen';
+import { installShutdownSignalHandlers, validateShutdownTimeout } from './shutdownSignals';
 import type {
   CreateLuckyStackServerOptions,
   RunningLuckyStackServer,
@@ -55,38 +56,14 @@ import type {
  * await server.listen();
  * ```
  */
-//? Extracted verbatim from the previous inline `if (enableDevTools) { ... }`
-//? block. Same dynamic imports, same ordering, same SIGINT/SIGTERM handlers —
-//? hoisted so the bootstrap function reads as a sequence of named steps.
-const initDevTools = async (): Promise<void> => {
+const initDevTools = async (shutdownTimeoutMs?: number): Promise<void> => {
   //? Dev-only: console-log color tagger + devkit hot reload + REPL.
   //? Kept dynamic so tier-A consumers in production never load the
   //? typescript compiler API or chokidar's filesystem watchers.
   const { initConsolelog } = await import('@luckystack/core');
   initConsolelog();
-  //? Belt-and-braces: explicit SIGINT/SIGTERM handler so Ctrl+C is honored even
-  //? if a sync CPU burst (TS Program build, large require chain) is still in
-  //? flight when the signal arrives. Installed BEFORE the guarded devkit import
-  //? so Ctrl+C still works when devkit is absent and we early-return below.
-  //? Give `preServerStop` subscribers (cron lease release, tracker flush) a
-  //? BOUNDED window before the hard exit — without it a dev Ctrl+C leaves the
-  //? cron leader lease dangling until its TTL, so no jobs fire for up to 30s
-  //? after every restart. Dev iteration speed still wins: 2s cap, then exit.
-  const devSignalExit = (reason: 'SIGINT' | 'SIGTERM'): void => {
-    void Promise.race([
-      dispatchHook('preServerStop', { reason, timeoutMs: 2000 }),
-      new Promise((resolve) => {
-        setTimeout(resolve, 2000);
-      }),
-      // eslint-disable-next-line unicorn/no-process-exit -- deliberate dev hard-exit once the bounded hook window closes (mirrors the original inline handler)
-    ]).finally(() => process.exit(0));
-  };
-  process.once('SIGINT', () => {
-    devSignalExit('SIGINT');
-  });
-  process.once('SIGTERM', () => {
-    devSignalExit('SIGTERM');
-  });
+  //? Install before the optional devkit import so signals work without devkit.
+  installShutdownSignalHandlers({ timeoutMs: shutdownTimeoutMs });
   //? @luckystack/devkit is an OPTIONAL peer, normally ABSENT in production. If a
   //? deploy forgets `NODE_ENV=production`, enableDevTools stays true and an
   //? unguarded `import('@luckystack/devkit')` would crash boot with
@@ -258,6 +235,7 @@ export const listenLuckyStackServer = (
 export const createLuckyStackServer = async (
   options: CreateLuckyStackServerOptions = {}
 ): Promise<RunningLuckyStackServer> => {
+  validateShutdownTimeout(options.shutdownTimeoutMs);
   //? Auto-register the framework-shipped runtime maps provider when the
   //? consumer supplied a `loadGeneratedMaps` callback. Runs before
   //? `verifyBootstrap` so the registration counts toward the boot check.
@@ -296,7 +274,7 @@ export const createLuckyStackServer = async (
   registerBindAddress({ ip, port, configuredPort: options.defaultPort });
 
   if (enableDevTools) {
-    await initDevTools();
+    await initDevTools(options.shutdownTimeoutMs);
   }
 
   //? Boot UUID must be written before /_health can answer truthfully. Router
@@ -346,36 +324,23 @@ export const createLuckyStackServer = async (
     return listeningServer;
   };
 
-  //? Idempotent graceful shutdown. A second call (e.g. SIGINT then SIGTERM, or a
-  //? programmatic `stop()` racing a signal) returns the in-flight promise rather
+  //? Idempotent graceful shutdown. A second programmatic call (or a manual
+  //? `stop()` racing the first signal) returns the in-flight promise rather
   //? than running the teardown twice.
   let shutdownPromise: Promise<void> | null = null;
   const stop = (stopOptions: StopLuckyStackServerOptions = {}): Promise<void> => {
     bootUuidHeartbeat?.stop();
-    shutdownPromise ??= runGracefulShutdown({ httpServer, ioServer, adapterClients }, stopOptions);
+    shutdownPromise ??= runGracefulShutdown({ httpServer, ioServer, adapterClients }, {
+      ...stopOptions,
+      timeoutMs: stopOptions.timeoutMs ?? options.shutdownTimeoutMs,
+    });
     return shutdownPromise;
   };
 
-  //? Production signal wiring (MIS-016). In dev, `initDevTools` already installs
-  //? fast `process.exit(0)` handlers (hot-reload supervisor restarts). In prod
-  //? we run the FULL graceful shutdown and exit only after it settles — an
-  //? orchestrator's SIGTERM should drain connections + flush trackers, not hard-
-  //? kill. `process.once` so a repeated signal doesn't stack handlers; the
-  //? `stop()` idempotency covers a SIGINT-then-SIGTERM sequence.
+  //? Dev installs its bounded hook handler before loading devkit. Production
+  //? runs the full drain; a second signal explicitly escalates either path.
   if (!enableDevTools) {
-    const handleSignal = (reason: 'SIGTERM' | 'SIGINT'): void => {
-      void (async () => {
-        await stop({ reason });
-        //? Terminate AFTER the graceful drain completes. This is the process
-        //? entry's signal handler (not deep library code) — an orchestrator's
-        //? SIGTERM expects the process to exit once it has drained, so exiting
-        //? here is correct. Mirrors the dev handlers in `initDevTools`.
-        // eslint-disable-next-line unicorn/no-process-exit -- top-level signal handler, exits after graceful drain
-        process.exit(0);
-      })();
-    };
-    process.once('SIGTERM', () => { handleSignal('SIGTERM'); });
-    process.once('SIGINT', () => { handleSignal('SIGINT'); });
+    installShutdownSignalHandlers({ timeoutMs: options.shutdownTimeoutMs, stop });
   }
 
   return { httpServer, ioServer, listen, afterListen: runAfterListenTask, stop, close: stop };

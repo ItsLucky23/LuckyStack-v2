@@ -59,6 +59,49 @@ describe('crash restart racing a watcher restart', () => {
 });
 
 describe('restart requested by the dev server', () => {
+  it('keeps a larger launching-environment grace override', async () => {
+    vi.stubEnv('LUCKYSTACK_SUPERVISOR_GRACE_MS', '200000');
+    vi.resetModules();
+    supervisor = await import('./supervisor');
+    const exit = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+    supervisor.startChild();
+    spawned[0]?.emit('message', { type: 'luckystack:shutdown-grace', graceMs: 181_000 });
+    supervisor.shutdownSupervisor();
+    await vi.advanceTimersByTimeAsync(199_999);
+    expect(exit).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(exit).toHaveBeenCalledWith(0);
+    exit.mockRestore();
+    vi.unstubAllEnvs();
+  });
+
+  it('does not carry a previous child budget into its replacement', async () => {
+    const exit = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+    supervisor.startChild();
+    spawned[0]?.emit('message', { type: 'luckystack:shutdown-grace', graceMs: 181_000 });
+    supervisor.scheduleRestart({ event: 'change', changedPath: 'server.ts' });
+    await vi.advanceTimersByTimeAsync(150);
+    spawned[0]?.emit('exit', 0, null);
+    spawned[0]?.emit('message', { type: 'luckystack:shutdown-grace', graceMs: 181_000 });
+    spawned[1]?.emit('message', { type: 'luckystack:shutdown-grace', graceMs: NaN });
+    supervisor.shutdownSupervisor();
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(exit).toHaveBeenCalledWith(0);
+    exit.mockRestore();
+  });
+
+  it.each([undefined, 181_000])('waits for child shutdown grace %s', async (graceMs) => {
+    const exit = vi.spyOn(process, 'exit').mockImplementation(() => undefined as never);
+    supervisor.startChild();
+    if (graceMs) spawned[0]?.emit('message', { type: 'luckystack:shutdown-grace', graceMs });
+    supervisor.shutdownSupervisor();
+    expect(spawned[0]?.kill).toHaveBeenCalledWith('SIGTERM');
+    await vi.advanceTimersByTimeAsync((graceMs ?? 1500) - 1);
+    expect(exit).not.toHaveBeenCalled();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(exit).toHaveBeenCalledWith(0);
+    exit.mockRestore();
+  });
   it('opens an IPC channel to the child', async () => {
     const { spawn } = await import('node:child_process');
     supervisor.startChild();
