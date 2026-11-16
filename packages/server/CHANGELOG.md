@@ -5,6 +5,12 @@ All notable changes to `@luckystack/server` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- Long-running shutdown hooks can use `shutdownTimeoutMs` on `bootstrapLuckyStack` / `createLuckyStackServer` without replacing framework signal handlers, in production and dev. The hook receives the budget; repeating the first SIGINT or SIGTERM forces immediate exit. Omitting the option preserves existing timeouts.
+
 ## [0.16.1] - 2026-11-12
 
 ### Fixed

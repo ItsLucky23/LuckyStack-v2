@@ -68,6 +68,13 @@ export interface CreateLuckyStackServerOptions {
    */
   enableDevTools?: boolean;
   /**
+   * Positive integer milliseconds for shutdown steps used by the framework's
+   * signal handlers and by stop()/close() unless timeoutMs is overridden.
+   * Also passed to preServerStop. Omit to retain 10s production / 2s dev signals.
+   * Production applies this budget per step, not to the whole sequence.
+   */
+  shutdownTimeoutMs?: number;
+  /**
    * Maximum HTTP buffer size for socket.io. Defaults to 5 MB. Adjust if you
    * stream large payloads through sockets.
    */
@@ -107,10 +114,11 @@ export interface StopLuckyStackServerOptions {
    */
   reason?: 'SIGTERM' | 'SIGINT' | 'SIGHUP' | 'manual';
   /**
-   * Soft budget (ms) for the whole shutdown sequence — the `preServerStop` hook
+   * Soft budget (ms) per step of the shutdown sequence — the `preServerStop` hook
    * fan-out, the bounded `flushErrorTrackers()` race, and closing the
    * http/io/redis-adapter handles. Each step is wrapped so a single hanging step
-   * cannot stall the others past this deadline. Defaults to `10000`.
+   * cannot stall the others indefinitely. Defaults to the server's configured
+   * shutdownTimeoutMs, or `10000` when omitted.
    */
   timeoutMs?: number;
 }
