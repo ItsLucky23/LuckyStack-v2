@@ -4,6 +4,12 @@ All notable changes to `@luckystack/cron` are documented here. Format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow the
 monorepo's lockstep versioning.
 
+## [0.17.0] - 2026-11-17
+
+### Changed
+
+- The scheduler starts no new runs once graceful shutdown begins (`isServerShuttingDown()` from core), and the leader hands its lease back on its next leader tick so another instance takes over. A run already in progress finishes; shutdown does not wait for it. A run whose lease arrives after shutdown began is skipped too (also for `runCronJobNow`, which then returns `null`). Before, cron kept firing new jobs during a `preServerDrain`/`preServerStop` drain, because its teardown ran after the app's own handlers (ADR 0089).
+
 ## [0.15.0] - 2026-10-19
 
 ### Changed

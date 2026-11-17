@@ -5,6 +5,13 @@ All notable changes to `@luckystack/core` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-11-17
+
+### Added
+
+- `preServerDrain` in `HookPayloads` (payload `PreServerDrainPayload`, same shape as `PreServerStopPayload`), dispatched by `@luckystack/server` before it closes its listeners (ADR 0089).
+- `isServerShuttingDown()`: true once this process started its graceful shutdown. Use it to refuse new work independent of hook registration order. The server sets it via `markServerShutdownStarted()`.
+
 ## [0.15.0] - 2026-10-19
 
 ### Added

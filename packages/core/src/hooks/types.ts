@@ -506,9 +506,11 @@ export interface PreSyncRecipientPayload {
 
 //? Graceful-shutdown hook (CORE-SHUTDOWN). Dispatched ONCE by
 //? `@luckystack/server` when the process receives a termination signal
-//? (SIGTERM/SIGINT) BEFORE the HTTP/socket server stops accepting connections
-//? and the process exits. Lets a consumer flush error-trackers, drain queues,
-//? close DB/Redis pools, or release leases without forking the server bootstrap.
+//? (SIGTERM/SIGINT) AFTER `preServerDrain` and after the HTTP listener and
+//? Socket.io have been closed (ADR 0089), before the process exits. Lets a
+//? consumer flush error-trackers, close DB/Redis pools, or release leases
+//? without forking the server bootstrap. Work that needs open listeners or
+//? sockets, or a long wait for running work, belongs in `preServerDrain`.
 //? Observational for control flow — a returned stop signal does NOT abort the
 //? shutdown (the process IS going down); handlers should be best-effort and
 //? self-isolating (the dispatcher already swallows per-handler throws).
@@ -522,6 +524,14 @@ export interface PreServerStopPayload {
    */
   timeoutMs?: number;
 }
+
+/**
+ * `preServerDrain` runs first in a graceful shutdown, while the HTTP listener
+ * and Socket.io still accept requests. Await long-running work here (and refuse
+ * new work yourself); the server closes its listeners once every handler has
+ * resolved or `timeoutMs` has passed, then dispatches `preServerStop`.
+ */
+export type PreServerDrainPayload = PreServerStopPayload;
 
 // --- Augmentable payload map ---
 
@@ -561,6 +571,7 @@ export interface HookPayloads {
   onUploadComplete: OnUploadCompletePayload;
   preAvatarServe: PreAvatarServePayload;
   postAvatarServe: PostAvatarServePayload;
+  preServerDrain: PreServerDrainPayload;
   preServerStop: PreServerStopPayload;
 }
 

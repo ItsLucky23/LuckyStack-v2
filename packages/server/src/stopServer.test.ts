@@ -4,7 +4,8 @@ import type { Server as SocketIOServer } from 'socket.io';
 import type { Redis as RedisClient } from 'ioredis';
 
 //? MIS-016: graceful shutdown. These tests pin that `runGracefulShutdown`:
-//?  - dispatches the core `preServerStop` hook (with reason + timeoutMs),
+//?  - dispatches `preServerDrain` while the listeners still serve (ADR 0089),
+//?  - then dispatches the core `preServerStop` hook (with reason + timeoutMs),
 //?  - calls `flushErrorTrackers()`,
 //?  - closes io + http + quits both redis-adapter clients,
 //?  - and CANNOT hang: a step that never resolves still lets shutdown finish
@@ -27,6 +28,7 @@ vi.mock('@luckystack/core', async () => {
   };
 });
 
+import { isServerShuttingDown } from '@luckystack/core';
 import { runGracefulShutdown } from './stopServer';
 
 const makeDeps = (overrides: {
@@ -74,6 +76,20 @@ describe('runGracefulShutdown — happy path', () => {
     expect(spies.httpClose).toHaveBeenCalledOnce();
     expect(spies.pubQuit).toHaveBeenCalledOnce();
     expect(spies.subQuit).toHaveBeenCalledOnce();
+  });
+
+  it('keeps both listeners open during preServerDrain and closes them before preServerStop', async () => {
+    const { deps, spies } = makeDeps();
+    const seen: string[] = [];
+    mocks.dispatchHook.mockImplementation(async (name) => {
+      seen.push(`${name}:http=${String(spies.httpClose.mock.calls.length)}:io=${String(spies.ioClose.mock.calls.length)}`);
+      return { stopped: false };
+    });
+
+    await runGracefulShutdown(deps, { timeoutMs: 5000 });
+
+    expect(seen).toEqual(['preServerDrain:http=0:io=0', 'preServerStop:http=1:io=1']);
+    expect(isServerShuttingDown()).toBe(true);
   });
 
   it('defaults reason to "manual" and uses the default timeout', async () => {
@@ -144,6 +160,48 @@ describe('runGracefulShutdown — real http + socket.io server (finding 086)', (
 
     expect(mocks.logger.warn).not.toHaveBeenCalled();
     expect(httpServer.listening).toBe(false);
+  });
+
+  it('serves requests and sockets during preServerDrain, refuses new connections after it', async () => {
+    const { createServer, get } = await import('node:http');
+    const { Server } = await import('socket.io');
+    const { io: connectClient } = await import('socket.io-client');
+    const httpServer = createServer((_req, res) => { res.end('ok'); });
+    const ioServer = new Server(httpServer);
+    await new Promise<void>((resolve) => { httpServer.listen(0, '127.0.0.1', resolve); });
+    const address = httpServer.address();
+    if (!address || typeof address === 'string') throw new Error('no port');
+    const url = `http://127.0.0.1:${String(address.port)}`;
+    //? `agent: false` opens a NEW connection per request, like a fresh page load.
+    const request = () => new Promise<string>((resolve) => {
+      get(`${url}/`, { agent: false }, (res) => {
+        res.setEncoding('utf8');
+        let body = '';
+        res.on('data', (chunk: string) => { body += chunk; });
+        res.on('end', () => { resolve(body); });
+      }).on('error', (error: NodeJS.ErrnoException) => { resolve(error.code ?? 'error'); });
+    });
+    const client = connectClient(url, { transports: ['websocket'], reconnection: false });
+    await new Promise<void>((resolve) => { client.on('connect', () => { resolve(); }); });
+    const disconnected = new Promise<void>((resolve) => { client.on('disconnect', () => { resolve(); }); });
+
+    const duringDrain: { body?: string; socketConnected?: boolean } = {};
+    mocks.dispatchHook.mockImplementation(async (name) => {
+      if (name === 'preServerDrain') {
+        duringDrain.body = await request();
+        duringDrain.socketConnected = client.connected;
+      }
+      return { stopped: false };
+    });
+    const { deps } = makeDeps();
+
+    await runGracefulShutdown({ ...deps, httpServer, ioServer }, { timeoutMs: 2000 });
+    await disconnected;
+
+    expect(duringDrain).toEqual({ body: 'ok', socketConnected: true });
+    expect(await request()).toBe('ECONNREFUSED');
+    expect(client.connected).toBe(false);
+    client.close();
   });
 
   it('other io.close errors are still surfaced', async () => {

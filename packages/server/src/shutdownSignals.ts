@@ -1,4 +1,4 @@
-import { dispatchHook, getLogger, tryCatch } from '@luckystack/core';
+import { dispatchHook, getLogger, markServerShutdownStarted, tryCatch } from '@luckystack/core';
 import type { StopLuckyStackServerOptions } from './types';
 import { DEFAULT_SHUTDOWN_TIMEOUT_MS } from './stopServer';
 
@@ -19,10 +19,11 @@ export const installShutdownSignalHandlers = ({
 }): void => {
   validateShutdownTimeout(timeoutMs);
   const budget = timeoutMs ?? (stop ? DEFAULT_SHUTDOWN_TIMEOUT_MS : 2000);
-  //? The supervisor must outlive every bounded step, not just the hook. There
-  //? are five sequential steps; HTTP close starts concurrently with the hook.
+  //? The supervisor must outlive every bounded step, not just the hooks.
+  //? Production has six sequential steps (drain, stop hook, flush, io/http
+  //? close, two Redis quits); dev runs only the drain and stop hooks.
   if (timeoutMs !== undefined && process.connected && typeof process.send === 'function') {
-    process.send({ type: 'luckystack:shutdown-grace', graceMs: budget * (stop ? 5 : 1) + 1000 }, undefined, undefined, (error) => {
+    process.send({ type: 'luckystack:shutdown-grace', graceMs: budget * (stop ? 6 : 2) + 1000 }, undefined, undefined, (error) => {
       if (error) getLogger().warn(`[shutdown] could not notify supervisor: ${error.message}`);
     });
   }
@@ -46,14 +47,19 @@ export const installShutdownSignalHandlers = ({
           await stop({ reason, timeoutMs: budget });
           return;
         }
-        let timer: ReturnType<typeof setTimeout> | undefined;
-        try {
-          await Promise.race([
-            dispatchHook('preServerStop', { reason, timeoutMs: budget }),
-            new Promise<void>((resolve) => { timer = setTimeout(resolve, budget); }),
-          ]);
-        } finally {
-          clearTimeout(timer);
+        //? Dev closes no listeners: the supervisor starts the next child only
+        //? after this one exits. Both hooks still run, each within the budget.
+        markServerShutdownStarted();
+        for (const hookName of ['preServerDrain', 'preServerStop'] as const) {
+          let timer: ReturnType<typeof setTimeout> | undefined;
+          try {
+            await Promise.race([
+              dispatchHook(hookName, { reason, timeoutMs: budget }),
+              new Promise<void>((resolve) => { timer = setTimeout(resolve, budget); }),
+            ]);
+          } finally {
+            clearTimeout(timer);
+          }
         }
       });
       if (error) getLogger().warn(`[shutdown] signal drain failed: ${error.message}`);

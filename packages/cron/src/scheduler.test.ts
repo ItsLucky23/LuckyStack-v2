@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => {
       (name: string, payload?: unknown) => Promise<{ stopped: boolean; signal?: unknown }>
     >(async () => ({ stopped: false })),
     registerHook: vi.fn(),
+    isServerShuttingDown: vi.fn(() => false),
     redis: {
       hset: vi.fn(async () => 1),
       hincrby: vi.fn(async () => 1),
@@ -47,6 +48,7 @@ vi.mock('@luckystack/core', () => {
     releaseLease: mocks.releaseLease,
     dispatchHook: mocks.dispatchHook,
     registerHook: mocks.registerHook,
+    isServerShuttingDown: mocks.isServerShuttingDown,
     getLogger: () => mocks.logger,
     formatKey: (namespace: string, suffix = ''): string =>
       suffix ? `test:${namespace}:${suffix}` : `test:${namespace}`,
@@ -103,6 +105,7 @@ beforeEach(() => {
   mocks.redis.hget.mockImplementation(async () => null);
   mocks.redis.set.mockImplementation(async () => 'OK');
   mocks.redis.get.mockImplementation(async () => null);
+  mocks.isServerShuttingDown.mockReturnValue(false);
 });
 
 afterEach(() => {
@@ -159,6 +162,51 @@ describe('leadership', () => {
     grantAllLeases();
     await vi.advanceTimersByTimeAsync(10_000);
     expect(isCronLeader()).toBe(true);
+  });
+
+  it('starts no new runs once shutdown begins and hands leadership back', async () => {
+    let releaseRunning!: () => void;
+    const slow = vi.fn(() => new Promise<void>((resolve) => { releaseRunning = resolve; }));
+    const fast = vi.fn();
+    registerCronJob({ name: 'job-slow', schedule: { everyMs: 1000 }, handler: slow });
+    registerCronJob({ name: 'job-fast', schedule: { everyMs: 1000 }, handler: fast });
+    await vi.advanceTimersByTimeAsync(1100);
+    expect(slow).toHaveBeenCalledTimes(1);
+    expect(fast).toHaveBeenCalledTimes(1);
+
+    const leaderAcquires = (): number =>
+      mocks.acquireLease.mock.calls.filter(([name]) => !String(name).startsWith('cron-run:')).length;
+    const acquiresBeforeShutdown = leaderAcquires();
+    mocks.isServerShuttingDown.mockReturnValue(true);
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(fast).toHaveBeenCalledTimes(1);
+    expect(isCronLeader()).toBe(false);
+    expect(mocks.releaseLease).toHaveBeenCalledWith(expect.any(String), 'leader-token');
+
+    //? The run that was already going is not interrupted; it finishes normally.
+    releaseRunning();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(mocks.releaseLease).toHaveBeenCalledWith('cron-run:job-slow', 'run-token-cron-run:job-slow');
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(slow).toHaveBeenCalledTimes(1);
+    expect(leaderAcquires()).toBe(acquiresBeforeShutdown);
+  });
+
+  it('does not start a run whose lease arrived after shutdown began', async () => {
+    const handler = vi.fn();
+    registerCronJob({ name: 'job-a', schedule: { everyMs: 1000 }, handler });
+    await vi.advanceTimersByTimeAsync(1);
+    let grantRunLease!: (token: string) => void;
+    mocks.acquireLease.mockImplementation((name: string) => (name.startsWith('cron-run:')
+      ? new Promise<string>((resolve) => { grantRunLease = resolve; })
+      : Promise.resolve('leader-token')));
+    await vi.advanceTimersByTimeAsync(1100);
+
+    mocks.isServerShuttingDown.mockReturnValue(true);
+    grantRunLease('run-token');
+    await vi.advanceTimersByTimeAsync(1);
+    expect(handler).not.toHaveBeenCalled();
+    expect(mocks.releaseLease).toHaveBeenCalledWith('cron-run:job-a', 'run-token');
   });
 
   it('does nothing when cronConfig.enabled is false', async () => {
