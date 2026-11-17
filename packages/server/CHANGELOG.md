@@ -5,6 +5,17 @@ All notable changes to `@luckystack/server` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.0] - 2026-11-17
+
+### Added
+
+- `preServerDrain` hook, dispatched and awaited at the start of graceful shutdown while the HTTP listener and Socket.io still serve (ADR 0089). Wait for long-running work there. It gets the same `{ reason, timeoutMs }` payload and per-step budget as `preServerStop`; repeating the first signal still forces exit during it.
+
+### Changed
+
+- Graceful shutdown no longer closes the HTTP listener before the hooks run. Order: `preServerDrain` → close HTTP and Socket.io together → `preServerStop` → tracker flush → Redis quits. Before, every request made during a long `preServerStop` drain was refused, which a single-instance proxy turned into a 502. Socket.io now closes before `preServerStop`; move a stop handler that still emits to sockets to `preServerDrain`.
+- The supervisor grace announced for a configured `shutdownTimeoutMs` covers the extra step: 6× the budget in production, 2× in dev, plus one second.
+
 ## [0.16.2] - 2026-11-16
 
 ### Fixed

@@ -214,6 +214,7 @@ export {
 } from './redisKeyFormatter';
 export type { RedisKeyFormatter } from './redisKeyFormatter';
 export { acquireLease, renewLease, releaseLease } from './lease';
+export { markServerShutdownStarted, isServerShuttingDown } from './serverShutdown';
 export {
   DEFAULT_CLIENT_KEY,
   registerPrismaClient,
@@ -407,6 +408,7 @@ export type {
   OnUploadCompletePayload,
   PreAvatarServePayload,
   PostAvatarServePayload,
+  PreServerDrainPayload,
   PreServerStopPayload,
   SyncHookName,
   SyncHookHandler,

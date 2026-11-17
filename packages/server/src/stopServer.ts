@@ -5,6 +5,7 @@ import {
   dispatchHook,
   flushErrorTrackers,
   getLogger,
+  markServerShutdownStarted,
   tryCatch,
 } from '@luckystack/core';
 import type { StopLuckyStackServerOptions } from './types';
@@ -77,15 +78,16 @@ const quitRedisClient = async (client: RedisClient): Promise<void> => {
 };
 
 /**
- * Run the graceful-shutdown sequence (MIS-016). Ordered + isolated:
- *   1. Stop accepting NEW HTTP connections (`httpServer.close()` is kicked off
- *      immediately; we await it last so in-flight requests can drain).
- *   2. Dispatch the core `preServerStop` hook so consumers can flush queues /
- *      release leases / close pools.
- *   3. `flushErrorTrackers()` so buffered events aren't lost — bounded by the
- *      timeout race.
- *   4. Close the Socket.io server, then the HTTP server, then `quit()` the
- *      Redis-adapter pub/sub clients.
+ * Run the graceful-shutdown sequence (MIS-016, ADR 0089). Ordered + isolated:
+ *   1. Mark the process as shutting down and dispatch `preServerDrain` while the
+ *      HTTP listener and Socket.io still serve, so long-running work can finish
+ *      and new requests still get an answer (e.g. "the server is restarting").
+ *   2. Stop accepting NEW HTTP connections and close Socket.io together, so
+ *      clients reconnect to the replacement server.
+ *   3. Dispatch `preServerStop` so consumers can flush queues / release leases
+ *      / close pools.
+ *   4. `flushErrorTrackers()` so buffered events aren't lost.
+ *   5. Await the io/http close, then `quit()` the Redis-adapter pub/sub clients.
  *
  * Every step is wrapped in {@link withTimeout} so a single failing/hanging step
  * cannot hang the whole shutdown — the sequence always settles within
@@ -100,11 +102,21 @@ export const runGracefulShutdown = async (
   const timeoutMs = options.timeoutMs ?? DEFAULT_SHUTDOWN_TIMEOUT_MS;
 
   getLogger().info(`[shutdown] graceful shutdown started (reason=${reason})`);
+  markServerShutdownStarted();
 
-  //? Kick off "stop accepting new connections" first. `httpServer.close()` only
-  //? finishes once existing connections drain, so START it now and AWAIT it near
-  //? the end — that way the hook + flush run while connections wind down.
+  //? Listeners stay open for the whole drain. Closing first (the pre-0.17
+  //? order) made every request during a long drain fail at the proxy (502):
+  //? Node refuses new connections and drops idle keep-alives on `close()`.
+  await withTimeout('preServerDrain-hook', timeoutMs, async () => {
+    await dispatchHook('preServerDrain', { reason, timeoutMs });
+  });
+
+  //? Start both closes now and await them after the stop hook + flush, so those
+  //? run while connections wind down. HTTP first: `io.close()` re-closes the
+  //? attached HTTP server, and that expected ERR_SERVER_NOT_RUNNING is ignored
+  //? on the io side only.
   const httpClosed = withTimeout('http-close', timeoutMs, () => closeHttpServer(httpServer));
+  const ioClosed = withTimeout('io-close', timeoutMs, () => closeIoServer(ioServer));
 
   //? Best-effort consumer shutdown hook. A returned stop signal is ignored — the
   //? process is going down — and the dispatcher already swallows per-handler
@@ -117,10 +129,7 @@ export const runGracefulShutdown = async (
   //? wedged transport (e.g. Sentry unreachable) can't hang shutdown.
   await withTimeout('flush-error-trackers', timeoutMs, () => flushErrorTrackers());
 
-  //? Close the socket layer before the HTTP server fully settles so no new
-  //? socket upgrades sneak in.
-  await withTimeout('io-close', timeoutMs, () => closeIoServer(ioServer));
-
+  await ioClosed;
   await httpClosed;
 
   //? Disconnect the Redis-adapter pub/sub clients — `io.close()` leaves them

@@ -20,6 +20,7 @@ import {
   acquireLease,
   dispatchHook,
   getLogger,
+  isServerShuttingDown,
   registerHook,
   releaseLease,
   renewLease,
@@ -140,7 +141,9 @@ const leaderTick = async (): Promise<void> => {
   state.leaderTickInFlight = true;
   try {
     const config = getCronConfig();
-    if (!config.enabled) {
+    //? A draining process hands leadership to another instance right away
+    //? instead of holding it, firing nothing, until the preServerStop teardown.
+    if (!config.enabled || isServerShuttingDown()) {
       if (state.leaderToken) {
         await releaseLease(config.leaseName, state.leaderToken);
         state.leaderToken = null;
@@ -229,6 +232,13 @@ const runJobCore = async (runtime: JobRuntime, scheduledFor: number): Promise<Er
     await incrementSkipStat(def.name);
     return null;
   }
+  //? Recheck after the async admission steps: the veto hook or the lease call
+  //? can take long enough for shutdown to begin after the tick admitted this run.
+  if (isServerShuttingDown()) {
+    logger.debug(`[cron] job "${def.name}" not started — server is shutting down`);
+    await releaseLease(runLeaseName, runToken);
+    return null;
+  }
 
   runtime.running = true;
   runtime.ranOnStart = true;
@@ -287,7 +297,10 @@ const runJob = async (runtime: JobRuntime, scheduledFor: number): Promise<Error 
 
 const schedulerTick = (): void => {
   const config = getCronConfig();
-  if (!config.enabled || !state.leaderToken) return;
+  //? No new runs once shutdown starts; running jobs finish. Read from core
+  //? rather than a preServerDrain handler: hook handlers run in registration
+  //? order, and an app's drain handler registered first can wait minutes.
+  if (!config.enabled || !state.leaderToken || isServerShuttingDown()) return;
   const now = Date.now();
   for (const runtime of jobRuntimes.values()) {
     if (runtime.nextRunAt === null || now < runtime.nextRunAt) continue;

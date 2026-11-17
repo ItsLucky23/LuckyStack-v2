@@ -36,6 +36,7 @@ vi.mock('@luckystack/core', () => {
     releaseLease: mocks.releaseLease,
     dispatchHook: mocks.dispatchHook,
     registerHook: mocks.registerHook,
+    isServerShuttingDown: () => false,
     getLogger: () => mocks.logger,
     formatKey: (namespace: string, suffix = ''): string =>
       suffix ? `test:${namespace}:${suffix}` : `test:${namespace}`,

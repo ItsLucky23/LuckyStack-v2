@@ -70,8 +70,9 @@ export interface CreateLuckyStackServerOptions {
   /**
    * Positive integer milliseconds for shutdown steps used by the framework's
    * signal handlers and by stop()/close() unless timeoutMs is overridden.
-   * Also passed to preServerStop. Omit to retain 10s production / 2s dev signals.
-   * Production applies this budget per step, not to the whole sequence.
+   * Also passed to preServerDrain and preServerStop. Omit to retain 10s
+   * production / 2s dev signals. Production applies this budget per step
+   * (the drain hook is one step), not to the whole sequence.
    */
   shutdownTimeoutMs?: number;
   /**
@@ -108,14 +109,15 @@ export interface CreateLuckyStackServerOptions {
 
 export interface StopLuckyStackServerOptions {
   /**
-   * Why the server is stopping — threaded into the `preServerStop` hook payload.
+   * Why the server is stopping — threaded into the `preServerDrain` and
+   * `preServerStop` hook payloads.
    * Defaults to `'manual'` for a programmatic `stop()`; the signal handlers pass
    * the received signal name.
    */
   reason?: 'SIGTERM' | 'SIGINT' | 'SIGHUP' | 'manual';
   /**
-   * Soft budget (ms) per step of the shutdown sequence — the `preServerStop` hook
-   * fan-out, the bounded `flushErrorTrackers()` race, and closing the
+   * Soft budget (ms) per step of the shutdown sequence — the `preServerDrain`
+   * and `preServerStop` hook fan-outs, the bounded `flushErrorTrackers()` race, and closing the
    * http/io/redis-adapter handles. Each step is wrapped so a single hanging step
    * cannot stall the others indefinitely. Defaults to the server's configured
    * shutdownTimeoutMs, or `10000` when omitted.
@@ -157,10 +159,10 @@ export interface RunningLuckyStackServer {
    */
   afterListen: (task: () => void | Promise<void>, options?: AfterListenOptions) => Promise<void>;
   /**
-   * Graceful shutdown (MIS-016). Stops accepting new connections, dispatches the
-   * core `preServerStop` hook, flushes error-trackers (bounded by a timeout
-   * race), and closes the Socket.io server, the HTTP server, and the
-   * Redis-adapter pub/sub clients. Every step is isolated + time-bounded so one
+   * Graceful shutdown (MIS-016). Dispatches the core `preServerDrain` hook while
+   * still serving, then stops accepting new connections and closes Socket.io,
+   * dispatches `preServerStop`, flushes error-trackers (bounded by a timeout
+   * race), and quits the Redis-adapter pub/sub clients. Every step is isolated + time-bounded so one
    * failing/hanging step cannot hang the whole shutdown. Idempotent — a second
    * call returns the in-flight shutdown promise. Resolves once shutdown
    * completes (or the timeout forces it to finish).
