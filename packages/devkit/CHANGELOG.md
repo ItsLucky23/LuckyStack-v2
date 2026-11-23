@@ -5,6 +5,12 @@ All notable changes to `@luckystack/devkit` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.17.1] - 2026-11-23
+
+### Changed
+
+- **Type-map generation is about 2–3× faster.** Most of the run waited on synchronous requests to the TypeScript 7 compiler process, and most requests repeated an earlier one. The server Program's checker now remembers the answers of `typeToString`, `getPropertyOfType` and `getTypeOfSymbol` for as long as that Program lives; a rebuilt Program (after a source change or a dev reload) starts with an empty memo. The scope query for fallback type symbols is skipped when the type text has no candidate name. Generated files are unchanged. Measured on a consumer with 330 API and 57 sync routes (reference patch): 18.8–20.6 s down to 6.5–8.1 s.
+
 ## [0.16.2] - 2026-11-16
 
 ### Fixed

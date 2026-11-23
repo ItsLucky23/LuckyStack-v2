@@ -76,6 +76,9 @@ const collectFallbackSymbolsFromTypeText = (
   checker: Checker,
 ): UnresolvedTypeSymbol[] => {
   const names = new Set((typeText.match(TYPE_NAME_PATTERN) ?? []).filter((name) => !KNOWN_GLOBAL_TYPE_NAMES.has(name)));
+  //? The scope query costs ~2 ms of IPC and nearly every type text has no
+  //? candidate name, so skip it when nothing would be looked up.
+  if (names.size === 0) return [];
   const symbolsInScope = checker.getSymbolsInScope(
     scopeNode,
     SymbolFlags.TypeAlias | SymbolFlags.Interface | SymbolFlags.Class | SymbolFlags.Enum | SymbolFlags.Alias,
