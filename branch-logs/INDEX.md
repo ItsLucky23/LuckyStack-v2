@@ -4,6 +4,7 @@
 
 | Branch | Ticket(s) | Last updated | Status | Entries |
 |---|---|---|---|---|
+| perf/devkit-checker-memo | (none) | 2026-11-23 11:40 | active — devkit: server checker memoizes `typeToString` / `getPropertyOfType` / `getTypeOfSymbol` per Program, scope query skipped without candidate names; type-map generation ~2× faster here, output identical; release v0.17.1 | 1 |
 | feat/oauth-account-id-0.16 | (none) | 2026-10-20 15:20 | merged 2026-10-20 — naar GitHub `main`, release v0.16.0: OAuth-accounts gekoppeld aan de vaste provider-ID (ADR 0086) — sluit de Microsoft-multi-tenant-overname, alle ingebouwde providers, ongekoppelde rij alleen bij geverifieerd e-mailadres; docs-ui-paneel klapt niet meer in bij een klik erin; nooit gekozen sync-sjabloon weg. Twee reviewrondes (14 punten). | 1 |
 | feat/server-drain-phase | (none) | 2026-11-17 | active — `preServerDrain` before closing HTTP/Socket.io, cron stops new runs on shutdown; ADR 0089, release v0.17.0 | 1 |
 | feat/server-shutdown-timeout | (none) | 2026-11-16 | merged 2026-11-16 — PR #12, release v0.16.2: typed signal shutdown budgets and supervisor grace; ADR 0088 | 1 |

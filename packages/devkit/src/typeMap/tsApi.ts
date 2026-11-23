@@ -3,6 +3,7 @@ import path from 'node:path';
 import { API, type Project, type Snapshot, type TranspileOutput } from 'typescript-7-api/sync';
 import type { ScriptKind, SourceFile } from 'typescript-7-api/ast';
 import { ROOT_DIR } from '@luckystack/core';
+import { memoizeChecker } from './checkerMemo';
 
 //? The TypeScript 7 API runs the compiler as a separate Go process and talks to
 //? it over a pipe. This module is the ONE owner of that process: everything in
@@ -39,6 +40,8 @@ export const openTsconfigProject = (tsconfigPath: string): TsconfigProject => {
 //? The server Program: every file `tsconfig.server.json` includes, plus the
 //? checker over it. Cached until `invalidateProgramCache()` — the generator and
 //? the hot-reload loader invalidate it whenever source files may have changed.
+//? Its checker memoizes the repeated queries (see checkerMemo); the memo is
+//? created here, with the Program, so invalidating drops both together.
 export const getServerProgram = (): Project => {
   if (serverProject) return serverProject;
 
@@ -46,9 +49,12 @@ export const getServerProgram = (): Project => {
   if (!fs.existsSync(tsconfigPath)) throw new Error('[TypeProgram] tsconfig.server.json not found');
 
   const { project, snapshot } = openTsconfigProject(tsconfigPath);
+  const checker = memoizeChecker(project.checker);
   serverSnapshot = snapshot;
-  serverProject = project;
-  return project;
+  serverProject = new Proxy(project, {
+    get: (target, property): unknown => (property === 'checker' ? checker : Reflect.get(target, property, target)),
+  });
+  return serverProject;
 };
 
 export const invalidateProgramCache = (): void => {

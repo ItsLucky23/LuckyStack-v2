@@ -331,7 +331,9 @@ const WIRE_PROJECTED_TYPES = new Map<string, string>([['Date', 'string']]);
 //? (Rule 1 is right for `Date`: `createdAt` is verified to come back as an ISO
 //? string on the same measured payload, both standalone and through the entity.)
 const resolveToJsonReturnType = (type: Type, checker: Checker): Type | null => {
-  const toJson = type.getProperty('toJSON');
+  //? Through the checker, not `type.getProperty`: the same compiler request,
+  //? but the server checker memoizes it (checkerMemo) and this runs per type.
+  const toJson = checker.getPropertyOfType(type, 'toJSON');
   if (!toJson) return null;
   if (!toJson.valueDeclaration && toJson.declarations.length === 0) return null;
   //? The type of a symbol AT its own declaration is its non-missing type; asking
