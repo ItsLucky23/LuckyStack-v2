@@ -6,7 +6,7 @@ Add optional features to an **existing** LuckyStack app:
 npx luckystack add <feature>
 ```
 
-Run `npx luckystack --help` for current features and flags. To audit environment or translation references, run `npx luckystack check-env` or `npx luckystack check-i18n`; review the generated reports before changing secrets or translations. For an existing project's framework-owned copied files, run `npx luckystack update` and inspect `.new` sidecars rather than replacing customizations.
+Run `npx luckystack --help` for current features and flags. To audit environment or translation references, run `npx luckystack check-env` or `npx luckystack check-i18n`; review the generated reports before changing secrets or translations. For an existing project's framework-owned copied files, run `npx luckystack update`: it merges the framework's change between versions into files you edited. Review the merged files with `git diff`, and carry over the conflicts from the patch the report names.
 
 ## Why use `add` instead of only installing a dependency?
 

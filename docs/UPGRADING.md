@@ -19,7 +19,7 @@ Do not silently enable new features. Explain relevant security additions and bre
    ```
 
    Review the update report and proposed replacements. Use the broader app scope only when those changes are intended.
-5. Merge replacement content while preserving consumer changes. A `.new` sidecar contains replacement content; a `.removed` marker is only a retirement notice, **never content to merge into a file**. Inspect all retired files and their references, propose removal in one batch, and wait for approval.
+5. Review what the update merged and carry over what it could not. For a file the project edited, `update` merges only the framework's change between the two versions (ADR 0090): a clean merge is already in the file, so review it with `git diff`. A conflict is not applied; the report names a patch file under `dump/` that holds only the framework's change, to carry over while preserving consumer changes. A `.new` sidecar (written only when no merge was possible) contains the whole new file. A `.removed` marker is only a retirement notice, **never content to merge into a file**. Inspect all retired files and their references, propose removal in one batch, and wait for approval.
 6. Adopt only the optional features the user selected. Use the CLI for new packages; separately review configuration, schema and secret prerequisites for features within an already-installed package. Never infer migration permission from an upgrade request.
 7. Regenerate artifacts and run the project's lint, build and unit-test gates. Verify changed flows, including failure/denial behaviour, in an authorized test environment.
 

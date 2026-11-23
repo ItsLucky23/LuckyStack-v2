@@ -21,4 +21,4 @@ Follow the generated package scripts for your selected data layer; if the scaffo
 
 Replace the sample page content and fill in `docs/PRODUCT.md` with what this application is for and who uses it. Add any new page intent beside the page. The selected features and their configuration live in your source and installed package types; this README is not a second inventory. Run `npm run generateArtifacts` after adding routes if your development setup has not already regenerated route types.
 
-For the design behind routing, auth, packages and generated artifacts, consult `docs/luckystack/`. For existing-project framework copy updates, run `npx luckystack update` after upgrading packages and inspect `.new` sidecars before adopting changes.
+For the design behind routing, auth, packages and generated artifacts, consult `docs/luckystack/`. For existing-project framework copy updates, run `npx luckystack update` after upgrading packages, then review the merged files with `git diff` and the update report before adopting changes.

@@ -8,8 +8,17 @@
 //? Semantics (the whole point — NEVER destroy user edits):
 //?   - file missing locally            -> ADD (new framework file)
 //?   - local hash == manifest hash     -> PRISTINE -> overwrite with new render
-//?   - local hash != manifest hash     -> USER-MODIFIED -> write `<file>.new`
-//?     sidecar + list it in the report for an AI-assisted (or manual) merge
+//?   - local hash != manifest hash     -> USER-MODIFIED. Compare the framework
+//?     with itself: the render of the version the last update used (the base)
+//?     against the new render.
+//?       - base == new                   -> KEPT: the framework did not change
+//?         this file in this version jump, nothing to merge
+//?       - otherwise                     -> three-way merge (local, base, new):
+//?         a clean merge is written into the file (review with `git diff`); a
+//?         conflict writes nothing and lands in a patch file under dump/ with
+//?         only the framework's change, for a manual or AI-assisted merge
+//?     Without a base render (old version unavailable, no git) the old rule
+//?     applies: a `<file>.new` sidecar holding the whole new file.
 //?   - no manifest at all (pre-0.4.1 scaffold) -> sidecar-only mode for
 //?     everything that differs; nothing is ever overwritten blind.
 //?
@@ -29,6 +38,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { ok, type ConsumerProject, type Result } from '../lib/project';
 import { writeDumpLog } from '../lib/scan';
+import { frameworkDiff, mergeThreeWay } from '../lib/threeWayMerge';
 import { AUTH_MODES, EMAIL_PROVIDERS, MONITORING_PROVIDERS, OAUTH_PROVIDERS } from '../featureOptions';
 import { REGISTRY } from '../registry';
 
@@ -310,7 +320,10 @@ export const choicesToFlags = (choices: Record<string, unknown>): string[] => {
   return flags;
 };
 
-export type UpdateAction = 'add' | 'overwrite' | 'sidecar' | 'unchanged' | 'ignored' | 'needsPackage';
+export type UpdateAction = 'add' | 'overwrite' | 'merge' | 'sidecar' | 'kept' | 'unchanged' | 'ignored' | 'needsPackage';
+//? What applying a plan did. A planned `merge` ends as `merged` (clean, written),
+//? `conflict` (patch file) or, without git, `sidecar`.
+export type UpdateOutcome = Exclude<UpdateAction, 'merge'> | 'merged' | 'conflict';
 
 export interface UpdatePlanEntry {
   path: string;
@@ -347,6 +360,29 @@ export const installHintFor = (pkg: string): string => {
   return entry ? `npx luckystack add ${entry.id}` : `npm install ${pkg}`;
 };
 
+//? A local file that differs from the fresh render. The recorded hash is the
+//? render the project last took over unedited; local equal to it (or to the
+//? base render) means the project never edited the file. For an edited file
+//? the question is only whether the FRAMEWORK changed it, so the base render
+//? (the version of the last update) is compared with the new one. Comparing
+//? against the recorded hash instead gave a `.new` for every edit on every
+//? run, and that hash never moved for an edited file: a consumer with ~100
+//? deliberately edited files got ~100 sidecars per update, nearly all holding
+//? changes it had merged months before.
+//? Without a base for the file, the recorded hash is the best available proof
+//? that the framework left it alone; without either, only a sidecar is safe.
+const classifyDifferingFile = (
+  localHash: string,
+  recorded: string | undefined,
+  freshHash: string,
+  baseHash: string | undefined,
+): UpdateAction => {
+  if (localHash === recorded || localHash === baseHash) return 'overwrite';
+  if (baseHash !== undefined) return baseHash === freshHash ? 'kept' : 'merge';
+  if (recorded !== undefined && freshHash === recorded) return 'kept';
+  return 'sidecar';
+};
+
 export interface UpdatePlan {
   entries: UpdatePlanEntry[];
   manifestPresent: boolean;
@@ -364,10 +400,13 @@ export const planUpdate = (
   scope: UpdateScope = 'framework',
   isIgnored: (relativePath: string) => boolean = createIgnoreMatcher(readScaffoldIgnore(consumerRoot)),
   declaredDependencies: ReadonlySet<string> = readDeclaredDependencies(consumerRoot),
+  //? The scaffold manifest of the base render (see classifyDifferingFile).
+  baseManifest: ScaffoldManifest | null = null,
 ): UpdatePlan => {
   const recordedHashes = new Map(
     (consumerManifest?.files ?? []).map((entry) => [entry.path, entry.sha256]),
   );
+  const baseHashes = new Map((baseManifest?.files ?? []).map((entry) => [entry.path, entry.sha256]));
   const entries: UpdatePlanEntry[] = [];
   for (const fresh of freshManifest.files) {
     if (!isUpdatablePath(fresh.path, scope)) continue;
@@ -394,21 +433,23 @@ export const planUpdate = (
       continue;
     }
     const recorded = recordedHashes.get(fresh.path);
-    entries.push({
-      path: fresh.path,
-      action: recorded !== undefined && localHash === recorded ? 'overwrite' : 'sidecar',
-      freshSha256: fresh.sha256,
-    });
+    const action = classifyDifferingFile(localHash, recorded, fresh.sha256, baseHashes.get(fresh.path));
+    entries.push({ path: fresh.path, action, freshSha256: fresh.sha256 });
   }
   return { entries, manifestPresent: consumerManifest !== null };
 };
 
+//? The base render applyUpdate merges against: its directory and version, or
+//? why there is none (the report says so, since edited files then fall back
+//? to full `.new` sidecars). `null` = not attempted (no manifest).
+export type BaseRender = { root: string; version: string } | { root: null; reason: string } | null;
+
 /**
  * Execute a plan: copy adds + pristine overwrites from the fresh render,
- * write `.new` sidecars for user-modified files, refresh the consumer
- * manifest (files we wrote, and files already identical to the new render,
- * get their new hash; sidecarred files keep the old baseline), and drop a
- * dump/ report.
+ * merge framework changes into edited files, write `.new` sidecars where no
+ * merge is possible, refresh the consumer manifest (files we wrote, merged
+ * or proved current get their new hash; sidecarred files keep the old
+ * baseline), and drop a dump/ report.
  */
 export const applyUpdate = (
   project: ConsumerProject,
@@ -417,9 +458,15 @@ export const applyUpdate = (
   freshRoot: string,
   freshManifest: ScaffoldManifest,
   scope: UpdateScope = 'framework',
-): { reportPath: string; counts: Record<UpdateAction, number> } => {
-  const counts: Record<UpdateAction, number> = { add: 0, overwrite: 0, sidecar: 0, unchanged: 0, ignored: 0, needsPackage: 0 };
+  base: BaseRender = null,
+): { reportPath: string; counts: Record<UpdateOutcome, number> } => {
+  const counts: Record<UpdateOutcome, number> = {
+    add: 0, overwrite: 0, merged: 0, conflict: 0, sidecar: 0, kept: 0, unchanged: 0, ignored: 0, needsPackage: 0,
+  };
   const sidecars: string[] = [];
+  const merged: string[] = [];
+  const conflicts: { path: string; diff: string | null }[] = [];
+  let mergeUnavailable: string | null = null;
   const heldBack: { path: string; requiredPackage: string }[] = [];
   const added: string[] = [];
   const overwritten: string[] = [];
@@ -427,9 +474,9 @@ export const applyUpdate = (
   const rebaselined: UpdatePlanEntry[] = [];
 
   for (const entry of plan.entries) {
-    counts[entry.action] += 1;
     const freshAbsolute = path.join(freshRoot, entry.path);
     const localAbsolute = path.join(project.root, entry.path);
+    if (entry.action !== 'merge') counts[entry.action] += 1;
     switch (entry.action) {
       case 'add':
       case 'overwrite': {
@@ -440,9 +487,41 @@ export const applyUpdate = (
         else overwritten.push(entry.path);
         break;
       }
+      case 'merge': {
+        const baseAbsolute = base?.root ? path.join(base.root, entry.path) : null;
+        const result = baseAbsolute
+          ? mergeThreeWay(localAbsolute, baseAbsolute, freshAbsolute)
+          : { kind: 'unavailable' as const, reason: 'no base render' };
+        if (result.kind === 'unavailable' || baseAbsolute === null) {
+          if (result.kind === 'unavailable') mergeUnavailable ??= result.reason;
+          counts.sidecar += 1;
+          fs.copyFileSync(freshAbsolute, `${localAbsolute}.new`);
+          sidecars.push(entry.path);
+          break;
+        }
+        if (result.kind === 'clean') {
+          counts.merged += 1;
+          fs.writeFileSync(localAbsolute, result.merged);
+          merged.push(entry.path);
+        } else {
+          counts.conflict += 1;
+          conflicts.push({ path: entry.path, diff: frameworkDiff(entry.path, baseAbsolute, freshAbsolute) });
+        }
+        //? The version jump is handled: the next update starts from the new
+        //? version, so this change is not offered again (the patch file keeps
+        //? an unresolved conflict).
+        rebaselined.push(entry);
+        break;
+      }
       case 'sidecar': {
         fs.copyFileSync(freshAbsolute, `${localAbsolute}.new`);
         sidecars.push(entry.path);
+        break;
+      }
+      case 'kept': {
+        //? Nothing written. The baseline moves to the new render: the project's
+        //? edit already sits on top of everything the framework shipped so far.
+        rebaselined.push(entry);
         break;
       }
       case 'ignored': {
@@ -517,12 +596,27 @@ export const applyUpdate = (
     );
   }
 
+  //? Only the framework's own change per file, named after the version jump so
+  //? re-running the same jump replaces it instead of piling up copies.
+  const fromVersion = consumerManifest?.luckystackVersion ?? 'unknown';
+  const patchPath = `dump/UPDATE_${fromVersion}_to_${freshManifest.luckystackVersion}.patch`;
+  if (conflicts.length > 0) {
+    fs.mkdirSync(path.join(project.root, 'dump'), { recursive: true });
+    const patch = conflicts
+      .map((conflict) => conflict.diff ?? `# ${conflict.path}: the framework diff could not be produced (git missing?)\n`)
+      .join('');
+    fs.writeFileSync(path.join(project.root, patchPath), patch);
+  }
+
   const lines: string[] = [
     `luckystack update (${scope} scope) — ${consumerManifest?.luckystackVersion ?? 'unknown (no manifest)'} -> ${freshManifest.luckystackVersion}`,
     '',
     `added:       ${String(counts.add)}`,
-    `overwritten: ${String(counts.overwrite)} (pristine — hash matched the scaffold manifest)`,
+    `overwritten: ${String(counts.overwrite)} (pristine — you had not edited these)`,
+    `merged:      ${String(counts.merged)} (you edited these; the framework change merged in cleanly)`,
+    `conflicts:   ${String(counts.conflict)} (you edited these; the framework change overlaps your edit — see ${patchPath})`,
     `sidecars:    ${String(counts.sidecar)} (user-modified — new version written as <file>.new)`,
+    `kept:        ${String(counts.kept)} (you edited these; the framework did not change them, nothing to merge)`,
     `unchanged:   ${String(counts.unchanged)}`,
     `ignored:     ${String(counts.ignored)} (opted out via ${IGNORE_FILE_NAME})`,
     '',
@@ -585,6 +679,36 @@ export const applyUpdate = (
     lines.push(
       'NOTE: no .luckystack/scaffold.json manifest was found (project scaffolded',
       'before 0.4.1). Running in sidecar-only mode: nothing was overwritten.',
+      '',
+    );
+  }
+  if (base?.root === null) {
+    lines.push(
+      `NOTE: no base render (${base.reason}), so framework changes could not be`,
+      'merged into edited files; those got a full `.new` sidecar instead.',
+      '',
+    );
+  }
+  if (mergeUnavailable !== null) {
+    lines.push(`NOTE: merging was not possible (${mergeUnavailable}); edited files got a full \`.new\` sidecar instead.`, '');
+  }
+  if (merged.length > 0) {
+    lines.push(
+      'Framework changes merged into files you edited (your edits are kept; review',
+      'each with `git diff` and run the typecheck — a clean text merge can still break code):',
+      ...merged.map((p) => `  - ${p}`),
+      '',
+    );
+  }
+  if (conflicts.length > 0) {
+    lines.push(
+      `Framework changes that overlap your edits — NOT applied, collected in ${patchPath}:`,
+      ...conflicts.map((conflict) => `  - ${conflict.path}`),
+      '',
+      'AI merge instruction: the patch holds only what the framework changed in',
+      'this version jump. For each file, carry that change into the file while',
+      'preserving the local edits, then review with `git diff`. The next update',
+      'starts from the new version and will not offer these changes again.',
       '',
     );
   }
@@ -740,6 +864,44 @@ const readInstalledCoreVersion = (root: string): string | null => {
   }
 };
 
+const noCleanup = (): void => {
+  //? Nothing to remove: the base is the fresh render or was never created.
+};
+interface BaseRenderResult { base: BaseRender; manifest: ScaffoldManifest | null; cleanup: () => void }
+const noBase = (reason: string): BaseRenderResult => ({ base: { root: null, reason }, manifest: null, cleanup: noCleanup });
+
+//? A plain release version only: it becomes an npx package spec.
+const RELEASE_VERSION = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.]+)?$/;
+
+//? The base render: the framework at the version the last update used, with
+//? the same recorded choices, so comparing it with the fresh render shows only
+//? what the framework changed. The same version needs no second render.
+const renderBase = (
+  options: UpdateOptions,
+  consumerManifest: ScaffoldManifest | null,
+  freshRoot: string,
+  freshManifest: ScaffoldManifest,
+): BaseRenderResult | null => {
+  if (!consumerManifest) return null;
+  const version = consumerManifest.luckystackVersion;
+  if (version === freshManifest.luckystackVersion) {
+    return { base: { root: freshRoot, version }, manifest: freshManifest, cleanup: noCleanup };
+  }
+  if (!RELEASE_VERSION.test(version)) return noBase(`the manifest version ${JSON.stringify(version)} is not a release version`);
+  const render = (options.renderFreshScaffold ?? renderScaffoldToTemp)({
+    cliVersion: version,
+    projectName: consumerManifest.projectName,
+    choices: consumerManifest.choices,
+  });
+  if (!render) return noBase(`create-luckystack-app@${version} could not be rendered`);
+  const manifest = readScaffoldManifest(render.projectDir);
+  if (!manifest) {
+    render.cleanup();
+    return noBase(`create-luckystack-app@${version} wrote no manifest`);
+  }
+  return { base: { root: render.projectDir, version }, manifest, cleanup: render.cleanup };
+};
+
 export const runUpdate = (project: ConsumerProject, options: UpdateOptions): Result<void> => {
   const scope: UpdateScope = options.scope ?? 'framework';
   const consumerManifest = readScaffoldManifest(project.root);
@@ -792,11 +954,20 @@ export const runUpdate = (project: ConsumerProject, options: UpdateOptions): Res
     console.log(
       'Running in APP scope (--app): framework-authored src/ UI + routes + config are\n' +
         'refreshed too. Your own app files (never in the fresh render) are untouched, and\n' +
-        'any file you edited gets a `.new` sidecar — nothing you changed is overwritten.',
+        'framework changes are merged into files you edited — your edits are kept.',
     );
   }
 
-  const plan = planUpdate(project.root, consumerManifest, freshManifest, scope);
+  const baseRender = renderBase(options, consumerManifest, render.projectDir, freshManifest);
+  const plan = planUpdate(
+    project.root,
+    consumerManifest,
+    freshManifest,
+    scope,
+    undefined,
+    undefined,
+    baseRender?.manifest ?? null,
+  );
   const { reportPath, counts } = applyUpdate(
     project,
     plan,
@@ -804,14 +975,20 @@ export const runUpdate = (project: ConsumerProject, options: UpdateOptions): Res
     render.projectDir,
     freshManifest,
     scope,
+    baseRender?.base ?? null,
   );
+  baseRender?.cleanup();
   render.cleanup();
 
   console.log(
     `\nUpdate complete (${scope} scope): +${String(counts.add)} added, ${String(counts.overwrite)} refreshed, ` +
-      `${String(counts.sidecar)} need a merge (\`.new\` sidecars), ${String(counts.unchanged)} already current.`,
+      `${String(counts.merged)} merged into your edits, ${String(counts.conflict)} conflicts, ` +
+      `${String(counts.sidecar)} \`.new\` sidecars, ${String(counts.kept)} edited but unchanged upstream, ${String(counts.unchanged)} already current.`,
   );
   console.log(`Report: ${reportPath}`);
+  if (counts.merged + counts.conflict > 0) {
+    console.log('Review the merged files with git diff and run the typecheck; carry the conflicts over from the patch named in the report.');
+  }
   if (counts.sidecar > 0) {
     console.log('Merge the listed `.new` sidecars (an AI agent can apply the report), then review with git diff.');
   }
@@ -825,7 +1002,7 @@ export const runUpdate = (project: ConsumerProject, options: UpdateOptions): Res
   if (fs.existsSync(path.join(project.root, 'CLAUDE.md'))) {
     console.log('Legacy CLAUDE.md remains untouched. Review its custom rules against AGENTS.md before deciding whether to retire it; update never deletes it.');
   }
-  if (scope === 'framework' && counts.add + counts.overwrite + counts.sidecar === 0) {
+  if (scope === 'framework' && counts.add + counts.overwrite + counts.merged + counts.conflict + counts.sidecar === 0) {
     console.log('Tip: framework-owned docs/scripts are current. Run `npx luckystack update --app` to also refresh the scaffolded src/ UI + routes (e.g. after a feature release).');
   }
   return ok();

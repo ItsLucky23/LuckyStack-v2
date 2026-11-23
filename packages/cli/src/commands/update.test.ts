@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import {
   applyUpdate,
   choicesToFlags,
@@ -59,6 +60,10 @@ const manifestFor = (
   write(root, MANIFEST_RELATIVE_PATH, `${JSON.stringify(manifest, null, 2)}\n`);
   return manifest;
 };
+
+//? The old version cannot be rendered, so edited files take the `.new` fallback.
+const freshOnly = (version: string) => ({ cliVersion }: { cliVersion: string }) =>
+  cliVersion === version ? { projectDir: freshDir, cleanup: () => undefined } : null;
 
 const project = (): ConsumerProject => ({
   root: consumerDir,
@@ -217,6 +222,31 @@ describe('planUpdate', () => {
     });
   });
 
+  it('keeps an edited file without a sidecar when the framework did not change it', () => {
+    //? Regression: every project edit used to get a `.new` on every run, even
+    //? when the fresh render equalled the baseline — pure noise to merge.
+    write(consumerDir, 'scripts/generateServerRequests.ts', '// LOCAL DELTA\nlocal\n');
+    write(consumerDir, 'docs/luckystack/GUIDE.md', 'USER EDITED\n');
+    const consumerManifest = manifestFor(consumerDir, {
+      'scripts/generateServerRequests.ts': 'template\n',
+      'docs/luckystack/GUIDE.md': 'old guide\n',
+    });
+    write(freshDir, 'scripts/generateServerRequests.ts', 'template\n');
+    write(freshDir, 'docs/luckystack/GUIDE.md', 'new guide\n');
+    const freshManifest = manifestFor(freshDir, {
+      'scripts/generateServerRequests.ts': 'template\n',
+      'docs/luckystack/GUIDE.md': 'new guide\n',
+    }, { luckystackVersion: '0.5.0' });
+
+    const plan = planUpdate(consumerDir, consumerManifest, freshManifest);
+    const byPath = Object.fromEntries(plan.entries.map((e) => [e.path, e.action]));
+    expect(byPath).toEqual({
+      'scripts/generateServerRequests.ts': 'kept',
+      //? Edited AND changed upstream: still a merge.
+      'docs/luckystack/GUIDE.md': 'sidecar',
+    });
+  });
+
   it('without a manifest, differing files are sidecar-only (never overwrite)', () => {
     write(consumerDir, 'CLAUDE.md', 'old claude\n');
     write(freshDir, 'CLAUDE.md', 'new claude\n');
@@ -260,7 +290,7 @@ describe('applyUpdate + runUpdate (injected fresh render)', () => {
 
     const result = runUpdate(project(), {
       cliVersion: '0.5.0',
-      renderFreshScaffold: () => ({ projectDir: freshDir, cleanup: () => undefined }),
+      renderFreshScaffold: freshOnly('0.5.0'),
     });
     expect(result.ok).toBe(true);
 
@@ -450,7 +480,7 @@ describe('applyUpdate + runUpdate (injected fresh render)', () => {
     const result = runUpdate(project(), {
       cliVersion: '0.6.0',
       scope: 'app',
-      renderFreshScaffold: () => ({ projectDir: freshDir, cleanup: () => undefined }),
+      renderFreshScaffold: freshOnly('0.6.0'),
     });
     expect(result.ok).toBe(true);
 
@@ -640,5 +670,97 @@ describe('a file that imports an optional package the project does not have', ()
 
     const plan = planUpdate(consumerDir, consumerManifest, freshManifest, 'app');
     expect(plan.entries.map((entry) => entry.action)).toEqual(['add']);
+  });
+});
+
+//? Edited files are compared framework-to-framework: the render of the version
+//? the last update used (base) against the new render (fresh).
+describe('version-jump merge for edited files', () => {
+  const FILE = 'scripts/generateServerRequests.ts';
+  let baseDir: string;
+  beforeEach(() => {
+    baseDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ls-upd-base-'));
+  });
+  afterEach(() => {
+    fs.rmSync(baseDir, { recursive: true, force: true });
+  });
+
+  const renders = ({ cliVersion }: { cliVersion: string }) => {
+    if (cliVersion === '0.5.0') return { projectDir: baseDir, cleanup: () => undefined };
+    if (cliVersion === '0.6.0') return { projectDir: freshDir, cleanup: () => undefined };
+    return null;
+  };
+  //? `recorded` stands for a baseline that never moved since the first
+  //? scaffold — the state that used to produce a sidecar on every run.
+  const setup = (local: string, base: string, fresh: string, recorded = 'ancient template\n'): void => {
+    write(consumerDir, FILE, local);
+    manifestFor(consumerDir, { [FILE]: recorded }, { luckystackVersion: '0.5.0' });
+    write(baseDir, FILE, base);
+    manifestFor(baseDir, { [FILE]: base }, { luckystackVersion: '0.5.0' });
+    write(freshDir, FILE, fresh);
+    manifestFor(freshDir, { [FILE]: fresh }, { luckystackVersion: '0.6.0' });
+  };
+  const update = (): void => {
+    expect(runUpdate(project(), { cliVersion: '0.6.0', renderFreshScaffold: renders }).ok).toBe(true);
+  };
+  const latestReport = (): string => {
+    const dumpDir = path.join(consumerDir, 'dump');
+    const reports = fs.readdirSync(dumpDir)
+      .filter((f) => f.startsWith('UPDATE_') && f.endsWith('.log'))
+      .map((f) => path.join(dumpDir, f))
+      .toSorted((a, b) => fs.statSync(a).mtimeMs - fs.statSync(b).mtimeMs);
+    return fs.readFileSync(String(reports.at(-1)), 'utf8');
+  };
+  const local = (): string => fs.readFileSync(path.join(consumerDir, FILE), 'utf8');
+  const recordedHash = (): string | undefined =>
+    readScaffoldManifest(consumerDir)?.files.find((entry) => entry.path === FILE)?.sha256;
+
+  it('writes nothing when the framework did not change the file, even with an old baseline', () => {
+    setup('// LOCAL DELTA\ntemplate\n', 'template\n', 'template\n');
+    update();
+    expect(local()).toBe('// LOCAL DELTA\ntemplate\n');
+    expect(fs.existsSync(path.join(consumerDir, `${FILE}.new`))).toBe(false);
+    expect(latestReport()).toContain('kept:        1');
+    expect(recordedHash()).toBe(sha('template\n'));
+  });
+
+  it('merges a framework change that does not overlap the edit into the file', () => {
+    setup('a LOCAL\nb\nc\nd\ne\n', 'a\nb\nc\nd\ne\n', 'a\nb\nc\nd\ne NEW\n');
+    update();
+    expect(local()).toBe('a LOCAL\nb\nc\nd\ne NEW\n');
+    expect(fs.existsSync(path.join(consumerDir, `${FILE}.new`))).toBe(false);
+    const report = latestReport();
+    expect(report).toContain('merged:      1');
+    expect(report).toContain(`  - ${FILE}`);
+    expect(readScaffoldManifest(consumerDir)?.luckystackVersion).toBe('0.6.0');
+
+    //? Running the same jump again changes nothing: the base is now 0.6.0.
+    update();
+    expect(local()).toBe('a LOCAL\nb\nc\nd\ne NEW\n');
+    expect(latestReport()).toContain('kept:        1');
+  });
+
+  it('leaves an overlapping change out of the file and writes only the framework diff to a patch', () => {
+    setup('a\nb LOCAL\nc\n', 'a\nb\nc\n', 'a\nb NEW\nc\n');
+    update();
+    expect(local()).toBe('a\nb LOCAL\nc\n');
+    expect(fs.existsSync(path.join(consumerDir, `${FILE}.new`))).toBe(false);
+    expect(latestReport()).toContain('conflicts:   1');
+
+    const patch = fs.readFileSync(path.join(consumerDir, 'dump/UPDATE_0.5.0_to_0.6.0.patch'), 'utf8');
+    expect(patch).toContain(`--- a/${FILE}`);
+    expect(patch).toContain(`+++ b/${FILE}`);
+    expect(patch).toContain('-b\n+b NEW\n');
+    expect(patch).not.toContain('LOCAL');
+    //? A real patch: it turns the base render into the new one.
+    const applied = spawnSync('git', ['apply', '-'], { cwd: baseDir, input: patch, encoding: 'utf8' });
+    expect(applied.status, applied.stderr).toBe(0);
+    expect(fs.readFileSync(path.join(baseDir, FILE), 'utf8')).toBe('a\nb NEW\nc\n');
+  });
+
+  it('overwrites a file that equals the base render, even when the recorded hash is older', () => {
+    setup('template v1\n', 'template v1\n', 'template v2\n');
+    update();
+    expect(local()).toBe('template v2\n');
   });
 });
