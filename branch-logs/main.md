@@ -1621,3 +1621,11 @@ PR #9 kreeg om een verwante reden nooit CI: `pull_request` draait tegen `refs/pu
 **Release.** PR #14 (perf(devkit): memoize the server checker's repeated queries (0.17.1)) gemerged op GitHub `main` als `86e37a7`, daarna tag `v0.17.1` → `ci` run 45155983037 groen en `publish.yml` run 45156004853 groen. Registry 17/17 (~5 min propagatie), `latest` = 0.17.1, devkit met SLSA-provenance. Vooraf: `verify` 2924/2924, PR-`ci` 4/4 groen. Tarball-spotcheck: devkit-dist bevat `memoizeChecker` en de vroege return in `collectFallbackSymbolsFromTypeText`. `pack:dry`, `publish:dry`, `audit:production` en de e2e-matrix niet lokaal gedraaid; de publish-workflow draaide audit en `pack:dry` wel.
 
 **Files:** `branch-logs/{main,INDEX}.md`. Tag `v0.17.1`.
+
+## 2026-11-23 15:10 — v0.18.0 gepubliceerd
+
+**User prompt (summary):** klacht van een collega: `luckystack update` liet in Flexbuddy 99 `.new`-kopieën achter. Gekozen: alleen de wijziging tussen de twee frameworkversies tonen, schone merges toepassen, conflicten naar een patchbestand, één release 0.18.0 (werk op `fix/cli-update-unchanged-template`, zie die log).
+
+**Release.** PR #15 (feat(cli): update merges the framework's version jump into edited files (0.18.0)) gemerged op GitHub `main` als `610d803`, daarna tag `v0.18.0` → `ci` run 45178287126 groen en `publish.yml` run 45178296711 groen. Registry 17/17, `latest` = 0.18.0, cli met SLSA-provenance. Vooraf: `verify` 2929/2929, PR-`ci` 4/4 groen. Tarball-spotcheck: cli-dist bevat `merge-file` en de patchnaam. Copilot-review kon niet draaien (quotum op). `pack:dry`, `publish:dry`, `audit:production` en de e2e-matrix niet lokaal gedraaid; de publish-workflow draaide audit en `pack:dry` wel.
+
+**Files:** `branch-logs/{main,INDEX}.md`. Tag `v0.18.0`.
