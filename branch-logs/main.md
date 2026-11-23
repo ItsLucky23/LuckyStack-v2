@@ -1613,3 +1613,11 @@ PR #9 kreeg om een verwante reden nooit CI: `pull_request` draait tegen `refs/pu
 **Opgemerkt:** de GitHub-account was tijdelijk geblokkeerd door een betalingsprobleem (CI-jobs startten niet); door de gebruiker opgelost. `sendEmailBatch.test.ts` ("slot reserved by a mail of a sender blocked meanwhile") faalde één keer met 96 ms bij load ~14 op deze machine; daarna 6× groen. Wankele timingtest, niet aangeraakt.
 
 **Files:** `package.json`, `package-lock.json`, `branch-logs/{main,INDEX}.md`. Tag `v0.16.1`.
+
+## 2026-11-23 11:50 — v0.17.1 gepubliceerd
+
+**User prompt (summary):** devkit-typegeneratie sneller maken (memo op de checker van het server-Program, scope-query overslaan zonder kandidaatnamen) en uitbrengen als 0.17.1 (werk op `perf/devkit-checker-memo`, zie die log).
+
+**Release.** PR #14 (perf(devkit): memoize the server checker's repeated queries (0.17.1)) gemerged op GitHub `main` als `86e37a7`, daarna tag `v0.17.1` → `ci` run 45155983037 groen en `publish.yml` run 45156004853 groen. Registry 17/17 (~5 min propagatie), `latest` = 0.17.1, devkit met SLSA-provenance. Vooraf: `verify` 2924/2924, PR-`ci` 4/4 groen. Tarball-spotcheck: devkit-dist bevat `memoizeChecker` en de vroege return in `collectFallbackSymbolsFromTypeText`. `pack:dry`, `publish:dry`, `audit:production` en de e2e-matrix niet lokaal gedraaid; de publish-workflow draaide audit en `pack:dry` wel.
+
+**Files:** `branch-logs/{main,INDEX}.md`. Tag `v0.17.1`.
