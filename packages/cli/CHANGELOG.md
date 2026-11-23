@@ -5,6 +5,23 @@ All notable changes to `@luckystack/cli` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2026-11-23
+
+### Changed
+
+- **`luckystack update` merges the framework's change into files you edited, instead of writing a `.new` copy of the whole file** (ADR 0090). It renders the framework at the version of your last update and at the new version, with your recorded choices, and compares the two:
+  - the framework did not change the file: nothing is written (`kept` in the report);
+  - the change merges cleanly: it is written into your file, with your edits kept. Review with `git diff` and run the typecheck;
+  - the change overlaps your edit: your file is not touched. The change goes into `dump/UPDATE_<from>_to_<to>.patch`, which holds only the framework's diff.
+
+  Before, every edited file got a `.new` copy on every run, also when the framework had not changed it. A project with ~100 deliberately edited framework files got ~100 copies per update; the same project now gets one clean merge.
+- A `.new` copy of the whole file remains only when no merge is possible: the old version cannot be rendered (no longer on npm, choices rejected), git is not on PATH, or there is no `.luckystack/scaffold.json`. The report says why.
+- The update needs a second scaffold render (`npx create-luckystack-app@<previous version>`), unless the recorded version equals the new one.
+
+### Upgrade
+
+- The first update after this release starts from the version recorded in `.luckystack/scaffold.json`. Commit that file after each update, so the next run starts from the right version.
+
 ## [0.16.0] - 2026-10-20
 
 ### Changed

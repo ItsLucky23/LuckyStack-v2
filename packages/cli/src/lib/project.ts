@@ -343,7 +343,7 @@ export const assetPath = (...segments: string[]): string => {
 //? `npm.exe` dropped in the project root can never be picked up. On Windows we try
 //? each `PATHEXT` extension (`.cmd`, `.exe`, …); elsewhere the bare name. Returns
 //? null if not found (caller reports a clean failure).
-const resolveCommandPath = (command: string): string | null => {
+export const resolveCommandPath = (command: string): string | null => {
   const rawPath = process.env.PATH ?? process.env.Path ?? '';
   const dirs = rawPath.split(path.delimiter).filter((d) => d.length > 0);
   const exts =

@@ -5,6 +5,12 @@ All notable changes to `create-luckystack-app` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.0] - 2026-11-23
+
+### Changed
+
+- The scaffolded `README.md` describes the merging `luckystack update` (ADR 0090): review merged files with `git diff` and the update report, instead of looking for `.new` copies.
+
 ## [0.16.0] - 2026-10-20
 
 ### Changed
