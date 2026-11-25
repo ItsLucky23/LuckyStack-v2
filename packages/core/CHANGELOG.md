@@ -5,6 +5,12 @@ All notable changes to `@luckystack/core` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.1] - 2026-11-25
+
+### Added
+
+- `extractBearerToken(req)`: the token from an `Authorization: Bearer` header, without the session-mode rules of `extractTokenFromRequest`. `@luckystack/server` uses it for the CSRF exemption of ADR 0091.
+
 ## [0.17.0] - 2026-11-17
 
 ### Added
