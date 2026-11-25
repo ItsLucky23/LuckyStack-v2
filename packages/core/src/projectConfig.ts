@@ -338,6 +338,9 @@ export interface HttpConfig {
    * Set true to restore the legacy behaviour (cookie-then-bearer fallback).
    * IGNORED in token-mode (`session.basedToken === true`), which is unaffected:
    * it always reads the bearer/handshake token first, cookie as fallback.
+   * When true and `@luckystack/login` is installed, a state-changing request
+   * with a bearer and NO session cookie also skips the CSRF check, like token
+   * mode (ADR 0091). A request that has the session cookie keeps the CSRF check.
    */
   acceptBearerInCookieMode?: boolean;
   /**

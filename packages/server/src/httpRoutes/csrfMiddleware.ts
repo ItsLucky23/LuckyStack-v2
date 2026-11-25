@@ -1,7 +1,16 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { dispatchHook, getCookieValue, getCsrfConfig, getProjectConfig, readSession } from '@luckystack/core';
+import {
+  dispatchHook,
+  extractBearerToken,
+  getCookieValue,
+  getCsrfConfig,
+  getProjectConfig,
+  hasCookie,
+  readSession,
+} from '@luckystack/core';
 import { capabilities } from '../capabilities';
 import { isOriginExemptPath } from '../originExemptRegistry';
+import { resolveSessionCookieName } from './sessionCookie';
 import { timingSafeStringEqual } from './timingSafeEqual';
 
 //? Returns true when the request was rejected (CSRF mismatch) and the response
@@ -56,9 +65,24 @@ export const enforceCsrfOnStateChangingRequest = async ({
   //? whose path starts with the given prefix from BOTH the origin gate AND CSRF.
   //? Register only the narrowest prefix needed (prefer ending with `/` — e.g.
   //? `/webhooks/` — to avoid accidentally exempting `/webhooksAdmin`).
+  //? ADR 0091: with `acceptBearerInCookieMode`, a request that carries the
+  //? session only in an `Authorization: Bearer` header and NO session cookie has
+  //? no credential the browser attaches by itself, so there is nothing for a
+  //? forged cross-site request to ride on (token mode skips CSRF for the same
+  //? reason). A request with the session cookie, with or without a bearer,
+  //? stays under CSRF. Without @luckystack/login there is no session for a
+  //? bearer to carry, so the double-submit check stays for custom routes that
+  //? trust a cookie of their own.
+  const isHeaderOnlyBearer =
+    isCookieMode
+    && capabilities.login
+    && config.http.acceptBearerInCookieMode === true
+    && extractBearerToken(req) !== null
+    && !hasCookie(req.headers.cookie, resolveSessionCookieName());
   const isExemptFromCsrf =
     isAuthBootstrap
     || isCallbackPath
+    || isHeaderOnlyBearer
     || isOriginExemptPath(routePath);
   const isCsrfCandidate =
     routePath.startsWith('/api/')
@@ -67,7 +91,8 @@ export const enforceCsrfOnStateChangingRequest = async ({
     || (!routePath.startsWith('/auth/') && !routePath.startsWith('/assets/'));
 
   //? CSRF only applies to cookie-mode, state-changing routes not already
-  //? exempted by another auth mechanism (origin-exempt webhooks, bootstrap).
+  //? exempted by another auth mechanism (origin-exempt webhooks, bootstrap,
+  //? header-only bearer).
   if (!(isCookieMode && isStateChanging && isCsrfCandidate && !isExemptFromCsrf)) {
     return false;
   }

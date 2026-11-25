@@ -298,7 +298,7 @@ export {
 export type { AvatarConfig, AvatarConfigInput } from './avatarConfig';
 export { default as getParams } from './getParams';
 export { extractTokenFromSocket } from './extractToken';
-export { extractTokenFromRequest } from './extractTokenFromRequest';
+export { extractBearerToken, extractTokenFromRequest } from './extractTokenFromRequest';
 export { resolveClientIp, isLoopbackIp, UNKNOWN_CLIENT_IP, deriveTokenBucketId } from './resolveClientIp';
 export type { ResolveClientIpParams } from './resolveClientIp';
 export {

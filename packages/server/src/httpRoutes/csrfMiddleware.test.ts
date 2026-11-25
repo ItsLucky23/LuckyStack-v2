@@ -2,22 +2,32 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 //? `vi.mock` factories are hoisted above module-level consts, so the mutable
 //? seams they reference must be created via `vi.hoisted` (also hoisted).
-const { caps, mockCookies, dispatchHookMock, sessionRef } = vi.hoisted(() => ({
+const { caps, mockCookies, dispatchHookMock, sessionRef, configRef } = vi.hoisted(() => ({
   caps: { login: true, presence: true, sync: true },
   mockCookies: {} as Record<string, string>,
   dispatchHookMock: vi.fn(),
   sessionRef: { current: null as { id?: string; csrfToken?: string } | null },
+  configRef: { basedToken: false, acceptBearerInCookieMode: false },
 }));
 
 vi.mock('../capabilities', () => ({ capabilities: caps }));
 
 vi.mock('@luckystack/core', () => ({
   dispatchHook: (...args: unknown[]) => dispatchHookMock(...args),
-  getProjectConfig: () => ({ session: { basedToken: false } }),
+  getProjectConfig: () => ({
+    session: { basedToken: configRef.basedToken },
+    http: { acceptBearerInCookieMode: configRef.acceptBearerInCookieMode },
+  }),
   getCsrfConfig: () => ({ cookieName: 'csrf-token', headerName: 'x-csrf-token', tokenLength: 32, cookieOptions: {} }),
   getCookieValue: (_cookie: string | undefined, name: string) => mockCookies[name] ?? null,
+  //? Mirrors the real `hasCookie`: an empty value counts as absent.
+  hasCookie: (_cookie: string | undefined, name: string) => Boolean(mockCookies[name]),
+  extractBearerToken: (req: { headers: { authorization?: string } }) =>
+    req.headers.authorization?.startsWith('Bearer ') ? req.headers.authorization.slice(7) : null,
   readSession: () => Promise.resolve(sessionRef.current),
 }));
+
+vi.mock('./sessionCookie', () => ({ resolveSessionCookieName: () => 'token' }));
 
 //? `isOriginExemptPath` comes from a separate module; mock it so tests can
 //? control whether a path is treated as an origin-exempt webhook.
@@ -39,10 +49,12 @@ const run = async (opts: {
   routePath?: string;
   header?: string;
   token?: string | null;
+  bearer?: string;
 }): Promise<{ rejected: boolean; res: FakeRes }> => {
   const res: FakeRes = { statusCode: 200, setHeader: vi.fn(), end: vi.fn() };
   const headers: Record<string, string> = {};
   if (opts.header !== undefined) headers['x-csrf-token'] = opts.header;
+  if (opts.bearer !== undefined) headers.authorization = `Bearer ${opts.bearer}`;
   const req = { method: opts.method ?? 'POST', headers } as unknown as Parameters<typeof enforceCsrfOnStateChangingRequest>[0]['req'];
   const rejected = await enforceCsrfOnStateChangingRequest({
     req,
@@ -55,6 +67,8 @@ const run = async (opts: {
 
 beforeEach(() => {
   caps.login = true;
+  configRef.basedToken = false;
+  configRef.acceptBearerInCookieMode = false;
   sessionRef.current = null;
   for (const k of Object.keys(mockCookies)) delete mockCookies[k];
   originExemptPaths.clear();
@@ -145,5 +159,67 @@ describe('enforceCsrfOnStateChangingRequest — login PRESENT (session-bound)', 
     const { rejected, res } = await run({ token: 'sess', header: 'wrong' });
     expect(rejected).toBe(true);
     expect(res.statusCode).toBe(403);
+  });
+});
+
+//? ADR 0091: in cookie mode with `acceptBearerInCookieMode`, only a request with
+//? a bearer header and no session cookie skips CSRF. `token` mirrors what
+//? `extractTokenFromRequest` returns (cookie first, then bearer).
+describe('enforceCsrfOnStateChangingRequest — bearer in cookie mode', () => {
+  beforeEach(() => {
+    sessionRef.current = { id: 'user-1', csrfToken: 'session-tok' };
+  });
+
+  it('setting off: a bearer-only POST without a CSRF header is rejected', async () => {
+    const { rejected, res } = await run({ token: 'sess', bearer: 'sess' });
+    expect(rejected).toBe(true);
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('setting on: a bearer-only POST without a CSRF header is allowed', async () => {
+    configRef.acceptBearerInCookieMode = true;
+    const { rejected } = await run({ token: 'sess', bearer: 'sess' });
+    expect(rejected).toBe(false);
+  });
+
+  it('setting on: a session-cookie POST without a CSRF header is rejected', async () => {
+    configRef.acceptBearerInCookieMode = true;
+    mockCookies.token = 'sess';
+    const { rejected, res } = await run({ token: 'sess' });
+    expect(rejected).toBe(true);
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('setting on: a POST with session cookie AND bearer without a CSRF header is rejected', async () => {
+    configRef.acceptBearerInCookieMode = true;
+    mockCookies.token = 'sess';
+    const { rejected, res } = await run({ token: 'sess', bearer: 'other' });
+    expect(rejected).toBe(true);
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('setting on: an empty session cookie carries no session, so a bearer request is allowed', async () => {
+    //? The real `getCookieValue` returns null for `token=`; the token then comes
+    //? from the bearer, which a cross-site page cannot add.
+    configRef.acceptBearerInCookieMode = true;
+    mockCookies.token = '';
+    const { rejected } = await run({ token: 'sess', bearer: 'sess' });
+    expect(rejected).toBe(false);
+  });
+
+  it('setting on, login absent: a bearer does not skip the double-submit check', async () => {
+    configRef.acceptBearerInCookieMode = true;
+    caps.login = false;
+    const { rejected, res } = await run({ bearer: 'sess' });
+    expect(rejected).toBe(true);
+    expect(res.statusCode).toBe(403);
+  });
+
+  it('token mode: CSRF is skipped, with or without the setting', async () => {
+    configRef.basedToken = true;
+    mockCookies.token = 'sess';
+    expect((await run({ token: 'sess' })).rejected).toBe(false);
+    configRef.acceptBearerInCookieMode = true;
+    expect((await run({ token: 'sess', bearer: 'sess' })).rejected).toBe(false);
   });
 });

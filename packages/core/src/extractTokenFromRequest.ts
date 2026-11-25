@@ -2,6 +2,20 @@ import { IncomingMessage } from 'node:http';
 import { getProjectConfig } from './projectConfig';
 import { applyCookiePrefixConstraints, getCookieValue } from './cookies';
 
+/** The token from an `Authorization: Bearer <token>` header, or null. Ignores the session mode. */
+export const extractBearerToken = (req: IncomingMessage): string | null => {
+  // Node types `authorization` as `string`, but duplicate headers can arrive as
+  // an array at runtime via the IncomingHttpHeaders index signature. Treat the
+  // value as unknown and narrow with typeof guards so a single string is used.
+  const rawAuthHeader: unknown = req.headers.authorization;
+  const authHeader = typeof rawAuthHeader === 'string'
+    ? rawAuthHeader
+    : (Array.isArray(rawAuthHeader) && typeof rawAuthHeader[0] === 'string' ? rawAuthHeader[0] : undefined);
+  return authHeader?.startsWith('Bearer ')
+    ? authHeader.slice(7)
+    : null;
+};
+
 /**
  * Extract the authentication token from an HTTP request.
  *
@@ -13,16 +27,7 @@ import { applyCookiePrefixConstraints, getCookieValue } from './cookies';
  * @returns The token string or null if not found
  */
 export const extractTokenFromRequest = (req: IncomingMessage): string | null => {
-  // Node types `authorization` as `string`, but duplicate headers can arrive as
-  // an array at runtime via the IncomingHttpHeaders index signature. Treat the
-  // value as unknown and narrow with typeof guards so a single string is used.
-  const rawAuthHeader: unknown = req.headers.authorization;
-  const authHeader = typeof rawAuthHeader === 'string'
-    ? rawAuthHeader
-    : (Array.isArray(rawAuthHeader) && typeof rawAuthHeader[0] === 'string' ? rawAuthHeader[0] : undefined);
-  const bearerToken = authHeader?.startsWith('Bearer ')
-    ? authHeader.slice(7)
-    : null;
+  const bearerToken = extractBearerToken(req);
 
   const config = getProjectConfig();
   //? Effective cookie name, matching the server's prefixed `Set-Cookie`.

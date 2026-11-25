@@ -5,6 +5,12 @@ All notable changes to `@luckystack/server` are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.18.1] - 2026-11-25
+
+### Fixed
+
+- With `http.acceptBearerInCookieMode: true`, a POST/PUT/DELETE that has an `Authorization: Bearer` header and no session cookie no longer needs a CSRF header (ADR 0091). Before, a token-mode client on a cookie-mode server (for example the app in a cross-site iframe, where the `SameSite=Strict` cookie is not sent) got `auth.csrfMismatch` on every write, because token-mode clients do not fetch a CSRF token. A request with the session cookie keeps the CSRF check, also when it has a bearer. Without `@luckystack/login` the double-submit check stays. With the setting off (the default) nothing changes.
+
 ## [0.17.0] - 2026-11-17
 
 ### Added

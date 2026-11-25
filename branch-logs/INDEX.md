@@ -4,6 +4,7 @@
 
 | Branch | Ticket(s) | Last updated | Status | Entries |
 |---|---|---|---|---|
+| fix/csrf-bearer-in-cookie-mode | (none) | 2026-11-25 12:20 | active — server: with `acceptBearerInCookieMode`, a bearer-only request (no session cookie) skips CSRF, like token mode; cookie requests keep CSRF; ADR 0091, release v0.18.1 | 1 |
 | fix/cli-update-unchanged-template | (none) | 2026-11-23 14:30 | merged 2026-11-23 — PR #15, release v0.18.0. Cli: `luckystack update` merges only the framework's change between two versions into edited files (clean merge written, conflict → patch in `dump/`, `.new` only as fallback); Flexbuddy 100 `.new` → 0; ADR 0090, release v0.18.0 | 1 |
 | perf/devkit-checker-memo | (none) | 2026-11-23 11:40 | merged 2026-11-23 — PR #14, release v0.17.1. Devkit: server checker memoizes `typeToString` / `getPropertyOfType` / `getTypeOfSymbol` per Program, scope query skipped without candidate names; type-map generation ~2× faster here, output identical; release v0.17.1 | 1 |
 | feat/oauth-account-id-0.16 | (none) | 2026-10-20 15:20 | merged 2026-10-20 — naar GitHub `main`, release v0.16.0: OAuth-accounts gekoppeld aan de vaste provider-ID (ADR 0086) — sluit de Microsoft-multi-tenant-overname, alle ingebouwde providers, ongekoppelde rij alleen bij geverifieerd e-mailadres; docs-ui-paneel klapt niet meer in bij een klik erin; nooit gekozen sync-sjabloon weg. Twee reviewrondes (14 punten). | 1 |
