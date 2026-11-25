@@ -1629,3 +1629,11 @@ PR #9 kreeg om een verwante reden nooit CI: `pull_request` draait tegen `refs/pu
 **Release.** PR #15 (feat(cli): update merges the framework's version jump into edited files (0.18.0)) gemerged op GitHub `main` als `610d803`, daarna tag `v0.18.0` → `ci` run 45178287126 groen en `publish.yml` run 45178296711 groen. Registry 17/17, `latest` = 0.18.0, cli met SLSA-provenance. Vooraf: `verify` 2929/2929, PR-`ci` 4/4 groen. Tarball-spotcheck: cli-dist bevat `merge-file` en de patchnaam. Copilot-review kon niet draaien (quotum op). `pack:dry`, `publish:dry`, `audit:production` en de e2e-matrix niet lokaal gedraaid; de publish-workflow draaide audit en `pack:dry` wel.
 
 **Files:** `branch-logs/{main,INDEX}.md`. Tag `v0.18.0`.
+
+## 2026-11-25 12:45 — v0.18.1 gepubliceerd
+
+**User prompt (summary):** handoff van een Flexbuddy-collega: in cookiemodus met `acceptBearerInCookieMode` gaf elke write vanuit een iframe met tokenmodus `auth.csrfMismatch`. Uitzoeken, fixen als het duidelijk en goed voor het framework is, full send met council, mergen en op npm uitbrengen (werk op `fix/csrf-bearer-in-cookie-mode`, zie die log).
+
+**Release.** PR #16 (fix(server): bearer-only requests skip CSRF in cookie mode (0.18.1)) gemerged op GitHub `main` als `805ad54`, daarna tag `v0.18.1` → `ci` run 45603860449 groen en `publish.yml` run 45603881005 groen. Registry 17/17 met provenance (~5 min propagatie, api en presence het laatst), `latest` = 0.18.1. Vooraf: `verify` 2936/2936, PR-`ci` 4/4 groen, council 2 rondes (Claude Opus 5.5, GPT-6.2 Sol, GPT-6.2 Astra: 8/6/7 → 9/9/9). Tarball-spotcheck: server-dist bevat `isHeaderOnlyBearer`, server hangt af van core `^0.18.1`. Copilot-review kon niet draaien (quotum op). `pack:dry`, `publish:dry`, `audit:production` en de e2e-matrix niet lokaal gedraaid; de publish-workflow draaide audit en `pack:dry` wel.
+
+**Files:** `branch-logs/{main,INDEX}.md`. Tag `v0.18.1`.
